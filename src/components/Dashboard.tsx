@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Category, Income, Transaction } from "../types";
+import { ExpenseCategory, Income, IncomeCategory, Transaction } from "../types";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -11,9 +11,12 @@ import {
   X
 } from "lucide-react";
 import { motion } from "motion/react";
+import { useFirebase } from "../contexts/FirebaseContext";
+import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 
 interface DashboardProps {
-  categories: Category[];
+  expenseCategories: ExpenseCategory[];
+  incomeCategories: IncomeCategory[];
   transactions: Transaction[];
   income: Income[];
   previousTransactions?: Transaction[];
@@ -25,7 +28,8 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
-  categories,
+  expenseCategories,
+  incomeCategories,
   transactions,
   income,
   previousTransactions = [],
@@ -33,26 +37,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onUpdateTarget,
   monthMultiplier = 1
 }) => {
+  const { preferences } = useFirebase();
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  const totalSpend = transactions.reduce((acc, t) => acc + t.amount, 0);
-  const totalIncome = income.reduce((acc, i) => acc + i.amount, 0);
-  const balance = totalIncome - totalSpend;
-  const prevSpend = previousTransactions.reduce((acc, t) => acc + t.amount, 0);
-  const prevIncome = previousIncome.reduce((acc, i) => acc + i.amount, 0);
+  const baseSymbol = getCurrencySymbol(preferences?.baseCurrency);
 
-  const categorySpending = categories.map((cat) => {
+  const totalSpend = transactions.reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
+  const totalIncome = income.reduce((acc, i) => acc + convertToBaseCurrency(i.amount, i.currency, preferences), 0);
+  const balance = totalIncome - totalSpend;
+  const prevSpend = previousTransactions.reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
+  const prevIncome = previousIncome.reduce((acc, i) => acc + convertToBaseCurrency(i.amount, i.currency, preferences), 0);
+
+  const categorySpending = expenseCategories.map((cat) => {
     const spend = transactions
       .filter((transaction) => transaction.category_id === cat.id)
-      .reduce((acc, transaction) => acc + transaction.amount, 0);
+      .reduce((acc, transaction) => acc + convertToBaseCurrency(transaction.amount, transaction.currency, preferences), 0);
     const proratedTarget = cat.target_amount * monthMultiplier;
     const progress = proratedTarget > 0 ? (spend / proratedTarget) * 100 : 0;
     return { ...cat, spend, progress, proratedTarget };
   });
 
+  const incomeCategoryProgress = incomeCategories.map((cat) => {
+    const received = income
+      .filter((record) => record.category_id === cat.id || record.category === cat.name)
+      .reduce((acc, record) => acc + convertToBaseCurrency(record.amount, record.currency, preferences), 0);
+    const proratedTarget = cat.target_amount * monthMultiplier;
+    const progress = proratedTarget > 0 ? (received / proratedTarget) * 100 : 0;
+    return { ...cat, received, progress, proratedTarget };
+  });
+
   const activeTargets = categorySpending.filter((category) => category.target_amount > 0);
+  const activeIncomeTargets = incomeCategoryProgress.filter((category) => category.target_amount > 0);
   const overTargetCount = activeTargets.filter((category) => category.spend > category.proratedTarget).length;
+  const incomeTargetCount = activeIncomeTargets.filter((category) => category.received >= category.proratedTarget).length;
   const spendingRatio = totalIncome > 0 ? Math.min(100, (totalSpend / totalIncome) * 100) : 0;
   const hasRecords = transactions.length > 0 || income.length > 0;
   const isEmptyState = !hasRecords && activeTargets.length === 0;
@@ -128,7 +146,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="mt-2.5 text-xs font-bold uppercase tracking-[0.16em] text-fintech-muted">{item.label}</div>
               <div className={`mt-1 text-[1.35rem] font-bold tracking-tight ${item.tone}`}>
                 {typeof item.value === "number" && item.label !== "Active Targets"
-                  ? `$${item.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  ? `${baseSymbol}${item.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   : item.value}
               </div>
             </div>
@@ -142,13 +160,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div>
               <div className="text-2xl font-semibold tracking-tight text-[#d9e1f9]">Available Balance</div>
               <div className={`mt-1 font-bold tracking-tight text-white ${isEmptyState ? "text-[2rem]" : "text-[2.15rem]"}`}>
-                ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {baseSymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
             <div className={`grid grid-cols-2 gap-3 ${isEmptyState ? "xl:pt-1" : "xl:pt-3"}`}>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-fintech-muted">Net Flow</div>
-                <div className="mt-1 text-[1.25rem] font-bold text-fintech-accent">${(balance / 1000).toFixed(1)}k</div>
+                <div className="mt-1 text-[1.25rem] font-bold text-fintech-accent">{baseSymbol}{(balance / 1000).toFixed(1)}k</div>
               </div>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-fintech-muted">Spend Pace</div>
@@ -269,9 +287,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold leading-5">{cat.name}</div>
                           <div className="mt-0.5 text-[11px] text-fintech-muted">
-                            ${cat.spend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {baseSymbol}{cat.spend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             {" "}of{" "}
-                            ${cat.proratedTarget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {baseSymbol}{cat.proratedTarget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                         </div>
                         <div className="shrink-0 text-right">
@@ -316,6 +334,47 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-xl border border-white/5 bg-[#151f38] p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[1.1rem] font-bold">Income Targets</h3>
+              <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">
+                {incomeTargetCount}/{activeIncomeTargets.length || 0} on track
+              </div>
+            </div>
+
+            {activeIncomeTargets.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-white/8 bg-[#121a2d] p-3 text-sm text-fintech-muted">
+                Add income category targets in Settings to track where money comes from.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {activeIncomeTargets.slice(0, 6).map((cat) => (
+                  <div key={cat.id} className="rounded-lg border border-white/5 bg-[#121a2d] px-2.5 py-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold leading-5">{cat.name}</div>
+                        <div className="mt-0.5 text-[11px] text-fintech-muted">
+                          {baseSymbol}{cat.received.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {" "}of{" "}
+                          {baseSymbol}{cat.proratedTarget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <div className={`shrink-0 text-[11px] font-bold ${cat.progress >= 100 ? "text-fintech-accent" : "text-white"}`}>
+                        {Math.round(cat.progress)}%
+                      </div>
+                    </div>
+                    <div className="mt-2 h-1.5 rounded-full bg-[#25304f]">
+                      <div
+                        className="h-full rounded-full bg-[linear-gradient(90deg,_#77e6ff,_#63f0bf)]"
+                        style={{ width: `${Math.max(4, Math.min(100, cat.progress))}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </section>

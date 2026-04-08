@@ -1,14 +1,23 @@
-export interface Category {
+export interface ExpenseCategory {
   id: string;
   name: string;
   target_amount: number;
 }
+
+export interface IncomeCategory {
+  id: string;
+  name: string;
+  target_amount: number;
+}
+
+export type Category = ExpenseCategory;
 
 export interface Transaction {
   id: string;
   date: string;
   vendor: string;
   amount: number;
+  currency?: string;
   category_id: string;
   category_name: string;
   notes: string;
@@ -20,9 +29,22 @@ export interface Income {
   date: string;
   source: string;
   amount: number;
+  currency?: string;
+  category_id?: string;
   category: string;
   notes?: string;
   updated_at?: string;
+}
+
+export interface ExchangeRate {
+  currency: string;   // e.g., "USD"
+  rateToBase: number; // e.g., 1.35 (1 USD = 1.35 Base Currency)
+}
+
+export interface Preferences {
+  baseCurrency: string;       // e.g., "CAD"
+  exchangeRates: ExchangeRate[];
+  coreExcludedCategories?: string[]; // Categories excluded from "Core" logic
 }
 
 export type View = "dashboard" | "transactions" | "analysis" | "settings";
@@ -91,4 +113,21 @@ export interface DriveConnection {
   budgetFileId?: string | null;
   budgetFileName: string;
   connectedAt: string;
+}
+
+export type PublicSheetImportMapping = Record<string, string>;
+
+export interface PublicSheetImportColumnSelection {
+  rowIndex: number;
+  columnIndex: number;
+  headerLabel: string;
+}
+
+export interface PublicSheetImportConfig {
+  sheetUrl: string;
+  spreadsheetId?: string;
+  sheetTabName: string;
+  headerRowIndex?: number;
+  mapping: Record<string, PublicSheetImportColumnSelection>;
+  override: boolean;
 }

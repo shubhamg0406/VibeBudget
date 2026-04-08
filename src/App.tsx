@@ -10,7 +10,7 @@ import { View, DateRange } from "./types";
 import { useFirebase } from "./contexts/FirebaseContext";
 
 export default function App() {
-  const { loading, categories, transactions, income, updateCategoryTarget } = useFirebase();
+  const { loading, expenseCategories, incomeCategories, transactions, income, updateExpenseCategoryTarget } = useFirebase();
   const [view, setView] = useState<View>("dashboard");
 
   // Default date range: This Month
@@ -108,32 +108,35 @@ export default function App() {
               <DateRangeSelector range={dateRange} onChange={setDateRange} />
             </div>
             <Dashboard 
-              categories={categories} 
+              expenseCategories={expenseCategories}
+              incomeCategories={incomeCategories}
               transactions={filteredTransactions} 
               income={filteredIncome}
               previousTransactions={previousTransactions}
               previousIncome={previousIncome}
               allTransactions={transactions}
               onViewHistory={() => setView("transactions")}
-              onUpdateTarget={updateCategoryTarget}
+              onUpdateTarget={updateExpenseCategoryTarget}
               monthMultiplier={monthMultiplier}
             />
           </div>
         );
       case "transactions":
         return (
-          <TransactionsView 
-            transactions={transactions}
-            income={income}
-            categories={categories}
-            onRefresh={() => {}} // Firestore handles real-time updates
-          />
+            <TransactionsView 
+              transactions={transactions}
+              income={income}
+              expenseCategories={expenseCategories}
+              incomeCategories={incomeCategories}
+              onRefresh={() => {}} // Firestore handles real-time updates
+            />
         );
       case "analysis":
         return (
           <div className="space-y-6">
             <Analysis 
-              categories={categories} 
+              expenseCategories={expenseCategories}
+              incomeCategories={incomeCategories}
               transactions={transactions} 
               income={income} 
               allTransactions={transactions}
@@ -145,7 +148,7 @@ export default function App() {
       case "settings":
         return <Settings onRefresh={() => {}} />;
       default:
-        return <Dashboard categories={categories} transactions={filteredTransactions} income={filteredIncome} />;
+        return <Dashboard expenseCategories={expenseCategories} incomeCategories={incomeCategories} transactions={filteredTransactions} income={filteredIncome} />;
     }
   };
 

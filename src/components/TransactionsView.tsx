@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Transaction, Income, Category } from "../types";
+import { Transaction, Income, ExpenseCategory, IncomeCategory } from "../types";
 import { 
   Search, 
   Filter, 
@@ -16,11 +16,14 @@ import { motion, AnimatePresence } from "motion/react";
 import { TransactionEntry } from "./TransactionEntry";
 import { TransactionIcon } from "./TransactionIcon";
 import { formatDisplayDate, getMonthYearLabel } from "../utils/dateUtils";
+import { useFirebase } from "../contexts/FirebaseContext";
+import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 
 interface TransactionsViewProps {
   transactions: Transaction[];
   income: Income[];
-  categories: Category[];
+  expenseCategories: ExpenseCategory[];
+  incomeCategories: IncomeCategory[];
   onRefresh: () => void;
 }
 
@@ -32,13 +35,15 @@ interface UnifiedTransaction {
   category: string;
   notes?: string;
   type: "expense" | "income";
+  currency?: string;
   original?: any;
 }
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({ 
   transactions, 
   income, 
-  categories,
+  expenseCategories,
+  incomeCategories,
   onRefresh 
 }) => {
   const [search, setSearch] = useState("");
@@ -47,6 +52,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [editingTransaction, setEditingTransaction] = useState<UnifiedTransaction | null>(null);
   const [filterType, setFilterType] = useState<"all" | "expense" | "income">("all");
   const [showFilters, setShowFilters] = useState(false);
+  const { preferences } = useFirebase();
   
   // Advanced filters
   const [minAmount, setMinAmount] = useState("");
@@ -65,6 +71,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       category: t.category_name,
       notes: t.notes,
       type: "expense",
+      currency: t.currency,
       original: t
     }));
 
@@ -76,6 +83,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       category: i.category,
       notes: i.notes,
       type: "income",
+      currency: i.currency,
       original: i
     }));
 
@@ -123,17 +131,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   }, [sortedAndFiltered]);
 
   const allCategoryNames = useMemo(() => {
-    const expenseCats = categories.map(c => c.name);
-    const incomeCats = Array.from(new Set(income.map(i => i.category)));
+    const expenseCats = expenseCategories.map(c => c.name);
+    const incomeCats = incomeCategories.map(c => c.name);
     return Array.from(new Set([...expenseCats, ...incomeCats])).sort();
-  }, [categories, income]);
+  }, [expenseCategories, incomeCategories]);
 
   const totalIncoming = sortedAndFiltered
     .filter((item) => item.type === "income")
-    .reduce((sum, item) => sum + item.amount, 0);
+    .reduce((sum, item) => sum + convertToBaseCurrency(item.amount, item.currency, preferences), 0);
   const totalOutgoing = sortedAndFiltered
     .filter((item) => item.type === "expense")
-    .reduce((sum, item) => sum + item.amount, 0);
+    .reduce((sum, item) => sum + convertToBaseCurrency(item.amount, item.currency, preferences), 0);
   const netFlow = totalIncoming - totalOutgoing;
 
   return (
@@ -382,7 +390,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                   <div className={`text-base font-bold shrink-0 ${
                     t.type === "income" ? "text-fintech-success" : "text-fintech-danger"
                   }`}>
-                    {t.type === "income" ? "+" : "-"}${t.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {t.type === "income" ? "+" : "-"}{getCurrencySymbol(t.currency)}{t.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {t.currency && t.currency !== preferences?.baseCurrency && (
+                      <div className="text-[10px] text-fintech-muted text-right font-normal mt-0.5">
+                        {getCurrencySymbol(preferences?.baseCurrency)}{convertToBaseCurrency(t.amount, t.currency, preferences).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               ))}
@@ -426,23 +439,23 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
       <section className="grid grid-cols-1 gap-6 md:grid-cols-4">
         <div className="rounded-2xl border border-white/5 bg-[#0f1930] p-6 md:col-span-1">
-          <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Period In</div>
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Period In ({preferences?.baseCurrency || "CAD"})</div>
           <div className="text-2xl font-bold text-fintech-accent">
-            ${totalIncoming.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {getCurrencySymbol(preferences?.baseCurrency)}{totalIncoming.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
         <div className="rounded-2xl border border-white/5 bg-[#0f1930] p-6 md:col-span-1">
-          <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Period Out</div>
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Period Out ({preferences?.baseCurrency || "CAD"})</div>
           <div className="text-2xl font-bold text-fintech-danger">
-            ${totalOutgoing.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {getCurrencySymbol(preferences?.baseCurrency)}{totalOutgoing.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
         <div className="rounded-2xl border border-white/5 bg-gradient-to-r from-[#0f1930] to-[#141f38] p-6 md:col-span-2">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Net Flow</div>
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Net Flow ({preferences?.baseCurrency || "CAD"})</div>
               <div className={`text-2xl font-bold ${netFlow >= 0 ? "text-[#77e6ff]" : "text-fintech-danger"}`}>
-                ${netFlow.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {getCurrencySymbol(preferences?.baseCurrency)}{netFlow.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
             <div className="flex h-10 w-32 items-end gap-1 overflow-hidden rounded bg-[#192540] px-2 pb-1 opacity-25">
@@ -501,7 +514,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               
               <div className="pt-6">
                 <TransactionEntry 
-                  categories={categories} 
+                  expenseCategories={expenseCategories}
+                  incomeCategories={incomeCategories}
                   hideHeader={true}
                   initialData={editingTransaction}
                   onRefresh={() => {

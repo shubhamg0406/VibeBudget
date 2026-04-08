@@ -21,9 +21,13 @@ import {
   RefreshCw,
   Save,
   Shield,
+  Settings as SettingsIcon,
+  Globe,
   CloudDownload
 } from "lucide-react";
-import { Category, ExpenseSheetMapping, GoogleSheetsSyncConfig, Income, IncomeSheetMapping, Transaction } from "../types";
+import { ExpenseCategory, ExpenseSheetMapping, GoogleSheetsSyncConfig, Income, IncomeCategory, IncomeSheetMapping, Transaction, ExchangeRate } from "../types";
+import { GoogleSheetImporter } from "./GoogleSheetImporter";
+import { CURRENCIES, getCurrencySymbol } from "../utils/currencyUtils";
 import { motion, AnimatePresence } from "motion/react";
 import { useFirebase } from "../contexts/FirebaseContext";
 
@@ -36,8 +40,8 @@ interface DataDomain {
   title: string;
   description: string;
   icon: React.ReactNode;
-  type: "targets" | "income" | "expenses" | "investments";
-  exportType: "categories" | "income" | "transactions";
+  type: "expenseCategories" | "incomeCategories" | "income" | "expenses" | "investments";
+  exportType: "expenseCategories" | "incomeCategories" | "income" | "transactions";
 }
 
 export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
@@ -49,7 +53,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     syncToCloud,
     isSyncing,
     importData,
-    categories,
+    expenseCategories,
+    incomeCategories,
     transactions,
     income: incomeRecords,
     googleSheetsConfig,
@@ -66,8 +71,11 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     driveSyncError,
     connectDriveFolder,
     loadBudgetFromDrive,
-    disconnectDriveFolder
+    disconnectDriveFolder,
+    preferences,
+    updatePreferences
   } = useFirebase();
+  const [activeTab, setActiveTab] = useState<"data" | "cloud" | "currency" | "maintenance">("data");
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [wiping, setWiping] = useState<string | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
@@ -75,6 +83,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   const [confirmWipe, setConfirmWipe] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [isUpsert, setIsUpsert] = useState(false);
+  const [showGoogleSheetImporter, setShowGoogleSheetImporter] = useState(false);
   const [folderInput, setFolderInput] = useState("");
   const [sheetUrl, setSheetUrl] = useState("");
   const [sheetTitle, setSheetTitle] = useState("");
@@ -107,12 +116,20 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
 
   const domains: DataDomain[] = [
     {
-      id: "categories",
-      title: "Budget Categories",
-      description: "Manage spending targets and category structure",
+      id: "expense-categories",
+      title: "Expense Categories",
+      description: "Manage spending categories and expense targets",
       icon: <Target size={20} />,
-      type: "targets",
-      exportType: "categories"
+      type: "expenseCategories",
+      exportType: "expenseCategories"
+    },
+    {
+      id: "income-categories",
+      title: "Income Categories",
+      description: "Manage income-side category structure and targets",
+      icon: <Target size={20} className="text-[#77e6ff]" />,
+      type: "incomeCategories",
+      exportType: "incomeCategories"
     },
     {
       id: "expenses",
@@ -313,7 +330,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   };
 
   const templates = {
-    targets: () => downloadCSV("categories_template.csv", "Category Name,Monthly Target\nRent,2000\nGroceries,500\nUtilities,150"),
+    expenseCategories: () => downloadCSV("expense_categories_template.csv", "Category Name,Monthly Target\nRent,2000\nGroceries,500\nUtilities,150"),
+    incomeCategories: () => downloadCSV("income_categories_template.csv", "Category Name,Monthly Target\nSalary,5000\nFreelance,1500\nDividends,250"),
     income: () => downloadCSV("income_template.csv", "Date (MM-DD-YYYY),Source,Amount,Income Category,Notes (Optional)\n04-05-2024,fabric,3667.00,Job,Shubham\n04-08-2024,BMO,350.00,Side project,Account Bonus"),
     expenses: () => downloadCSV("expenses_template.csv", "Date,Store / Vendor,Amount,Expense Category,Notes (Optional)\n04-01-2024,Chicken World,35.37,Going out food,Chicken World\n04-02-2024,Aurora Fotino,2479.62,Rent,Rent April"),
     investments: () => alert("Investment template coming soon!")
@@ -323,8 +341,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     try {
       let csv = "";
       
-      if (type === "categories") {
-        csv = "Name,Monthly Target\n" + categories.map((c: Category) => `${c.name},${c.target_amount}`).join("\n");
+      if (type === "expenseCategories") {
+        csv = "Name,Monthly Target\n" + expenseCategories.map((c: ExpenseCategory) => `${c.name},${c.target_amount}`).join("\n");
+      } else if (type === "incomeCategories") {
+        csv = "Name,Monthly Target\n" + incomeCategories.map((c: IncomeCategory) => `${c.name},${c.target_amount}`).join("\n");
       } else if (type === "transactions") {
         csv = "Date,Vendor,Amount,Category,Notes\n" + transactions.map((t: Transaction) => `${t.date},${t.vendor},${t.amount},${t.category_name},${t.notes || ""}`).join("\n");
       } else if (type === "income") {
@@ -336,6 +356,31 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       setActiveDomain(null);
     } catch (error) {
       setStatus({ type: "error", message: `Failed to export ${type}.` });
+    }
+  };
+
+  const handleGoogleSheetImport = async (type: string, dataRows: any[], override: boolean) => {
+    try {
+      if (override) {
+         setWiping(type);
+         await wipeData(type);
+         setWiping(null);
+      }
+      setImportProgress({ current: 0, total: dataRows.length });
+      await importData(type, dataRows, !override, (current, total) => {
+        setImportProgress({ current, total });
+      });
+      setStatus({ type: "success", message: `${type} imported successfully from sheet (${dataRows.length} records)!` });
+      setImportProgress(null);
+      setWiping(null);
+      setShowGoogleSheetImporter(false);
+      setActiveDomain(null);
+      onRefresh();
+    } catch (error: any) {
+      console.error("Public GS Import error:", error);
+      setStatus({ type: "error", message: error.message || `Failed to import ${type} from sheet.` });
+      setImportProgress(null);
+      setWiping(null);
     }
   };
 
@@ -361,7 +406,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         }
 
         let data: any[] = [];
-        if (type === "targets") {
+        if (type === "expenseCategories" || type === "incomeCategories") {
           data = rows.map(row => {
             const parts = splitCSVRow(row, delimiter);
             if (parts.length < 2) return null;
@@ -615,8 +660,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                     )}
                   </label>
                   
-                  {activeDomain.type !== "targets" && (
-                    <label className="flex items-center gap-3 p-4 cursor-pointer hover:bg-white/5 transition-colors">
+                  {activeDomain.type !== "expenseCategories" && activeDomain.type !== "incomeCategories" && (
+                    <label className="flex items-center gap-3 p-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-white/5">
                       <div className="relative flex items-center">
                         <input 
                           type="checkbox" 
@@ -632,6 +677,20 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                       </div>
                     </label>
                   )}
+
+                  <button
+                    onClick={() => setShowGoogleSheetImporter(true)}
+                    className="w-full flex items-center justify-between p-5 hover:bg-fintech-import/10 transition-all group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-4">
+                      <Link2 size={24} className="text-fintech-import" />
+                      <div className="flex flex-col text-left">
+                         <span className="font-bold text-fintech-import">Import from Google Sheet</span>
+                         <span className="text-[10px] text-fintech-muted">Auto-map formats from public links</span>
+                      </div>
+                    </div>
+                    <ChevronRight size={20} className="text-fintech-import" />
+                  </button>
                 </div>
 
                 <button
@@ -645,6 +704,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                   <ChevronRight size={20} className="text-fintech-accent" />
                 </button>
               </div>
+
+              <AnimatePresence>
+                {showGoogleSheetImporter && (
+                  <GoogleSheetImporter
+                    initialType={activeDomain.type as any}
+                    onClose={() => setShowGoogleSheetImporter(false)}
+                    onImport={handleGoogleSheetImport}
+                  />
+                )}
+              </AnimatePresence>
             </motion.div>
           </>
         )}
@@ -664,8 +733,42 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         </div>
       )}
 
-      {/* Data Hub Section */}
-      <section className="space-y-6">
+      {/* Tabs Navigation */}
+      <div className="flex w-fit flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
+        <button 
+          onClick={() => setActiveTab("data")}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "data" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-white"}`}
+        >
+          <Database size={14} />
+          Data Hub
+        </button>
+        <button 
+          onClick={() => setActiveTab("currency")}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "currency" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-white"}`}
+        >
+          <Globe size={14} />
+          Currency
+        </button>
+        <button 
+          onClick={() => setActiveTab("cloud")}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "cloud" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-white"}`}
+        >
+          <Cloud size={14} />
+          Cloud Sync
+        </button>
+        <button 
+          onClick={() => setActiveTab("maintenance")}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-white"}`}
+        >
+          <SettingsIcon size={14} />
+          Maintenance
+        </button>
+      </div>
+
+      <div className="mt-8">
+      {/* Data Hub Tab */}
+      {activeTab === "data" && (
+        <section className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted">
           <Database size={20} className="text-fintech-accent" /> Data Hub
         </div>
@@ -691,11 +794,130 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
           ))}
         </div>
       </section>
+      )}
 
-      <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-      <section className="space-y-4">
-        <h3 className="text-base font-bold flex items-center gap-2">
-          <Cloud size={20} className="text-fintech-accent" /> Private Drive Vault
+      {/* Currency Tab */}
+      {activeTab === "currency" && (
+        <section className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+          <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 space-y-6">
+            <h3 className="text-base font-bold flex items-center gap-2">
+              <Globe size={20} className="text-fintech-accent" /> Currency Configuration
+            </h3>
+            <p className="text-xs text-fintech-muted leading-relaxed">
+              Set your base currency and configure exchange rates for international transactions. 
+              All metrics will be converted to your base currency dynamically.
+            </p>
+
+            <div className="space-y-4">
+              <label className="space-y-2 block">
+                <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Base Currency</span>
+                <select
+                  value={preferences?.baseCurrency || "CAD"}
+                  onChange={async (e) => {
+                    if (updatePreferences) {
+                      await updatePreferences({ ...preferences, baseCurrency: e.target.value });
+                      setStatus({ type: "success", message: "Base currency updated." });
+                    }
+                  }}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold focus:outline-none focus:border-fintech-accent"
+                >
+                  {CURRENCIES.map(c => (
+                    <option key={c.code} value={c.code} className="bg-[#192540]">
+                      {c.code} - {c.name} ({c.symbol})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="space-y-4 pt-4 border-t border-white/10">
+                <h4 className="text-sm font-bold flex justify-between items-center">
+                  Exchange Rates (to {preferences?.baseCurrency || "CAD"})
+                  <button 
+                    onClick={() => {
+                      const newRate: ExchangeRate = { currency: "USD", rateToBase: 1.35 };
+                      if (updatePreferences) {
+                        const currentRates = preferences?.exchangeRates || [];
+                        updatePreferences({ ...preferences, exchangeRates: [...currentRates, newRate] });
+                      }
+                    }}
+                    className="text-[10px] bg-fintech-accent/10 text-fintech-accent px-3 py-1.5 rounded-lg uppercase tracking-wider hover:bg-fintech-accent/20 transition-colors"
+                  >
+                    + Add Rate
+                  </button>
+                </h4>
+                
+                {(!preferences?.exchangeRates || preferences.exchangeRates.length === 0) ? (
+                  <div className="text-xs text-fintech-muted italic p-4 bg-white/5 rounded-xl border border-white/5 text-center">
+                    No custom exchange rates defined. Transactions in other currencies will assume a 1:1 ratio.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {preferences.exchangeRates.map((rate, index) => (
+                      <div key={index} className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10">
+                        <select
+                          value={rate.currency}
+                          onChange={(e) => {
+                            if (updatePreferences) {
+                              const newRates = [...(preferences?.exchangeRates || [])];
+                              newRates[index].currency = e.target.value;
+                              updatePreferences({ ...preferences, exchangeRates: newRates });
+                            }
+                          }}
+                          className="bg-[#192540] border border-white/10 rounded-lg px-3 py-2 text-sm font-bold w-32"
+                        >
+                          {CURRENCIES.filter(c => c.code !== preferences?.baseCurrency).map(c => (
+                            <option key={c.code} value={c.code}>{c.code}</option>
+                          ))}
+                        </select>
+                        
+                        <div className="flex-1 flex items-center gap-2">
+                          <span className="text-xs font-bold text-fintech-muted mr-1">=</span>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={rate.rateToBase}
+                            onChange={(e) => {
+                              if (updatePreferences) {
+                                const newRates = [...(preferences?.exchangeRates || [])];
+                                newRates[index].rateToBase = parseFloat(e.target.value) || 0;
+                                updatePreferences({ ...preferences, exchangeRates: newRates });
+                              }
+                            }}
+                            className="flex-1 bg-[#192540] border border-white/10 rounded-lg px-3 py-2 text-sm"
+                            placeholder="Rate"
+                          />
+                          <span className="text-xs font-bold text-fintech-muted uppercase w-12">{preferences?.baseCurrency || "CAD"}</span>
+                        </div>
+                        
+                        <button
+                          onClick={() => {
+                            if (updatePreferences) {
+                              const newRates = [...(preferences?.exchangeRates || [])];
+                              newRates.splice(index, 1);
+                              updatePreferences({ ...preferences, exchangeRates: newRates });
+                            }
+                          }}
+                          className="p-2 text-fintech-danger hover:bg-fintech-danger/10 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Cloud Sync Tab */}
+      {activeTab === "cloud" && (
+      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+        <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+          <section className="space-y-4">
+            <h3 className="text-base font-bold flex items-center gap-2">
+              <Cloud size={20} className="text-fintech-accent" /> Private Drive Vault
         </h3>
         <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 space-y-6">
           <p className="text-xs text-fintech-muted leading-relaxed">
@@ -981,7 +1203,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
 
             <button
               onClick={() => {
-                const data = { categories, transactions, income: incomeRecords };
+                const data = { expenseCategories, incomeCategories, transactions, income: incomeRecords };
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
@@ -1005,8 +1227,12 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
           </div>
         </div>
       </section>
+      </div>
+      )}
 
-      {/* Maintenance Section */}
+      {/* Maintenance Tab */}
+      {activeTab === "maintenance" && (
+      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
       <section className="grid gap-4 xl:grid-cols-2">
         <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 flex items-center gap-5">
           <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[#214b58] bg-[#122836] text-fintech-accent">
@@ -1037,8 +1263,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
             {[
               { id: "expenses", label: "Clear All Expenses" },
               { id: "income", label: "Clear All Incomes" },
-              { id: "categories", label: "Clear All Categories" },
-              { id: "targets", label: "Reset All Targets to $0" }
+              { id: "expenseCategories", label: "Reset Expense Categories" },
+              { id: "incomeCategories", label: "Reset Income Categories" }
             ].map((item) => (
               <button
                 key={item.id}
@@ -1053,6 +1279,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
           </div>
         </div>
       </section>
+      </div>
+      )}
+      </div>
 
       <footer className="text-center py-8">
         <p className="text-[10px] text-fintech-muted uppercase tracking-[0.2em]">VibeBudget v1.0.0</p>

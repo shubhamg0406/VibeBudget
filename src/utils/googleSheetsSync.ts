@@ -4,6 +4,7 @@ import {
   GoogleSheetsSyncConfig,
   Income,
   IncomeSheetMapping,
+  PublicSheetImportColumnSelection,
   Transaction,
 } from "../types";
 
@@ -14,7 +15,20 @@ const DEFAULT_INCOME_HEADERS = ["Date", "Source", "Amount", "Category", "Notes",
 interface SpreadsheetSheet {
   properties?: {
     title?: string;
+    gridProperties?: {
+      rowCount?: number;
+      columnCount?: number;
+    };
   };
+  data?: Array<{
+    startRow?: number;
+    startColumn?: number;
+    rowData?: Array<{
+      values?: Array<{
+        formattedValue?: string;
+      }>;
+    }>;
+  }>;
 }
 
 interface SpreadsheetMetadataResponse {
@@ -26,6 +40,32 @@ interface SpreadsheetMetadataResponse {
 
 interface ValueRangeResponse {
   values?: string[][];
+}
+
+export interface SheetTabPreview {
+  title: string;
+  previewRows: string[][];
+}
+
+interface SpreadsheetGridResponse {
+  sheets?: SpreadsheetSheet[];
+}
+
+export interface ImportFieldDefinition {
+  field: string;
+  label: string;
+  aliases: string[];
+  required: boolean;
+}
+
+export interface HeaderRowDetectionResult {
+  headerRowIndex: number;
+  confidence: number;
+  matchedFields: string[];
+}
+
+export interface SheetColumnOption extends PublicSheetImportColumnSelection {
+  value: string;
 }
 
 type SheetsKind = "expenses" | "income";
@@ -154,6 +194,178 @@ export const getSheetValues = async (token: string, spreadsheetId: string, range
     `${GOOGLE_SHEETS_API}/${spreadsheetId}/values/${encodeURIComponent(range)}`
   )
 );
+
+const buildGridRows = (
+  data: SpreadsheetSheet["data"],
+  rowCount: number,
+  columnCount: number
+) => {
+  const rows = Array.from({ length: rowCount }, () => Array.from({ length: columnCount }, () => ""));
+
+  (data || []).forEach((block) => {
+    const startRow = block.startRow || 0;
+    const startColumn = block.startColumn || 0;
+
+    (block.rowData || []).forEach((row, rowOffset) => {
+      (row.values || []).forEach((cell, columnOffset) => {
+        const targetRow = startRow + rowOffset;
+        const targetColumn = startColumn + columnOffset;
+        if (targetRow < rowCount && targetColumn < columnCount) {
+          rows[targetRow][targetColumn] = cell.formattedValue || "";
+        }
+      });
+    });
+  });
+
+  return rows;
+};
+
+export const getSheetGridRows = async (
+  token: string,
+  spreadsheetId: string,
+  sheetName: string,
+  rowCount = 50
+) => {
+  const metadata = await getSpreadsheetMetadata(token, spreadsheetId);
+  const sheet = (metadata.sheets || []).find((entry) => entry.properties?.title === sheetName);
+  const columnCount = Math.max(sheet?.properties?.gridProperties?.columnCount || 1, 1);
+
+  const response = await fetchGoogleSheets<SpreadsheetGridResponse>(
+    token,
+    `${GOOGLE_SHEETS_API}/${spreadsheetId}?ranges=${encodeURIComponent(`${escapeSheetName(sheetName)}!1:${rowCount}`)}&includeGridData=true&fields=sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue))))`
+  );
+
+  const targetSheet = (response.sheets || [])[0];
+  return buildGridRows(targetSheet?.data, rowCount, columnCount);
+};
+
+export const getFullSheetGridRows = async (
+  token: string,
+  spreadsheetId: string,
+  sheetName: string
+) => {
+  const metadata = await getSpreadsheetMetadata(token, spreadsheetId);
+  const sheet = (metadata.sheets || []).find((entry) => entry.properties?.title === sheetName);
+  const rowCount = Math.max(sheet?.properties?.gridProperties?.rowCount || 1, 1);
+  const columnCount = Math.max(sheet?.properties?.gridProperties?.columnCount || 1, 1);
+
+  const response = await fetchGoogleSheets<SpreadsheetGridResponse>(
+    token,
+    `${GOOGLE_SHEETS_API}/${spreadsheetId}?ranges=${encodeURIComponent(escapeSheetName(sheetName))}&includeGridData=true&fields=sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue))))`
+  );
+
+  const targetSheet = (response.sheets || [])[0];
+  return buildGridRows(targetSheet?.data, rowCount, columnCount);
+};
+
+export const getSheetTabPreviews = async (
+  token: string,
+  spreadsheetId: string,
+  previewRowCount = 6
+): Promise<SheetTabPreview[]> => {
+  const metadata = await getSpreadsheetMetadata(token, spreadsheetId);
+  const sheets = metadata.sheets || [];
+
+  const tabs = await Promise.all(sheets.map(async (sheet) => {
+    const title = sheet.properties?.title || "";
+    let previewRows: string[][] = [];
+
+    if (title) {
+      try {
+        previewRows = await getSheetGridRows(token, spreadsheetId, title, previewRowCount);
+      } catch (error) {
+        console.error("Failed to load sheet preview", title, error);
+      }
+    }
+
+    return {
+      title,
+      previewRows,
+    };
+  }));
+
+  return tabs.filter((tab) => Boolean(tab.title));
+};
+
+export const getSheetPreviewRows = async (
+  token: string,
+  spreadsheetId: string,
+  sheetName: string,
+  previewRowCount = 25
+) => {
+  return getSheetGridRows(token, spreadsheetId, sheetName, previewRowCount);
+};
+
+const scoreHeaderCell = (value: string, aliases: string[]) => {
+  const normalizedValue = normalizeHeader(value);
+  if (!normalizedValue) return 0;
+
+  let bestScore = 0;
+  for (const alias of aliases) {
+    const normalizedAlias = normalizeHeader(alias);
+    if (!normalizedAlias) continue;
+    if (normalizedValue === normalizedAlias) return 3;
+    if (normalizedValue.includes(normalizedAlias) || normalizedAlias.includes(normalizedValue)) {
+      bestScore = Math.max(bestScore, 2);
+    }
+  }
+
+  return bestScore;
+};
+
+export const detectHeaderRow = (
+  rows: string[][],
+  fields: ImportFieldDefinition[]
+): HeaderRowDetectionResult => {
+  let bestRowIndex = 1;
+  let bestScore = -1;
+  let bestMatchedFields: string[] = [];
+
+  rows.forEach((row, index) => {
+    const nonEmptyCells = row.filter((cell) => cell.trim() !== "").length;
+    if (nonEmptyCells === 0) return;
+
+    const matchedFields = fields
+      .filter((field) => row.some((cell) => scoreHeaderCell(cell, [field.label, ...field.aliases]) > 0))
+      .map((field) => field.field);
+
+    const exactishScore = fields.reduce((total, field) => {
+      const bestCellScore = row.reduce((cellBest, cell) => (
+        Math.max(cellBest, scoreHeaderCell(cell, [field.label, ...field.aliases]))
+      ), 0);
+      return total + bestCellScore;
+    }, 0);
+
+    const rowScore = exactishScore + Math.min(nonEmptyCells, 8) * 0.05;
+
+    if (
+      rowScore > bestScore ||
+      (rowScore === bestScore && matchedFields.length > bestMatchedFields.length)
+    ) {
+      bestScore = rowScore;
+      bestRowIndex = index + 1;
+      bestMatchedFields = matchedFields;
+    }
+  });
+
+  return {
+    headerRowIndex: bestRowIndex,
+    confidence: bestScore > 0 ? bestScore : 0,
+    matchedFields: bestMatchedFields,
+  };
+};
+
+export const buildSheetColumnOptions = (headerRow: string[]): SheetColumnOption[] => {
+  return headerRow.map((header, index) => {
+    const normalizedHeader = header.trim();
+    const headerLabel = normalizedHeader || `Column ${index + 1}`;
+    return {
+      columnIndex: index,
+      headerLabel,
+      value: `${headerLabel} (${getColumnLetter(index)})`,
+    };
+  });
+};
 
 export const updateSheetValues = async (
   token: string,

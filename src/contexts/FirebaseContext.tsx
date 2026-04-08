@@ -11,11 +11,14 @@ import { auth, googleProvider } from "../firebase";
 import {
   Category,
   DriveConnection,
+  ExpenseCategory,
   GoogleSheetsInspectionResult,
   GoogleSheetsSyncConfig,
   GoogleSheetsSyncDirection,
   Income,
+  IncomeCategory,
   Transaction,
+  Preferences,
 } from "../types";
 import {
   clearSheetRowForItem,
@@ -69,11 +72,28 @@ const DEFAULT_CATEGORY_NAMES = [
   "Utilities",
 ];
 
+const DEFAULT_CORE_EXCLUDED = [
+  "Canada Investments", 
+  "India Transfer Investment", 
+  "India Transfer - Parents", 
+  "Nagar/Bamor Expenses"
+];
+
 const getIsoNow = () => new Date().toISOString();
 
-const createDefaultCategories = (): Category[] => (
+const createDefaultExpenseCategories = (): ExpenseCategory[] => (
   DEFAULT_CATEGORY_NAMES
     .slice()
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({
+      id: crypto.randomUUID(),
+      name,
+      target_amount: 0,
+    }))
+);
+
+const createIncomeCategoriesFromRecords = (incomeRecords: Income[]): IncomeCategory[] => (
+  Array.from(new Set(incomeRecords.map((item) => item.category).filter(Boolean)))
     .sort((a, b) => a.localeCompare(b))
     .map((name) => ({
       id: crypto.randomUUID(),
@@ -91,45 +111,67 @@ const getLocalBudgetId = () => {
 };
 
 interface LocalStatePayload {
-  categories: Category[];
+  categories?: ExpenseCategory[];
+  expenseCategories: ExpenseCategory[];
+  incomeCategories: IncomeCategory[];
   transactions: Transaction[];
   income: Income[];
   googleSheetsConfig: GoogleSheetsSyncConfig | null;
   driveConnection: DriveConnection | null;
   lastSyncedAt: string | null;
+  preferences?: Preferences;
 }
 
 const loadLocalState = (): LocalStatePayload => {
   const raw = localStorage.getItem(LOCAL_STATE_KEY);
   if (!raw) {
     return {
-      categories: createDefaultCategories(),
+      categories: createDefaultExpenseCategories(),
+      expenseCategories: createDefaultExpenseCategories(),
+      incomeCategories: [],
       transactions: [],
       income: [],
       googleSheetsConfig: null,
       driveConnection: null,
       lastSyncedAt: null,
+      preferences: { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED },
     };
   }
 
   try {
     const parsed = JSON.parse(raw) as Partial<LocalStatePayload>;
     return {
-      categories: Array.isArray(parsed.categories) && parsed.categories.length > 0 ? parsed.categories : createDefaultCategories(),
       transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
       income: Array.isArray(parsed.income) ? parsed.income : [],
+      expenseCategories:
+        Array.isArray(parsed.expenseCategories) && parsed.expenseCategories.length > 0
+          ? parsed.expenseCategories
+          : Array.isArray(parsed.categories) && parsed.categories.length > 0
+            ? parsed.categories
+            : createDefaultExpenseCategories(),
+      incomeCategories:
+        Array.isArray(parsed.incomeCategories)
+          ? parsed.incomeCategories
+          : createIncomeCategoriesFromRecords(Array.isArray(parsed.income) ? parsed.income : []),
       googleSheetsConfig: parsed.googleSheetsConfig || null,
       driveConnection: parsed.driveConnection || null,
       lastSyncedAt: typeof parsed.lastSyncedAt === "string" ? parsed.lastSyncedAt : null,
+      preferences: parsed.preferences ? { 
+        ...parsed.preferences, 
+        coreExcludedCategories: parsed.preferences.coreExcludedCategories || DEFAULT_CORE_EXCLUDED 
+      } : { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED },
     };
   } catch {
     return {
-      categories: createDefaultCategories(),
+      categories: createDefaultExpenseCategories(),
+      expenseCategories: createDefaultExpenseCategories(),
+      incomeCategories: [],
       transactions: [],
       income: [],
       googleSheetsConfig: null,
       driveConnection: null,
       lastSyncedAt: null,
+      preferences: { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED },
     };
   }
 };
@@ -144,9 +186,13 @@ interface FirebaseContextType {
   budgetId: string | null;
   ownerEmail: string | null;
   sharedUsers: string[];
+  expenseCategories: ExpenseCategory[];
+  incomeCategories: IncomeCategory[];
   categories: Category[];
   transactions: Transaction[];
   income: Income[];
+  preferences: Preferences;
+  updatePreferences: (prefs: Partial<Preferences>) => Promise<void>;
   signIn: () => Promise<void>;
   logout: () => Promise<void>;
   addTransaction: (data: any) => Promise<void>;
@@ -155,6 +201,8 @@ interface FirebaseContextType {
   addIncome: (data: any) => Promise<void>;
   updateIncome: (id: string, data: any) => Promise<void>;
   deleteIncome: (id: string) => Promise<void>;
+  updateExpenseCategoryTarget: (id: string, target: number) => Promise<void>;
+  updateIncomeCategoryTarget: (id: string, target: number) => Promise<void>;
   updateCategoryTarget: (id: string, target: number) => Promise<void>;
   importData: (type: string, data: any[], isUpsert?: boolean, onProgress?: (current: number, total: number) => void) => Promise<void>;
   wipeData: (type: string) => Promise<void>;
@@ -179,6 +227,7 @@ interface FirebaseContextType {
   connectDriveFolder: (folderRef?: string) => Promise<void>;
   loadBudgetFromDrive: () => Promise<void>;
   disconnectDriveFolder: () => void;
+  googleSheetsAccessToken: string | null;
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -189,9 +238,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [budgetId] = useState<string>(getLocalBudgetId);
-  const [categories, setCategories] = useState<Category[]>(initialLocalState.categories);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>(initialLocalState.expenseCategories);
+  const [incomeCategories, setIncomeCategories] = useState<IncomeCategory[]>(initialLocalState.incomeCategories);
   const [transactions, setTransactions] = useState<Transaction[]>(initialLocalState.transactions);
   const [income, setIncome] = useState<Income[]>(initialLocalState.income);
+  const [preferences, setPreferences] = useState<Preferences>(initialLocalState.preferences || { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED });
   const [googleSheetsConfig, setGoogleSheetsConfig] = useState<GoogleSheetsSyncConfig | null>(initialLocalState.googleSheetsConfig);
   const [driveConnection, setDriveConnection] = useState<DriveConnection | null>(initialLocalState.driveConnection);
   const [lastSynced, setLastSynced] = useState<Date | null>(initialLocalState.lastSyncedAt ? new Date(initialLocalState.lastSyncedAt) : null);
@@ -202,33 +253,42 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [backingUp, setBackingUp] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const categoriesRef = useRef(categories);
+  const expenseCategoriesRef = useRef(expenseCategories);
+  const incomeCategoriesRef = useRef(incomeCategories);
   const transactionsRef = useRef(transactions);
   const incomeRef = useRef(income);
+  const preferencesRef = useRef(preferences);
   const sheetsConfigRef = useRef(googleSheetsConfig);
   const driveConnectionRef = useRef(driveConnection);
   const autoSaveTimerRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
   const loadingDriveRef = useRef(false);
 
-  useEffect(() => { categoriesRef.current = categories; }, [categories]);
+  useEffect(() => { expenseCategoriesRef.current = expenseCategories; }, [expenseCategories]);
+  useEffect(() => { incomeCategoriesRef.current = incomeCategories; }, [incomeCategories]);
   useEffect(() => { transactionsRef.current = transactions; }, [transactions]);
   useEffect(() => { incomeRef.current = income; }, [income]);
+  useEffect(() => { preferencesRef.current = preferences; }, [preferences]);
   useEffect(() => { sheetsConfigRef.current = googleSheetsConfig; }, [googleSheetsConfig]);
   useEffect(() => { driveConnectionRef.current = driveConnection; }, [driveConnection]);
 
   const persistSnapshot = (
-    nextCategories = categoriesRef.current,
+    nextExpenseCategories = expenseCategoriesRef.current,
+    nextIncomeCategories = incomeCategoriesRef.current,
     nextTransactions = transactionsRef.current,
     nextIncome = incomeRef.current,
+    nextPreferences = preferencesRef.current,
     nextSheetsConfig = sheetsConfigRef.current,
     nextDriveConnection = driveConnectionRef.current,
     nextLastSynced = lastSynced
   ) => {
     persistLocalState({
-      categories: nextCategories,
+      categories: nextExpenseCategories,
+      expenseCategories: nextExpenseCategories,
+      incomeCategories: nextIncomeCategories,
       transactions: nextTransactions,
       income: nextIncome,
+      preferences: nextPreferences,
       googleSheetsConfig: nextSheetsConfig,
       driveConnection: nextDriveConnection,
       lastSyncedAt: nextLastSynced ? nextLastSynced.toISOString() : null,
@@ -236,41 +296,55 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const setBudgetState = ({
-    nextCategories = categoriesRef.current,
+    nextExpenseCategories = expenseCategoriesRef.current,
+    nextIncomeCategories = incomeCategoriesRef.current,
     nextTransactions = transactionsRef.current,
     nextIncome = incomeRef.current,
+    nextPreferences = preferencesRef.current,
     nextSheetsConfig = sheetsConfigRef.current,
     nextDriveConnection = driveConnectionRef.current,
     nextLastSynced = lastSynced,
   }: {
-    nextCategories?: Category[];
+    nextExpenseCategories?: ExpenseCategory[];
+    nextIncomeCategories?: IncomeCategory[];
     nextTransactions?: Transaction[];
     nextIncome?: Income[];
+    nextPreferences?: Preferences;
     nextSheetsConfig?: GoogleSheetsSyncConfig | null;
     nextDriveConnection?: DriveConnection | null;
     nextLastSynced?: Date | null;
   }) => {
-    categoriesRef.current = nextCategories;
+    expenseCategoriesRef.current = nextExpenseCategories;
+    incomeCategoriesRef.current = nextIncomeCategories;
     transactionsRef.current = nextTransactions;
     incomeRef.current = nextIncome;
+    preferencesRef.current = nextPreferences;
     sheetsConfigRef.current = nextSheetsConfig;
     driveConnectionRef.current = nextDriveConnection;
 
-    setCategories(nextCategories);
+    setExpenseCategories(nextExpenseCategories);
+    setIncomeCategories(nextIncomeCategories);
     setTransactions(nextTransactions);
     setIncome(nextIncome);
+    setPreferences(nextPreferences);
     setGoogleSheetsConfig(nextSheetsConfig);
     setDriveConnection(nextDriveConnection);
     setLastSynced(nextLastSynced);
 
     persistSnapshot(
-      nextCategories,
+      nextExpenseCategories,
+      nextIncomeCategories,
       nextTransactions,
       nextIncome,
+      nextPreferences,
       nextSheetsConfig,
       nextDriveConnection,
       nextLastSynced
     );
+  };
+
+  const updatePreferences = async (prefs: Partial<Preferences>) => {
+    setBudgetState({ nextPreferences: { ...preferencesRef.current, ...prefs } });
   };
 
   const storeAccessToken = (token: string | null) => {
@@ -331,7 +405,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const payload = createBudgetDataFile(
-      categoriesRef.current,
+      expenseCategoriesRef.current,
+      incomeCategoriesRef.current,
       transactionsRef.current,
       incomeRef.current,
       sheetsConfigRef.current
@@ -364,7 +439,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const raw = await readBudgetFileContent(token, currentConnection.budgetFileId);
       const parsed = parseBudgetDataFile(raw);
       setBudgetState({
-        nextCategories: parsed.categories.length > 0 ? parsed.categories : createDefaultCategories(),
+        nextExpenseCategories: parsed.expenseCategories.length > 0 ? parsed.expenseCategories : createDefaultExpenseCategories(),
+        nextIncomeCategories: parsed.incomeCategories,
         nextTransactions: parsed.transactions,
         nextIncome: parsed.income,
         nextSheetsConfig: parsed.googleSheetsConfig,
@@ -386,7 +462,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const folder = await ensureVibeBudgetFolder(token, folderRef);
       const payload = createBudgetDataFile(
-        categoriesRef.current,
+        expenseCategoriesRef.current,
+        incomeCategoriesRef.current,
         transactionsRef.current,
         incomeRef.current,
         sheetsConfigRef.current
@@ -445,7 +522,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         window.clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [categories, transactions, income, googleSheetsConfig, driveConnection, googleSheetsAccessToken]);
+  }, [expenseCategories, incomeCategories, transactions, income, googleSheetsConfig, driveConnection, googleSheetsAccessToken]);
 
   const inspectGoogleSheetsSpreadsheet = async (
     spreadsheetUrl: string,
@@ -501,17 +578,31 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setGoogleSheetsError(null);
   };
 
-  const ensureCategoryId = async (name: string) => {
-    const existing = categoriesRef.current.find((category) => category.name === name);
+  const ensureExpenseCategoryId = async (name: string) => {
+    const existing = expenseCategoriesRef.current.find((category) => category.name === name);
     if (existing) return existing.id;
 
-    const nextCategory: Category = {
+    const nextCategory: ExpenseCategory = {
       id: crypto.randomUUID(),
       name,
       target_amount: 0,
     };
-    const nextCategories = [...categoriesRef.current, nextCategory].sort((a, b) => a.name.localeCompare(b.name));
-    setBudgetState({ nextCategories });
+    const nextExpenseCategories = [...expenseCategoriesRef.current, nextCategory].sort((a, b) => a.name.localeCompare(b.name));
+    setBudgetState({ nextExpenseCategories });
+    return nextCategory.id;
+  };
+
+  const ensureIncomeCategoryId = async (name: string) => {
+    const existing = incomeCategoriesRef.current.find((category) => category.name === name);
+    if (existing) return existing.id;
+
+    const nextCategory: IncomeCategory = {
+      id: crypto.randomUUID(),
+      name,
+      target_amount: 0,
+    };
+    const nextIncomeCategories = [...incomeCategoriesRef.current, nextCategory].sort((a, b) => a.name.localeCompare(b.name));
+    setBudgetState({ nextIncomeCategories });
     return nextCategory.id;
   };
 
@@ -562,7 +653,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           config: sheetsConfigRef.current,
           transactions: transactionsRef.current,
           income: incomeRef.current,
-          ensureCategoryId,
+          ensureCategoryId: ensureExpenseCategoryId,
           upsertTransaction: upsertTransactionFromSync,
           upsertIncome: upsertIncomeFromSync,
         });
@@ -666,11 +757,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const addIncome = async (data: Omit<Income, "id">) => {
+    const categoryId = await ensureIncomeCategoryId(data.category);
     const nextIncome = [
       ...incomeRef.current,
       {
         id: crypto.randomUUID(),
         ...data,
+        category_id: data.category_id || categoryId,
         updated_at: getIsoNow(),
       },
     ];
@@ -681,8 +774,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const updateIncome = async (id: string, data: Partial<Income>) => {
+    const categoryId = data.category ? await ensureIncomeCategoryId(data.category) : undefined;
     const nextIncome = incomeRef.current.map((item) => (
-      item.id === id ? { ...item, ...data, updated_at: getIsoNow() } : item
+      item.id === id ? { ...item, ...data, category_id: categoryId || item.category_id, updated_at: getIsoNow() } : item
     ));
     setBudgetState({ nextIncome });
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
@@ -698,36 +792,60 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const updateCategoryTarget = async (id: string, target: number) => {
-    const nextCategories = categoriesRef.current.map((item) => (
+  const updateExpenseCategoryTarget = async (id: string, target: number) => {
+    const nextExpenseCategories = expenseCategoriesRef.current.map((item) => (
       item.id === id ? { ...item, target_amount: target } : item
     ));
-    setBudgetState({ nextCategories });
+    setBudgetState({ nextExpenseCategories });
   };
 
+  const updateIncomeCategoryTarget = async (id: string, target: number) => {
+    const nextIncomeCategories = incomeCategoriesRef.current.map((item) => (
+      item.id === id ? { ...item, target_amount: target } : item
+    ));
+    setBudgetState({ nextIncomeCategories });
+  };
+
+  const updateCategoryTarget = updateExpenseCategoryTarget;
+
   const importData = async (type: string, rows: any[], isUpsert = false, onProgress?: (current: number, total: number) => void) => {
-    let nextCategories = [...categoriesRef.current];
+    let nextExpenseCategories = [...expenseCategoriesRef.current];
+    let nextIncomeCategories = [...incomeCategoriesRef.current];
     let nextTransactions = [...transactionsRef.current];
     let nextIncome = [...incomeRef.current];
 
-    const getOrCreateCategoryId = (name: string) => {
-      const existing = nextCategories.find((item) => item.name === name);
+    const getOrCreateExpenseCategoryId = (name: string) => {
+      const existing = nextExpenseCategories.find((item) => item.name === name);
       if (existing) return existing.id;
-      const created: Category = { id: crypto.randomUUID(), name, target_amount: 0 };
-      nextCategories = [...nextCategories, created].sort((a, b) => a.name.localeCompare(b.name));
+      const created: ExpenseCategory = { id: crypto.randomUUID(), name, target_amount: 0 };
+      nextExpenseCategories = [...nextExpenseCategories, created].sort((a, b) => a.name.localeCompare(b.name));
+      return created.id;
+    };
+
+    const getOrCreateIncomeCategoryId = (name: string) => {
+      const existing = nextIncomeCategories.find((item) => item.name === name);
+      if (existing) return existing.id;
+      const created: IncomeCategory = { id: crypto.randomUUID(), name, target_amount: 0 };
+      nextIncomeCategories = [...nextIncomeCategories, created].sort((a, b) => a.name.localeCompare(b.name));
       return created.id;
     };
 
     rows.forEach((row, index) => {
-      if (type === "targets") {
+      if (type === "targets" || type === "expenseCategories") {
         const [name, target] = row;
-        const id = getOrCreateCategoryId(name);
-        nextCategories = nextCategories.map((item) => item.id === id ? { ...item, target_amount: target } : item);
+        const id = getOrCreateExpenseCategoryId(name);
+        nextExpenseCategories = nextExpenseCategories.map((item) => item.id === id ? { ...item, target_amount: target } : item);
+      }
+
+      if (type === "incomeCategories") {
+        const [name, target] = row;
+        const id = getOrCreateIncomeCategoryId(name);
+        nextIncomeCategories = nextIncomeCategories.map((item) => item.id === id ? { ...item, target_amount: target } : item);
       }
 
       if (type === "expenses") {
         const [date, vendor, amount, categoryName, notes] = row;
-        const categoryId = getOrCreateCategoryId(categoryName);
+        const categoryId = getOrCreateExpenseCategoryId(categoryName);
         const existingIndex = isUpsert ? nextTransactions.findIndex((item) => item.date === date && item.vendor === vendor) : -1;
         const payload: Transaction = {
           id: existingIndex >= 0 ? nextTransactions[existingIndex].id : crypto.randomUUID(),
@@ -748,12 +866,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (type === "income") {
         const [date, source, amount, category, notes] = row;
+        const categoryId = getOrCreateIncomeCategoryId(category);
         const existingIndex = isUpsert ? nextIncome.findIndex((item) => item.date === date && item.source === source) : -1;
         const payload: Income = {
           id: existingIndex >= 0 ? nextIncome[existingIndex].id : crypto.randomUUID(),
           date,
           source,
           amount,
+          category_id: existingIndex >= 0 ? nextIncome[existingIndex].category_id || categoryId : categoryId,
           category,
           notes,
           updated_at: getIsoNow(),
@@ -768,7 +888,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       onProgress?.(index + 1, rows.length);
     });
 
-    setBudgetState({ nextCategories, nextTransactions, nextIncome });
+    setBudgetState({ nextExpenseCategories, nextIncomeCategories, nextTransactions, nextIncome });
   };
 
   const wipeData = async (type: string) => {
@@ -780,8 +900,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setBudgetState({ nextIncome: [] });
       return;
     }
-    if (type === "categories") {
-      setBudgetState({ nextCategories: createDefaultCategories() });
+    if (type === "categories" || type === "targets" || type === "expenseCategories") {
+      setBudgetState({ nextExpenseCategories: createDefaultExpenseCategories() });
+    }
+    if (type === "incomeCategories") {
+      setBudgetState({ nextIncomeCategories: createIncomeCategoriesFromRecords(incomeRef.current) });
     }
   };
 
@@ -815,9 +938,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         budgetId,
         ownerEmail: user?.email || null,
         sharedUsers: [],
-        categories,
+        expenseCategories,
+        incomeCategories,
+        categories: expenseCategories,
         transactions,
         income,
+        preferences,
+        updatePreferences,
         signIn,
         logout,
         addTransaction,
@@ -826,6 +953,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addIncome,
         updateIncome,
         deleteIncome,
+        updateExpenseCategoryTarget,
+        updateIncomeCategoryTarget,
         updateCategoryTarget,
         importData,
         wipeData,
@@ -850,6 +979,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         connectDriveFolder,
         loadBudgetFromDrive,
         disconnectDriveFolder,
+        googleSheetsAccessToken,
       }}
     >
       {children}

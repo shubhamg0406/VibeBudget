@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Category, Transaction, Income, DateRange } from "../types";
+import { ExpenseCategory, Transaction, Income, DateRange, IncomeCategory } from "../types";
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, BarChart, Bar, ReferenceLine, Line
@@ -11,9 +11,12 @@ import {
 } from "lucide-react";
 import { DateRangeSelector } from "./DateRangeSelector";
 import { formatDate, getTodayStr, getFirstDayOfMonth, getLastDayOfMonth, formatMonth, formatDisplayDate } from "../utils/dateUtils";
+import { useFirebase } from "../contexts/FirebaseContext";
+import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 
 interface AnalysisProps {
-  categories: Category[];
+  expenseCategories: ExpenseCategory[];
+  incomeCategories: IncomeCategory[];
   transactions: Transaction[];
   income: Income[];
   allTransactions: Transaction[];
@@ -22,13 +25,6 @@ interface AnalysisProps {
 }
 
 const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
-
-const SAVINGS_CATEGORIES = [
-  "Canada Investments", 
-  "India Transfer Investment", 
-  "India Transfer - Parents", 
-  "Nagar/Bamor Expenses"
-];
 
 type ComparisonPeriodOption = 
   | "latest-month-vs-prev-month"
@@ -50,7 +46,8 @@ const COMPARISON_OPTIONS: { label: string; value: ComparisonPeriodOption }[] = [
 ];
 
 export const Analysis: React.FC<AnalysisProps> = ({ 
-  categories, 
+  expenseCategories,
+  incomeCategories,
   transactions, 
   income, 
   allTransactions,
@@ -58,37 +55,71 @@ export const Analysis: React.FC<AnalysisProps> = ({
   currentRange 
 }) => {
   const [expenseMode, setExpenseMode] = useState<"all" | "core">("all");
-  const [activeTab, setActiveTab] = useState<"overview" | "comparison" | "category">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "deep-dive">("overview");
   const [comparisonPeriod, setComparisonPeriod] = useState<ComparisonPeriodOption>("latest-month-vs-prev-month");
   const [comparisonMode, setComparisonMode] = useState<"previous" | "last-year">("last-year");
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(categories[0]?.id || null);
+  const categories = expenseCategories;
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(expenseCategories[0]?.id || null);
+  const { preferences, updatePreferences } = useFirebase();
+  const baseSymbol = getCurrencySymbol(preferences?.baseCurrency);
+  const [showCoreFilter, setShowCoreFilter] = useState(false);
+  const coreExcluded = useMemo(() => preferences?.coreExcludedCategories || [], [preferences?.coreExcludedCategories]);
   
   // Independent date ranges for Overview, Comparison, and Category Trends
   const [overviewRange, setOverviewRange] = useState<DateRange>(currentRange);
   const [comparisonRange, setComparisonRange] = useState<DateRange>(currentRange);
-  const [categoryRange, setCategoryRange] = useState<DateRange>(currentRange);
   const today = getTodayStr();
 
   // Filter transactions based on mode and local range
   const filteredTransactions = useMemo(() => {
-    const range = activeTab === "overview" ? overviewRange : (activeTab === "category" ? categoryRange : (activeTab === "comparison" ? comparisonRange : currentRange));
+    const range = activeTab === "overview" ? overviewRange : (activeTab === "deep-dive" ? comparisonRange : currentRange);
     const base = allTransactions.filter(t => t.date >= range.start && t.date <= range.end);
     const mode = activeTab === "overview" ? expenseMode : "all";
     return mode === "all" 
       ? base 
-      : base.filter(t => !SAVINGS_CATEGORIES.includes(t.category_name));
-  }, [allTransactions, expenseMode, activeTab, overviewRange, comparisonRange, categoryRange, currentRange]);
+      : base.filter(t => !coreExcluded.includes(t.category_name));
+  }, [allTransactions, expenseMode, activeTab, overviewRange, comparisonRange, currentRange, coreExcluded]);
 
   const filteredIncome = useMemo(() => {
-    const range = activeTab === "overview" ? overviewRange : (activeTab === "category" ? categoryRange : (activeTab === "comparison" ? comparisonRange : currentRange));
+    const range = activeTab === "overview" ? overviewRange : (activeTab === "deep-dive" ? comparisonRange : currentRange);
     return allIncome.filter(i => i.date >= range.start && i.date <= range.end);
-  }, [allIncome, activeTab, overviewRange, comparisonRange, categoryRange, currentRange]);
+  }, [allIncome, activeTab, overviewRange, comparisonRange, currentRange]);
+
+  const incomeCategoryTotals = useMemo(() => {
+    return incomeCategories
+      .map((category) => {
+        const total = filteredIncome
+          .filter((record) => record.category_id === category.id || record.category === category.name)
+          .reduce((acc, record) => acc + convertToBaseCurrency(record.amount, record.currency, preferences), 0);
+        return {
+          ...category,
+          total,
+        };
+      })
+      .filter((category) => category.total > 0 || category.target_amount > 0)
+      .sort((a, b) => b.total - a.total);
+  }, [filteredIncome, incomeCategories, preferences]);
+
+  const expenseCategoryTotals = useMemo(() => {
+    return expenseCategories
+      .map((category) => {
+        const total = filteredTransactions
+          .filter((record) => record.category_id === category.id)
+          .reduce((acc, record) => acc + convertToBaseCurrency(record.amount, record.currency, preferences), 0);
+        return {
+          ...category,
+          total,
+        };
+      })
+      .filter((category) => category.total > 0 || category.target_amount > 0)
+      .sort((a, b) => b.total - a.total);
+  }, [expenseCategories, filteredTransactions, preferences]);
 
   const filteredAllTransactions = useMemo(() => 
     expenseMode === "all" 
       ? allTransactions 
-      : allTransactions.filter(t => !SAVINGS_CATEGORIES.includes(t.category_name))
-  , [allTransactions, expenseMode]);
+      : allTransactions.filter(t => !coreExcluded.includes(t.category_name))
+  , [allTransactions, expenseMode, coreExcluded]);
 
   // Historical Comparison Logic
   const comparisonResult = useMemo(() => {
@@ -188,10 +219,10 @@ export const Analysis: React.FC<AnalysisProps> = ({
     const data = categories.map(cat => {
       const current = currentTransactions
         .filter(t => t.category_id === cat.id)
-        .reduce((acc, t) => acc + t.amount, 0);
+        .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       const previous = prevTransactions
         .filter(t => t.category_id === cat.id)
-        .reduce((acc, t) => acc + t.amount, 0);
+        .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       
       // Prorate current if it's exactly the current month and we are comparing against a full month
       let proratedCurrent = current;
@@ -243,10 +274,10 @@ export const Analysis: React.FC<AnalysisProps> = ({
   }, [comparisonData]);
 
   // Burn Rate Calculation
-  const totalSpend = filteredTransactions.reduce((acc, t) => acc + t.amount, 0);
-  const totalIncome = filteredIncome.reduce((acc, i) => acc + i.amount, 0);
+  const totalSpend = filteredTransactions.reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
+  const totalIncome = filteredIncome.reduce((acc, i) => acc + convertToBaseCurrency(i.amount, i.currency, preferences), 0);
 
-  const activeRange = activeTab === "overview" ? overviewRange : (activeTab === "category" ? categoryRange : (activeTab === "comparison" ? comparisonRange : currentRange));
+  const activeRange = activeTab === "overview" ? overviewRange : comparisonRange;
   const isThisMonth = activeRange.option === "this-month";
   const nowForProjection = new Date();
   const daysInMonth = new Date(nowForProjection.getFullYear(), nowForProjection.getMonth() + 1, 0).getDate();
@@ -285,10 +316,10 @@ export const Analysis: React.FC<AnalysisProps> = ({
       return fallbackMonths.map(month => {
         let spend = filteredAllTransactions
           .filter(t => t.date.startsWith(month))
-          .reduce((acc, t) => acc + t.amount, 0);
+          .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
         let inc = allIncome
           .filter(i => i.date.startsWith(month))
-          .reduce((acc, i) => acc + i.amount, 0);
+          .reduce((acc, i) => acc + convertToBaseCurrency(i.amount, i.currency, preferences), 0);
         
         const isCurrentMonth = month === today.slice(0, 7);
         if (isCurrentMonth) {
@@ -307,10 +338,10 @@ export const Analysis: React.FC<AnalysisProps> = ({
     return months.map(month => {
       let spend = filteredAllTransactions
         .filter(t => t.date.startsWith(month))
-        .reduce((acc, t) => acc + t.amount, 0);
+        .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       let inc = allIncome
         .filter(i => i.date.startsWith(month))
-        .reduce((acc, i) => acc + i.amount, 0);
+        .reduce((acc, i) => acc + convertToBaseCurrency(i.amount, i.currency, preferences), 0);
       
       // Prorate if it's the current month
       const isCurrentMonth = month === today.slice(0, 7);
@@ -342,7 +373,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
     const raw = categories.map(cat => {
       const value = filteredTransactions
         .filter(t => t.category_id === cat.id)
-        .reduce((acc, t) => acc + t.amount, 0);
+        .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       return { name: cat.name, value };
     }).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
 
@@ -356,7 +387,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
 
   const incomePieData = useMemo(() => {
     const bySource = filteredIncome.reduce((acc: any, curr) => {
-      acc[curr.source] = (acc[curr.source] || 0) + curr.amount;
+      acc[curr.source] = (acc[curr.source] || 0) + convertToBaseCurrency(curr.amount, curr.currency, preferences);
       return acc;
     }, {});
 
@@ -412,7 +443,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
           t.date >= categoryRange.start &&
           t.date <= categoryRange.end
         )
-        .reduce((acc, t) => acc + t.amount, 0);
+        .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       return { label: point, actual, target, isDaily };
     });
 
@@ -436,18 +467,11 @@ export const Analysis: React.FC<AnalysisProps> = ({
             Overview
           </button>
           <button 
-            onClick={() => setActiveTab("comparison")}
-            className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "comparison" ? "bg-fintech-accent text-white shadow-lg" : "text-fintech-muted hover:text-white"}`}
+            onClick={() => setActiveTab("deep-dive")}
+            className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "deep-dive" ? "bg-fintech-accent text-white shadow-lg" : "text-fintech-muted hover:text-white"}`}
           >
             <History size={14} />
-            Comparison
-          </button>
-          <button 
-            onClick={() => setActiveTab("category")}
-            className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "category" ? "bg-fintech-accent text-white shadow-lg" : "text-fintech-muted hover:text-white"}`}
-          >
-            <BarChart3 size={14} />
-            Category Trends
+            Deep Dive
           </button>
         </div>
       </div>
@@ -455,19 +479,106 @@ export const Analysis: React.FC<AnalysisProps> = ({
       {activeTab === "overview" ? (
         <>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            {/* Expense Mode Toggle Switch */}
-            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-1.5">
-              <span className={`text-[10px] font-bold uppercase tracking-widest pl-2 transition-colors ${expenseMode === 'all' ? 'text-white' : 'text-fintech-muted'}`}>All</span>
-              <button 
-                onClick={() => setExpenseMode(expenseMode === 'all' ? 'core' : 'all')}
-                className="relative w-10 h-5 bg-white/10 rounded-full transition-colors hover:bg-white/20"
-              >
-                <div className={`absolute top-1 left-1 w-3 h-3 bg-fintech-accent rounded-full transition-all duration-300 shadow-[0_0_8px_rgba(16,185,129,0.5)] ${expenseMode === 'core' ? 'translate-x-5' : ''}`} />
-              </button>
-              <span className={`text-[10px] font-bold uppercase tracking-widest pr-2 transition-colors ${expenseMode === 'core' ? 'text-white' : 'text-fintech-muted'}`}>Core</span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-1.5 relative">
+                <span className={`text-[10px] font-bold uppercase tracking-widest pl-2 transition-colors ${expenseMode === 'all' ? 'text-white' : 'text-fintech-muted'}`}>All</span>
+                <button 
+                  onClick={() => setExpenseMode(expenseMode === 'all' ? 'core' : 'all')}
+                  className="relative w-10 h-5 bg-white/10 rounded-full transition-colors hover:bg-white/20"
+                >
+                  <div className={`absolute top-1 left-1 w-3 h-3 bg-fintech-accent rounded-full transition-all duration-300 shadow-[0_0_8px_rgba(16,185,129,0.5)] ${expenseMode === 'core' ? 'translate-x-5' : ''}`} />
+                </button>
+                <span className={`text-[10px] font-bold uppercase tracking-widest pr-2 transition-colors ${expenseMode === 'core' ? 'text-white' : 'text-fintech-muted'}`}>Core</span>
+                
+                {/* Core Settings Tool */}
+                <button 
+                  onClick={() => setShowCoreFilter(!showCoreFilter)}
+                  className={`p-1.5 ml-1 rounded-lg transition-colors ${showCoreFilter ? 'bg-fintech-accent/20 text-fintech-accent' : 'hover:bg-white/10 text-fintech-muted'}`}
+                  title="Configure Core Exceptions"
+                >
+                  <LayoutGrid size={12} />
+                </button>
+
+                {showCoreFilter && (
+                  <div className="absolute top-full left-0 mt-2 w-64 bg-[#0f1930] border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="p-3 border-b border-white/5 bg-white/5">
+                      <div className="text-xs font-bold text-white">Excluded from Core</div>
+                      <div className="text-[10px] text-fintech-muted">Checked categories are dropped when CORE is active.</div>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto p-2">
+                      {categories.map(c => {
+                        const isExcluded = coreExcluded.includes(c.name);
+                        return (
+                          <label key={c.id} className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isExcluded}
+                              onChange={(e) => {
+                                if (updatePreferences && preferences) {
+                                  const newExcluded = e.target.checked 
+                                    ? [...coreExcluded, c.name]
+                                    : coreExcluded.filter(n => n !== c.name);
+                                  updatePreferences({ ...preferences, coreExcludedCategories: newExcluded });
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-white/20 text-fintech-accent focus:ring-fintech-accent/20 bg-[#121a2d]"
+                            />
+                            <span className="text-xs text-white">{c.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <DateRangeSelector range={overviewRange} onChange={setOverviewRange} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="rounded-xl border border-white/5 bg-[#151f38] p-4">
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Income Categories</div>
+              <div className="text-lg font-bold text-white">
+                {incomeCategoryTotals.length} active category{incomeCategoryTotals.length === 1 ? "" : "ies"}
+              </div>
+              <div className="mt-3 space-y-2">
+                {incomeCategoryTotals.slice(0, 4).map((category) => (
+                  <div key={category.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-sm">
+                    <span className="truncate text-white">{category.name}</span>
+                    <span className="ml-4 shrink-0 text-fintech-accent">
+                      {baseSymbol}{category.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                ))}
+                {incomeCategoryTotals.length === 0 && (
+                  <div className="rounded-lg bg-white/5 px-3 py-3 text-sm text-fintech-muted">
+                    No income categories have activity in this range yet.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/5 bg-[#151f38] p-4">
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Income vs Expense Categories</div>
+              <div className="text-lg font-bold text-white">Group-level comparison</div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-white/5 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fintech-muted">Top Income Group</div>
+                  <div className="mt-1 text-sm font-semibold text-white">{incomeCategoryTotals[0]?.name || "None"}</div>
+                  <div className="mt-1 text-xs text-fintech-accent">
+                    {incomeCategoryTotals[0] ? `${baseSymbol}${incomeCategoryTotals[0].total.toFixed(2)}` : "No data"}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-white/5 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fintech-muted">Top Expense Group</div>
+                  <div className="mt-1 text-sm font-semibold text-white">{expenseCategoryTotals[0]?.name || "None"}</div>
+                  <div className="mt-1 text-xs text-fintech-danger">
+                    {expenseCategoryTotals[0] ? `${baseSymbol}${expenseCategoryTotals[0].total.toFixed(2)}` : "No data"}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Stats Bento Grid */}
@@ -477,7 +588,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
                 <Flame size={14} className="text-orange-500" />
                 <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Daily Burn</span>
               </div>
-              <div className="text-base font-bold text-white">${burnRate.toFixed(0)}</div>
+              <div className="text-base font-bold text-white">{baseSymbol}{burnRate.toFixed(0)}</div>
               <div className="text-[10px] text-fintech-muted mt-1">Average per day</div>
             </div>
             <div className="glass-card rounded-xl border border-white/5 p-4">
@@ -496,10 +607,10 @@ export const Analysis: React.FC<AnalysisProps> = ({
                 <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Inflow</span>
               </div>
               <div className="text-base font-bold text-emerald-500">
-                ${(totalIncome/1000).toFixed(1)}k
+                {baseSymbol}{(totalIncome/1000).toFixed(1)}k
                 {isThisMonth && (
                   <span className="text-[10px] text-emerald-500/60 ml-2">
-                    Proj: ${(projectedIncome/1000).toFixed(1)}k
+                    Proj: {baseSymbol}{(projectedIncome/1000).toFixed(1)}k
                   </span>
                 )}
               </div>
@@ -511,10 +622,10 @@ export const Analysis: React.FC<AnalysisProps> = ({
                 <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Outflow</span>
               </div>
               <div className="text-base font-bold text-fintech-danger">
-                ${(totalSpend/1000).toFixed(1)}k
+                {baseSymbol}{(totalSpend/1000).toFixed(1)}k
                 {isThisMonth && (
                   <span className="text-[10px] text-fintech-danger/60 ml-2">
-                    Proj: ${(projectedSpend/1000).toFixed(1)}k
+                    Proj: {baseSymbol}{(projectedSpend/1000).toFixed(1)}k
                   </span>
                 )}
               </div>
@@ -532,8 +643,8 @@ export const Analysis: React.FC<AnalysisProps> = ({
                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fintech-danger" /> Expense</div>
                 </div>
                 <div className="flex flex-wrap gap-4 text-[10px] font-bold uppercase tracking-widest xl:border-l xl:border-white/10 xl:pl-4">
-                  <div className="text-emerald-400">Avg Inc: <span className="text-white">${Math.round(avgIncome).toLocaleString()}</span></div>
-                  <div className="text-fintech-danger">Avg Exp: <span className="text-white">${Math.round(avgSpend).toLocaleString()}</span></div>
+                  <div className="text-emerald-400">Avg Inc: <span className="text-white">{baseSymbol}{Math.round(avgIncome).toLocaleString()}</span></div>
+                  <div className="text-fintech-danger">Avg Exp: <span className="text-white">{baseSymbol}{Math.round(avgSpend).toLocaleString()}</span></div>
                 </div>
               </div>
             </div>
@@ -558,19 +669,19 @@ export const Analysis: React.FC<AnalysisProps> = ({
                     cursor={{ fill: '#ffffff05' }}
                     contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px", boxShadow: "0 10px 25px rgba(0,0,0,0.5)" }}
                     itemStyle={{ fontSize: "12px" }}
-                    formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
+                    formatter={(value: number) => [`${baseSymbol}${value.toLocaleString()}`, ""]}
                   />
                   <ReferenceLine 
                     y={avgIncome} 
                     stroke="#10b981" 
                     strokeDasharray="3 3" 
-                    label={{ position: 'right', value: `$${Math.round(avgIncome).toLocaleString()}`, fill: '#10b981', fontSize: 10, fontWeight: 'bold' }} 
+                    label={{ position: 'right', value: `${baseSymbol}${Math.round(avgIncome).toLocaleString()}`, fill: '#10b981', fontSize: 10, fontWeight: 'bold' }} 
                   />
                   <ReferenceLine 
                     y={avgSpend} 
                     stroke="#ef4444" 
                     strokeDasharray="3 3" 
-                    label={{ position: 'left', value: `$${Math.round(avgSpend).toLocaleString()}`, fill: '#ef4444', fontSize: 10, fontWeight: 'bold' }} 
+                    label={{ position: 'left', value: `${baseSymbol}${Math.round(avgSpend).toLocaleString()}`, fill: '#ef4444', fontSize: 10, fontWeight: 'bold' }} 
                   />
                   <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20}>
                     {trendData.map((entry, index) => (
@@ -611,7 +722,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
                       </Pie>
                       <Tooltip 
                         contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
-                        formatter={(value: number) => `$${value.toLocaleString()}`}
+                        formatter={(value: number) => `${baseSymbol}${value.toLocaleString()}`}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -654,7 +765,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
                       </Pie>
                       <Tooltip 
                         contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
-                        formatter={(value: number) => `$${value.toLocaleString()}`}
+                        formatter={(value: number) => `${baseSymbol}${value.toLocaleString()}`}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -743,8 +854,8 @@ export const Analysis: React.FC<AnalysisProps> = ({
                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fintech-accent" /> Current</div>
                 </div>
                 <div className="flex flex-wrap gap-4 text-[10px] font-bold uppercase tracking-widest xl:border-l xl:border-white/10 xl:pl-4">
-                  <div className="text-fintech-accent">Avg Cur: <span className="text-white">${Math.round(avgComparisonCurrent).toLocaleString()}</span></div>
-                  <div className="text-white/40">Avg Prev: <span className="text-white">${Math.round(avgComparisonPrev).toLocaleString()}</span></div>
+                  <div className="text-fintech-accent">Avg Cur: <span className="text-white">{baseSymbol}{Math.round(avgComparisonCurrent).toLocaleString()}</span></div>
+                  <div className="text-white/40">Avg Prev: <span className="text-white">{baseSymbol}{Math.round(avgComparisonPrev).toLocaleString()}</span></div>
                 </div>
               </div>
             </div>
@@ -769,19 +880,19 @@ export const Analysis: React.FC<AnalysisProps> = ({
                   <Tooltip 
                     cursor={{ fill: '#ffffff05' }}
                     contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
-                    formatter={(value: number) => `$${value.toLocaleString()}`}
+                    formatter={(value: number) => `${baseSymbol}${value.toLocaleString()}`}
                   />
                   <ReferenceLine 
                     x={avgComparisonCurrent} 
                     stroke="#3b82f6" 
                     strokeDasharray="3 3" 
-                    label={{ position: 'top', value: `$${Math.round(avgComparisonCurrent).toLocaleString()}`, fill: '#3b82f6', fontSize: 10, fontWeight: 'bold' }} 
+                    label={{ position: 'top', value: `${baseSymbol}${Math.round(avgComparisonCurrent).toLocaleString()}`, fill: '#3b82f6', fontSize: 10, fontWeight: 'bold' }} 
                   />
                   <ReferenceLine 
                     x={avgComparisonPrev} 
                     stroke="#ffffff40" 
                     strokeDasharray="3 3" 
-                    label={{ position: 'bottom', value: `$${Math.round(avgComparisonPrev).toLocaleString()}`, fill: '#ffffff40', fontSize: 10, fontWeight: 'bold' }} 
+                    label={{ position: 'bottom', value: `${baseSymbol}${Math.round(avgComparisonPrev).toLocaleString()}`, fill: '#ffffff40', fontSize: 10, fontWeight: 'bold' }} 
                   />
                   <Bar dataKey="previous" fill="#ffffff20" radius={[0, 4, 4, 0]} barSize={12} />
                   <Bar dataKey="current" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={12} />
@@ -810,8 +921,8 @@ export const Analysis: React.FC<AnalysisProps> = ({
                   {comparisonData.map((row) => (
                     <tr key={row.name} className="hover:bg-white/5 transition-colors">
                       <td className="px-6 py-4 text-sm font-medium">{row.name}</td>
-                      <td className="px-6 py-4 text-sm text-right text-fintech-muted">${row.previous.toLocaleString()}</td>
-                      <td className="px-6 py-4 text-sm text-right font-bold">${row.current.toLocaleString()}</td>
+                      <td className="px-6 py-4 text-sm text-right text-fintech-muted">{baseSymbol}{row.previous.toLocaleString()}</td>
+                      <td className="px-6 py-4 text-sm text-right font-bold">{baseSymbol}{row.current.toLocaleString()}</td>
                       <td className={`px-6 py-4 text-sm text-right font-bold ${row.diff > 0 ? "text-fintech-danger" : "text-emerald-500"}`}>
                         <div className="flex items-center justify-end gap-1">
                           {row.diff > 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
@@ -892,15 +1003,15 @@ export const Analysis: React.FC<AnalysisProps> = ({
                   <Tooltip 
                     cursor={{ fill: '#ffffff05' }}
                     contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "12px" }}
-                    formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
+                    formatter={(value: number) => [`${baseSymbol}${value.toLocaleString()}`, ""]}
                   />
                   <ReferenceLine 
                     y={currentTarget} 
                     stroke="#ef4444" 
                     strokeDasharray="3 3" 
                     label={{ 
-                      position: 'right', 
-                      value: 'Target', 
+                      position: 'insideTopRight', 
+                      value: `Target: ${baseSymbol}${currentTarget.toLocaleString()}`, 
                       fill: '#ef4444', 
                       fontSize: 10,
                       fontWeight: 'bold'
@@ -911,8 +1022,8 @@ export const Analysis: React.FC<AnalysisProps> = ({
                     stroke="#10b981" 
                     strokeDasharray="5 5" 
                     label={{ 
-                      position: 'left', 
-                      value: 'Avg', 
+                      position: 'insideTopLeft', 
+                      value: `Avg: ${baseSymbol}${(categoryTrendData[0]?.average || 0).toLocaleString()}`, 
                       fill: '#10b981', 
                       fontSize: 10,
                       fontWeight: 'bold'
@@ -929,13 +1040,13 @@ export const Analysis: React.FC<AnalysisProps> = ({
             <div className="glass-card rounded-xl border border-white/5 p-4">
               <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Avg. Monthly Spend</span>
               <div className="mt-1 text-base font-bold text-white">
-                ${(categoryTrendData.reduce((acc, d) => acc + d.actual, 0) / 12).toFixed(0)}
+                {baseSymbol}{(categoryTrendData.reduce((acc, d) => acc + d.actual, 0) / 12).toFixed(0)}
               </div>
             </div>
             <div className="glass-card rounded-xl border border-white/5 p-4">
               <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Monthly Target</span>
               <div className="mt-1 text-base font-bold text-fintech-accent">
-                ${categories.find(c => c.id === selectedCategoryId)?.target_amount || 0}
+                {baseSymbol}{categories.find(c => c.id === selectedCategoryId)?.target_amount || 0}
               </div>
             </div>
             <div className="glass-card rounded-xl border border-white/5 p-4">

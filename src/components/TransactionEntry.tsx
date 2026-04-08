@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { Category } from "../types";
+import { ExpenseCategory, IncomeCategory } from "../types";
 import { Plus, Search, Calendar, DollarSign, Tag, FileText, User } from "lucide-react";
 import { getTodayStr, formatDisplayDate } from "../utils/dateUtils";
 import { TransactionIcon } from "./TransactionIcon";
 import { useFirebase } from "../contexts/FirebaseContext";
+import { CURRENCIES, getCurrencySymbol } from "../utils/currencyUtils";
 
 const evaluateMath = (input: string): number | null => {
   try {
@@ -34,7 +35,8 @@ const evaluateMath = (input: string): number | null => {
 };
 
 interface TransactionEntryProps {
-  categories: Category[];
+  expenseCategories: ExpenseCategory[];
+  incomeCategories: IncomeCategory[];
   onRefresh: () => void;
   hideHeader?: boolean;
   initialData?: any;
@@ -42,29 +44,32 @@ interface TransactionEntryProps {
 }
 
 export const TransactionEntry: React.FC<TransactionEntryProps> = ({ 
-  categories, 
+  expenseCategories,
+  incomeCategories,
   onRefresh,
   hideHeader = false,
   initialData,
   onClose
 }) => {
-  const { transactions, income, addTransaction, updateTransaction, deleteTransaction, addIncome, updateIncome, deleteIncome } = useFirebase();
+  const { transactions, income, addTransaction, updateTransaction, deleteTransaction, addIncome, updateIncome, deleteIncome, preferences } = useFirebase();
   const [type, setType] = useState<"expense" | "income">(initialData?.type || "expense");
   const [date, setDate] = useState(initialData?.date || getTodayStr());
   const [vendor, setVendor] = useState(initialData?.vendor || initialData?.source || "");
   const [amount, setAmount] = useState(initialData?.amount?.toString() || "");
+  const [currency, setCurrency] = useState(initialData?.currency || preferences?.baseCurrency || "CAD");
   const [isAmountFocused, setIsAmountFocused] = useState(false);
   const [categoryId, setCategoryId] = useState(initialData?.category_id?.toString() || "");
   const [notes, setNotes] = useState(initialData?.notes || "");
   const [search, setSearch] = useState(initialData?.category_name || initialData?.category || "");
-  const [incomeCategory, setIncomeCategory] = useState(initialData?.category || "Job");
+  const [incomeCategoryId, setIncomeCategoryId] = useState(initialData?.category_id?.toString() || "");
+  const [incomeCategory, setIncomeCategory] = useState(initialData?.category || incomeCategories[0]?.name || "Job");
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const [isFocused, setIsFocused] = useState(false);
   const [isVendorFocused, setIsVendorFocused] = useState(false);
 
-  const filteredCategories = categories.filter(c => 
+  const filteredCategories = expenseCategories.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -88,6 +93,7 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
         date,
         vendor,
         amount: finalAmount,
+        currency,
         category_id: categoryId,
         category_name: search,
         notes
@@ -95,6 +101,8 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
         date,
         source: vendor,
         amount: finalAmount,
+        currency,
+        category_id: incomeCategoryId,
         category: incomeCategory,
         notes
       };
@@ -117,8 +125,11 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
         // Reset form only if adding new
         setVendor("");
         setAmount("");
+        setCurrency(preferences?.baseCurrency || "CAD");
         setCategoryId("");
         setSearch("");
+        setIncomeCategoryId("");
+        setIncomeCategory(incomeCategories[0]?.name || "Job");
         setNotes("");
       }
       
@@ -254,29 +265,43 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
           {/* Amount */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest flex items-center gap-2">
-              <DollarSign size={12} /> Amount (CAD)
+              <DollarSign size={12} /> Amount
             </label>
-            <div className="relative">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={isAmountFocused ? amount : (calculatedAmount !== null ? calculatedAmount.toString() : amount)}
-                onChange={(e) => setAmount(e.target.value)}
-                onFocus={() => setIsAmountFocused(true)}
-                onBlur={() => setIsAmountFocused(false)}
-                placeholder="0.00 or =100+20"
-                className="w-full text-lg font-bold"
-                required
-              />
-              {isAmountFocused && amount && (
-                <div className="absolute -bottom-5 left-1 text-[10px] font-bold animate-in fade-in slide-in-from-top-1">
-                  {calculatedAmount !== null && amount.toString() !== calculatedAmount.toString() ? (
-                    <span className="text-fintech-accent">= {calculatedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  ) : calculatedAmount === null ? (
-                    <span className="text-fintech-danger">Invalid calculation</span>
-                  ) : null}
-                </div>
-              )}
+            <div className="flex gap-2 relative">
+              <select 
+                value={currency} 
+                onChange={(e) => setCurrency(e.target.value)}
+                className="w-24 text-sm font-bold bg-white/5 border border-white/10 rounded-xl px-3"
+              >
+                {CURRENCIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.code}</option>
+                ))}
+              </select>
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={isAmountFocused ? amount : (calculatedAmount !== null ? calculatedAmount.toString() : amount)}
+                  onChange={(e) => setAmount(e.target.value)}
+                  onFocus={() => setIsAmountFocused(true)}
+                  onBlur={() => setIsAmountFocused(false)}
+                  placeholder="0.00 or =100+20"
+                  className="w-full text-lg font-bold pl-8"
+                  required
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fintech-muted font-bold">
+                  {getCurrencySymbol(currency)}
+                </span>
+                {isAmountFocused && amount && (
+                  <div className="absolute -bottom-5 left-1 text-[10px] font-bold animate-in fade-in slide-in-from-top-1">
+                    {calculatedAmount !== null && amount.toString() !== calculatedAmount.toString() ? (
+                      <span className="text-fintech-accent">= {calculatedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    ) : calculatedAmount === null ? (
+                      <span className="text-fintech-danger">Invalid calculation</span>
+                    ) : null}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -343,17 +368,20 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
                 <Tag size={12} /> Income Category
               </label>
               <select
-                value={incomeCategory}
-                onChange={(e) => setIncomeCategory(e.target.value)}
+                value={incomeCategoryId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  const nextCategory = incomeCategories.find((item) => item.id === nextId);
+                  setIncomeCategoryId(nextId);
+                  setIncomeCategory(nextCategory?.name || "");
+                }}
                 className="w-full"
                 required
               >
-                <option value="Card Refunds">Card Refunds</option>
-                <option value="Expense reimbursement">Expense reimbursement</option>
-                <option value="Job">Job</option>
-                <option value="Other">Other</option>
-                <option value="Side project">Side project</option>
-                <option value="Tax refund">Tax refund</option>
+                <option value="" disabled>Select income category</option>
+                {incomeCategories.map((item) => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
               </select>
             </div>
           )}

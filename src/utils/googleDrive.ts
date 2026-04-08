@@ -1,4 +1,4 @@
-import { DriveConnection, GoogleSheetsSyncConfig, Income, Transaction, Category } from "../types";
+import { DriveConnection, GoogleSheetsSyncConfig, Income, Transaction, ExpenseCategory, IncomeCategory } from "../types";
 
 const GOOGLE_DRIVE_API = "https://www.googleapis.com/drive/v3";
 const GOOGLE_DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files";
@@ -8,7 +8,9 @@ const DEFAULT_BUDGET_FILE_NAME = "budget.json";
 export interface BudgetDataFile {
   version: number;
   exportedAt: string;
-  categories: Category[];
+  categories?: ExpenseCategory[];
+  expenseCategories: ExpenseCategory[];
+  incomeCategories: IncomeCategory[];
   transactions: Transaction[];
   income: Income[];
   googleSheetsConfig: GoogleSheetsSyncConfig | null;
@@ -60,14 +62,16 @@ export const parseDriveFolderId = (input: string) => {
 };
 
 export const createBudgetDataFile = (
-  categories: Category[],
+  expenseCategories: ExpenseCategory[],
+  incomeCategories: IncomeCategory[],
   transactions: Transaction[],
   income: Income[],
   googleSheetsConfig: GoogleSheetsSyncConfig | null
 ): BudgetDataFile => ({
-  version: 1,
+  version: 2,
   exportedAt: new Date().toISOString(),
-  categories,
+  expenseCategories,
+  incomeCategories,
   transactions,
   income,
   googleSheetsConfig,
@@ -75,12 +79,29 @@ export const createBudgetDataFile = (
 
 export const parseBudgetDataFile = (raw: string): BudgetDataFile => {
   const parsed = JSON.parse(raw) as Partial<BudgetDataFile>;
+  const legacyExpenseCategories = Array.isArray(parsed.categories) ? parsed.categories : [];
+  const expenseCategories = Array.isArray(parsed.expenseCategories)
+    ? parsed.expenseCategories
+    : legacyExpenseCategories;
+  const income = Array.isArray(parsed.income) ? parsed.income : [];
+  const incomeCategories = Array.isArray(parsed.incomeCategories)
+    ? parsed.incomeCategories
+    : Array.from(new Set(income.map((item) => item.category).filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b))
+        .map((name) => ({
+          id: crypto.randomUUID(),
+          name,
+          target_amount: 0,
+        }));
+
   return {
-    version: typeof parsed.version === "number" ? parsed.version : 1,
+    version: typeof parsed.version === "number" ? parsed.version : 2,
     exportedAt: typeof parsed.exportedAt === "string" ? parsed.exportedAt : new Date().toISOString(),
-    categories: Array.isArray(parsed.categories) ? parsed.categories : [],
+    categories: legacyExpenseCategories,
+    expenseCategories,
+    incomeCategories,
     transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
-    income: Array.isArray(parsed.income) ? parsed.income : [],
+    income,
     googleSheetsConfig: parsed.googleSheetsConfig || null,
   };
 };
