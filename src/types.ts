@@ -48,6 +48,7 @@ export interface Preferences {
 }
 
 export type View = "dashboard" | "transactions" | "analysis" | "settings";
+export type Theme = "dark" | "light";
 
 export type DateRangeOption = "this-month" | "last-month" | "last-3-months" | "last-6-months" | "ytd" | "last-12-months" | "custom";
 
@@ -117,17 +118,26 @@ export interface DriveConnection {
 
 export type PublicSheetImportMapping = Record<string, string>;
 
-export interface PublicSheetImportColumnSelection {
+export interface PublicSheetImportCellCoordinate {
   rowIndex: number;
   columnIndex: number;
-  headerLabel: string;
+  cellRef: string;
+  displayValue: string;
+}
+
+export interface PublicSheetImportRangeSelection {
+  start: PublicSheetImportCellCoordinate;
+  end: PublicSheetImportCellCoordinate;
+  extendToSheetEnd?: boolean;
 }
 
 export interface PublicSheetImportConfig {
+  sheetTabName: string;
+  mapping: Record<string, PublicSheetImportRangeSelection>;
+  override: boolean;
+}
+
+export interface PublicSheetImportSharedConfig {
   sheetUrl: string;
   spreadsheetId?: string;
-  sheetTabName: string;
-  headerRowIndex?: number;
-  mapping: Record<string, PublicSheetImportColumnSelection>;
-  override: boolean;
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getTodayStr } from "../utils/dateUtils";
-import { 
+import {
   Download, 
   Upload, 
   Trash2, 
@@ -12,7 +12,6 @@ import {
   ChevronRight, 
   X,
   Share,
-  TrendingUp,
   Cloud,
   Users,
   UserPlus,
@@ -40,7 +39,7 @@ interface DataDomain {
   title: string;
   description: string;
   icon: React.ReactNode;
-  type: "expenseCategories" | "incomeCategories" | "income" | "expenses" | "investments";
+  type: "expenseCategories" | "incomeCategories" | "income" | "expenses";
   exportType: "expenseCategories" | "incomeCategories" | "income" | "transactions";
 }
 
@@ -143,17 +142,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       id: "income",
       title: "Income Records",
       description: "Historical earnings and source tracking",
-      icon: <TrendingUp size={20} />,
+      icon: <Download size={20} />,
       type: "income",
       exportType: "income"
-    },
-    {
-      id: "investments",
-      title: "Investment Data",
-      description: "Portfolio tracking and asset allocation",
-      icon: <TrendingUp size={20} className="text-fintech-import" />,
-      type: "investments",
-      exportType: "income" // Placeholder
     }
   ];
 
@@ -333,8 +324,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     expenseCategories: () => downloadCSV("expense_categories_template.csv", "Category Name,Monthly Target\nRent,2000\nGroceries,500\nUtilities,150"),
     incomeCategories: () => downloadCSV("income_categories_template.csv", "Category Name,Monthly Target\nSalary,5000\nFreelance,1500\nDividends,250"),
     income: () => downloadCSV("income_template.csv", "Date (MM-DD-YYYY),Source,Amount,Income Category,Notes (Optional)\n04-05-2024,fabric,3667.00,Job,Shubham\n04-08-2024,BMO,350.00,Side project,Account Bonus"),
-    expenses: () => downloadCSV("expenses_template.csv", "Date,Store / Vendor,Amount,Expense Category,Notes (Optional)\n04-01-2024,Chicken World,35.37,Going out food,Chicken World\n04-02-2024,Aurora Fotino,2479.62,Rent,Rent April"),
-    investments: () => alert("Investment template coming soon!")
+    expenses: () => downloadCSV("expenses_template.csv", "Date,Store / Vendor,Amount,Expense Category,Notes (Optional)\n04-01-2024,Chicken World,35.37,Going out food,Chicken World\n04-02-2024,Aurora Fotino,2479.62,Rent,Rent April")
   };
 
   const handleExport = async (type: string) => {
@@ -373,8 +363,6 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       setStatus({ type: "success", message: `${type} imported successfully from sheet (${dataRows.length} records)!` });
       setImportProgress(null);
       setWiping(null);
-      setShowGoogleSheetImporter(false);
-      setActiveDomain(null);
       onRefresh();
     } catch (error: any) {
       console.error("Public GS Import error:", error);
@@ -382,6 +370,11 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       setImportProgress(null);
       setWiping(null);
     }
+  };
+
+  const handleCloseGoogleSheetImporter = () => {
+    setShowGoogleSheetImporter(false);
+    setActiveDomain(null);
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
@@ -496,7 +489,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm"
+        className="w-full rounded-xl border bg-[var(--app-ghost)] px-3 py-2 text-sm"
+        style={{ borderColor: "var(--app-border)" }}
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -516,7 +510,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[120] flex items-center justify-center p-6 bg-fintech-bg/90 backdrop-blur-md"
+            className="fixed inset-0 z-[120] flex items-center justify-center p-6 backdrop-blur-md"
+            style={{ backgroundColor: "var(--app-overlay)" }}
           >
             <div className="w-full space-y-6 text-center">
               <div className="w-20 h-20 rounded-full bg-fintech-accent/10 flex items-center justify-center mx-auto relative">
@@ -534,7 +529,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                   Processing line {importProgress.current} of {importProgress.total}
                 </p>
               </div>
-              <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--app-ghost)]">
                 <motion.div 
                   className="h-full bg-fintech-accent"
                   initial={{ width: 0 }}
@@ -555,13 +550,15 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-fintech-bg/80 backdrop-blur-sm"
+            className="fixed inset-0 z-[110] flex items-center justify-center p-6 backdrop-blur-sm"
+            style={{ backgroundColor: "var(--app-overlay)" }}
           >
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="glass-card p-8 rounded-3xl max-w-xs w-full space-y-6 shadow-2xl border border-white/10"
+              className="glass-card max-w-xs w-full space-y-6 rounded-3xl border p-8 shadow-2xl"
+              style={{ borderColor: "var(--app-border)" }}
             >
               <div className="space-y-2 text-center">
                 <div className="w-12 h-12 rounded-full bg-fintech-danger/10 text-fintech-danger flex items-center justify-center mx-auto mb-4">
@@ -569,7 +566,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 </div>
                 <h3 className="text-lg font-bold">Are you sure?</h3>
                 <p className="text-xs text-fintech-muted leading-relaxed">
-                  You are about to delete <span className="text-white font-bold">{confirmWipe}</span>. This action cannot be undone.
+                  You are about to delete <span className="text-[var(--app-text)] font-bold">{confirmWipe}</span>. This action cannot be undone.
                 </p>
               </div>
               <div className="flex flex-col gap-3">
@@ -582,7 +579,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 </button>
                 <button
                   onClick={() => setConfirmWipe(null)}
-                  className="w-full py-3 bg-white/5 text-fintech-text font-bold rounded-xl hover:bg-white/10 transition-colors"
+                  className="w-full rounded-xl bg-[var(--app-ghost)] py-3 font-bold text-fintech-text transition-colors hover:bg-[var(--app-ghost-strong)]"
                 >
                   Cancel
                 </button>
@@ -599,16 +596,18 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setActiveDomain(null)}
-              className="fixed inset-0 z-[100] bg-fintech-bg/60 backdrop-blur-sm"
+              className="fixed inset-0 z-[100] backdrop-blur-sm"
+              style={{ backgroundColor: "var(--app-overlay)" }}
             />
             <motion.div 
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed bottom-0 left-0 right-0 z-[101] mx-auto w-full max-w-2xl rounded-t-[40px] border-t border-white/5 bg-fintech-card p-8 pb-12 shadow-2xl"
+              className="fixed bottom-0 left-0 right-0 z-[101] mx-auto w-full max-w-2xl rounded-t-[40px] border-t bg-fintech-card p-8 pb-12 shadow-2xl"
+              style={{ borderColor: "var(--app-border)" }}
             >
-              <div className="w-12 h-1.5 bg-white/10 rounded-full mx-auto mb-8" />
+              <div className="mx-auto mb-8 h-1.5 w-12 rounded-full bg-[var(--app-ghost-strong)]" />
               
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-4">
@@ -622,7 +621,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 </div>
                 <button 
                   onClick={() => setActiveDomain(null)}
-                  className="p-2 hover:bg-white/5 rounded-full transition-colors"
+                  className="rounded-full p-2 transition-colors hover:bg-[var(--app-ghost)]"
                 >
                   <X size={24} className="text-fintech-muted" />
                 </button>
@@ -631,17 +630,17 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
               <div className="space-y-4">
                 <button
                   onClick={templates[activeDomain.type as keyof typeof templates]}
-                  className="w-full flex items-center justify-between p-5 bg-white/5 rounded-2xl hover:bg-white/10 transition-all group"
+                  className="group flex w-full items-center justify-between rounded-2xl bg-[var(--app-ghost)] p-5 transition-all hover:bg-[var(--app-ghost-strong)]"
                 >
                   <div className="flex items-center gap-4">
-                    <Download size={24} className="text-fintech-muted group-hover:text-white transition-colors" />
+                    <Download size={24} className="text-fintech-muted transition-colors group-hover:text-[var(--app-text)]" />
                     <span className="font-bold">Download Template</span>
                   </div>
                   <ChevronRight size={20} className="text-fintech-muted" />
                 </button>
 
-                <div className="bg-white/5 rounded-2xl overflow-hidden">
-                  <label className="w-full flex items-center justify-between p-5 hover:bg-fintech-import/10 transition-all group cursor-pointer border-b border-white/5">
+                <div className="overflow-hidden rounded-2xl bg-[var(--app-ghost)]">
+                  <label className="group flex w-full cursor-pointer items-center justify-between border-b p-5 transition-all hover:bg-fintech-import/10" style={{ borderColor: "var(--app-border)" }}>
                     <div className="flex items-center gap-4">
                       <Upload size={24} className="text-fintech-import" />
                       <span className="font-bold text-fintech-import">Import CSV</span>
@@ -661,13 +660,14 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                   </label>
                   
                   {activeDomain.type !== "expenseCategories" && activeDomain.type !== "incomeCategories" && (
-                    <label className="flex items-center gap-3 p-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-white/5">
+                    <label className="flex cursor-pointer items-center gap-3 border-b p-4 transition-colors hover:bg-[var(--app-ghost)]" style={{ borderColor: "var(--app-border)" }}>
                       <div className="relative flex items-center">
                         <input 
                           type="checkbox" 
                           checked={isUpsert}
                           onChange={(e) => setIsUpsert(e.target.checked)}
-                          className="w-5 h-5 appearance-none border-2 border-white/20 rounded-md checked:bg-fintech-import checked:border-fintech-import transition-colors"
+                          className="h-5 w-5 appearance-none rounded-md border-2 checked:border-fintech-import checked:bg-fintech-import transition-colors"
+                          style={{ borderColor: "var(--app-border)" }}
                         />
                         {isUpsert && <CheckCircle2 size={14} className="absolute inset-0 m-auto text-white pointer-events-none" />}
                       </div>
@@ -685,8 +685,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                     <div className="flex items-center gap-4">
                       <Link2 size={24} className="text-fintech-import" />
                       <div className="flex flex-col text-left">
-                         <span className="font-bold text-fintech-import">Import from Google Sheet</span>
-                         <span className="text-[10px] text-fintech-muted">Auto-map formats from public links</span>
+                         <span className="font-bold text-fintech-import">Import from Shared Google Sheet</span>
+                         <span className="text-[10px] text-fintech-muted">Use one spreadsheet, then choose tabs and ranges per import type</span>
                       </div>
                     </div>
                     <ChevronRight size={20} className="text-fintech-import" />
@@ -695,7 +695,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
 
                 <button
                   onClick={() => handleExport(activeDomain.exportType)}
-                  className="w-full flex items-center justify-between p-5 bg-white/5 rounded-2xl hover:bg-fintech-accent/10 transition-all group"
+                  className="group flex w-full items-center justify-between rounded-2xl bg-[var(--app-ghost)] p-5 transition-all hover:bg-fintech-accent/10"
                 >
                   <div className="flex items-center gap-4">
                     <Share size={24} className="text-fintech-accent" />
@@ -709,7 +709,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 {showGoogleSheetImporter && (
                   <GoogleSheetImporter
                     initialType={activeDomain.type as any}
-                    onClose={() => setShowGoogleSheetImporter(false)}
+                    onClose={handleCloseGoogleSheetImporter}
                     onImport={handleGoogleSheetImport}
                   />
                 )}
@@ -734,31 +734,31 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       )}
 
       {/* Tabs Navigation */}
-      <div className="flex w-fit flex-wrap gap-2 rounded-xl border border-white/10 bg-white/5 p-1">
+      <div className="flex w-fit flex-wrap gap-2 rounded-xl border bg-[var(--app-ghost)] p-1" style={{ borderColor: "var(--app-border)" }}>
         <button 
           onClick={() => setActiveTab("data")}
-          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "data" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-white"}`}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "data" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-[var(--app-text)]"}`}
         >
           <Database size={14} />
           Data Hub
         </button>
         <button 
           onClick={() => setActiveTab("currency")}
-          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "currency" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-white"}`}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "currency" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-[var(--app-text)]"}`}
         >
           <Globe size={14} />
           Currency
         </button>
         <button 
           onClick={() => setActiveTab("cloud")}
-          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "cloud" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-white"}`}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "cloud" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-[var(--app-text)]"}`}
         >
           <Cloud size={14} />
           Cloud Sync
         </button>
         <button 
           onClick={() => setActiveTab("maintenance")}
-          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-white"}`}
+          className={`flex items-center gap-2 rounded-lg px-5 py-2 text-xs font-bold transition-all ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919] shadow-lg" : "text-fintech-muted hover:text-[var(--app-text)]"}`}
         >
           <SettingsIcon size={14} />
           Maintenance
@@ -778,10 +778,11 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
             <button
               key={domain.id}
               onClick={() => setActiveDomain(domain)}
-              className="w-full flex items-center justify-between rounded-xl border border-transparent bg-[#0f1930] p-5 text-left transition-all group hover:border-fintech-accent/20 hover:bg-[#1f2b49]"
+              className="group flex w-full items-center justify-between rounded-xl border p-5 text-left transition-all hover:border-fintech-accent/20 hover:bg-[var(--app-hover)]"
+              style={{ borderColor: "var(--app-border)", backgroundColor: "var(--app-panel)" }}
             >
               <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#192540] text-fintech-accent group-hover:scale-105 transition-transform">
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[var(--app-panel-strong)] text-fintech-accent transition-transform group-hover:scale-105">
                   {domain.icon}
                 </div>
                 <div>
@@ -799,7 +800,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       {/* Currency Tab */}
       {activeTab === "currency" && (
         <section className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-          <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 space-y-6">
+          <div className="rounded-xl border bg-[var(--app-panel)] p-6 space-y-6" style={{ borderColor: "var(--app-border)" }}>
             <h3 className="text-base font-bold flex items-center gap-2">
               <Globe size={20} className="text-fintech-accent" /> Currency Configuration
             </h3>
@@ -819,17 +820,18 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                       setStatus({ type: "success", message: "Base currency updated." });
                     }
                   }}
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold focus:outline-none focus:border-fintech-accent"
+                  className="w-full rounded-xl border bg-[var(--app-ghost)] px-4 py-3 text-sm font-bold focus:border-fintech-accent focus:outline-none"
+                  style={{ borderColor: "var(--app-border)" }}
                 >
                   {CURRENCIES.map(c => (
-                    <option key={c.code} value={c.code} className="bg-[#192540]">
+                    <option key={c.code} value={c.code} className="bg-[var(--app-panel)]">
                       {c.code} - {c.name} ({c.symbol})
                     </option>
                   ))}
                 </select>
               </label>
 
-              <div className="space-y-4 pt-4 border-t border-white/10">
+              <div className="space-y-4 border-t pt-4" style={{ borderColor: "var(--app-border)" }}>
                 <h4 className="text-sm font-bold flex justify-between items-center">
                   Exchange Rates (to {preferences?.baseCurrency || "CAD"})
                   <button 
@@ -847,13 +849,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 </h4>
                 
                 {(!preferences?.exchangeRates || preferences.exchangeRates.length === 0) ? (
-                  <div className="text-xs text-fintech-muted italic p-4 bg-white/5 rounded-xl border border-white/5 text-center">
+                  <div className="rounded-xl border bg-[var(--app-ghost)] p-4 text-center text-xs italic text-fintech-muted" style={{ borderColor: "var(--app-border)" }}>
                     No custom exchange rates defined. Transactions in other currencies will assume a 1:1 ratio.
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {preferences.exchangeRates.map((rate, index) => (
-                      <div key={index} className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10">
+                      <div key={index} className="flex items-center gap-3 rounded-xl border bg-[var(--app-ghost)] p-3" style={{ borderColor: "var(--app-border)" }}>
                         <select
                           value={rate.currency}
                           onChange={(e) => {
@@ -863,7 +865,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                               updatePreferences({ ...preferences, exchangeRates: newRates });
                             }
                           }}
-                          className="bg-[#192540] border border-white/10 rounded-lg px-3 py-2 text-sm font-bold w-32"
+                          className="w-32 rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm font-bold"
+                          style={{ borderColor: "var(--app-border)" }}
                         >
                           {CURRENCIES.filter(c => c.code !== preferences?.baseCurrency).map(c => (
                             <option key={c.code} value={c.code}>{c.code}</option>
@@ -883,7 +886,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                                 updatePreferences({ ...preferences, exchangeRates: newRates });
                               }
                             }}
-                            className="flex-1 bg-[#192540] border border-white/10 rounded-lg px-3 py-2 text-sm"
+                            className="flex-1 rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm"
+                            style={{ borderColor: "var(--app-border)" }}
                             placeholder="Rate"
                           />
                           <span className="text-xs font-bold text-fintech-muted uppercase w-12">{preferences?.baseCurrency || "CAD"}</span>
@@ -919,9 +923,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
             <h3 className="text-base font-bold flex items-center gap-2">
               <Cloud size={20} className="text-fintech-accent" /> Private Drive Vault
         </h3>
-        <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 space-y-6">
+        <div className="rounded-xl border bg-[var(--app-panel)] p-6 space-y-6" style={{ borderColor: "var(--app-border)" }}>
           <p className="text-xs text-fintech-muted leading-relaxed">
-            Your budget stays local-first and syncs to a <span className="font-semibold text-white">VibeBudget</span> folder in your own Google Drive. The app no longer treats Firestore as the source of truth for your budget data.
+            Your budget stays local-first and syncs to a <span className="font-semibold text-[var(--app-text)]">VibeBudget</span> folder in your own Google Drive. The app no longer treats Firestore as the source of truth for your budget data.
           </p>
 
           <div className="space-y-4">
@@ -931,7 +935,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 placeholder="Optional: existing Drive folder URL or folder ID"
                 value={folderInput}
                 onChange={(e) => setFolderInput(e.target.value)}
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-fintech-accent/20 transition-all"
+                className="w-full rounded-2xl border bg-[var(--app-ghost)] px-4 py-3 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-fintech-accent/20"
+                style={{ borderColor: "var(--app-border)" }}
               />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -948,23 +953,23 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 type="button"
                 onClick={loadBudgetFromDrive}
                 disabled={!driveConnected || isSyncing}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-white/5 rounded-2xl font-bold hover:bg-white/10 transition-all disabled:opacity-50 text-sm"
+                className="w-full rounded-2xl bg-[var(--app-ghost)] py-3 text-sm font-bold transition-all hover:bg-[var(--app-ghost-strong)] disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isSyncing ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Download size={18} />}
                 <span>Load budget.json</span>
               </button>
             </div>
 
-            <div className="space-y-3 rounded-xl border border-white/5 bg-[#121a2d] p-4">
+            <div className="space-y-3 rounded-xl border bg-[var(--app-panel-muted)] p-4" style={{ borderColor: "var(--app-border)" }}>
               <div className="flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-white">Drive Status</h4>
-                <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${driveConnected ? "bg-fintech-accent/10 text-fintech-accent" : "bg-white/5 text-fintech-muted"}`}>
+                <h4 className="text-sm font-semibold text-[var(--app-text)]">Drive Status</h4>
+                <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${driveConnected ? "bg-fintech-accent/10 text-fintech-accent" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>
                   {driveConnected ? "Connected" : "Local Only"}
                 </span>
               </div>
               <div className="space-y-1 text-xs text-fintech-muted">
-                <p>Folder: <span className="text-white">{driveConnection?.folderName || "Not connected"}</span></p>
-                <p>Budget File: <span className="text-white">{driveConnection?.budgetFileName || "budget.json"}</span></p>
+                <p>Folder: <span className="text-[var(--app-text)]">{driveConnection?.folderName || "Not connected"}</span></p>
+                <p>Budget File: <span className="text-[var(--app-text)]">{driveConnection?.budgetFileName || "budget.json"}</span></p>
                 {driveConnection?.folderUrl && (
                   <p>
                     Drive Folder: <a className="text-fintech-accent hover:underline" href={driveConnection.folderUrl} target="_blank" rel="noreferrer">Open in Google Drive</a>
@@ -990,9 +995,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         <h3 className="text-base font-bold flex items-center gap-2">
           <Link2 size={20} className="text-fintech-accent" /> Google Sheets Sync
         </h3>
-        <div className="rounded-2xl border border-white/5 bg-[#0f1930] p-6 space-y-5">
+        <div className="rounded-2xl border bg-[var(--app-panel)] p-6 space-y-5" style={{ borderColor: "var(--app-border)" }}>
           <p className="text-xs text-fintech-muted leading-relaxed">
-            Optionally connect a spreadsheet from your Drive workspace. Your canonical data still lives in local state plus <span className="font-semibold text-white">budget.json</span>, and Sheets acts as a user-controlled mirror/edit surface.
+            Optionally connect a spreadsheet from your Drive workspace. Your canonical data still lives in local state plus <span className="font-semibold text-[var(--app-text)]">budget.json</span>, and Sheets acts as a user-controlled mirror/edit surface.
           </p>
 
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -1011,7 +1016,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
             </button>
             <button
               onClick={disconnectGoogleSheets}
-              className="rounded-xl bg-white/5 px-4 py-3 text-sm font-bold hover:bg-white/10 transition-colors"
+              className="rounded-xl bg-[var(--app-ghost)] px-4 py-3 text-sm font-bold transition-colors hover:bg-[var(--app-ghost-strong)]"
               disabled={!googleSheetsConnected}
             >
               Disconnect
@@ -1027,7 +1032,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 value={sheetUrl}
                 onChange={(e) => setSheetUrl(e.target.value)}
                 placeholder="https://docs.google.com/spreadsheets/d/..."
-                className="w-full rounded-lg border border-white/10 bg-[#192540] px-4 py-3 text-sm"
+                className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-4 py-3 text-sm"
+                style={{ borderColor: "var(--app-border)" }}
               />
             </label>
 
@@ -1038,7 +1044,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                   type="text"
                   value={expensesSheetName}
                   onChange={(e) => setExpensesSheetName(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-[#192540] px-3 py-2 text-sm"
+                  className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm"
+                  style={{ borderColor: "var(--app-border)" }}
                 />
               </label>
               <label className="space-y-1 block">
@@ -1047,7 +1054,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                   type="text"
                   value={incomeSheetName}
                   onChange={(e) => setIncomeSheetName(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-[#192540] px-3 py-2 text-sm"
+                  className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm"
+                  style={{ borderColor: "var(--app-border)" }}
                 />
               </label>
             </div>
@@ -1056,7 +1064,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
               <button
                 onClick={handleInspectGoogleSheet}
                 disabled={!googleSheetsConnected || loadingSheetConfig}
-                className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-white/5 py-3 font-bold hover:bg-white/10 transition-colors disabled:opacity-50"
+                className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--app-ghost)] py-3 font-bold transition-colors hover:bg-[var(--app-ghost-strong)] disabled:opacity-50"
               >
                 {loadingSheetConfig ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <RefreshCw size={16} />}
                 <span>{loadingSheetConfig ? "Loading..." : "Load Columns"}</span>
@@ -1073,7 +1081,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
           </div>
 
           {(expenseHeaders.length > 0 || incomeHeaders.length > 0 || googleSheetsConfig) && (
-            <div className="space-y-5 pt-2 border-t border-white/10">
+            <div className="space-y-5 border-t pt-2" style={{ borderColor: "var(--app-border)" }}>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="font-bold">Expenses Mapping</h4>
@@ -1109,7 +1117,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                     min="15"
                     value={syncIntervalSeconds}
                     onChange={(e) => setSyncIntervalSeconds(e.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-[#192540] px-3 py-2 text-sm"
+                    className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm"
+                    style={{ borderColor: "var(--app-border)" }}
                   />
                 </label>
                 <label className="flex items-end gap-3 pb-2">
@@ -1149,13 +1158,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         <h3 className="text-base font-bold flex items-center gap-2">
           <Cloud size={20} className="text-fintech-accent" /> Local + Drive Sync
         </h3>
-        <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 space-y-4">
+        <div className="rounded-xl border bg-[var(--app-panel)] p-6 space-y-4" style={{ borderColor: "var(--app-border)" }}>
           <div className="flex items-center justify-between">
             <p className="text-xs text-fintech-muted leading-relaxed">
-              Save your latest budget into your own Drive folder as <span className="font-semibold text-white">budget.json</span>, or reload it from Drive on this device.
+              Save your latest budget into your own Drive folder as <span className="font-semibold text-[var(--app-text)]">budget.json</span>, or reload it from Drive on this device.
             </p>
             {lastSynced && (
-              <span className="text-[10px] font-medium text-fintech-muted bg-white/5 px-2 py-1 rounded-lg">
+              <span className="rounded-lg bg-[var(--app-ghost)] px-2 py-1 text-[10px] font-medium text-fintech-muted">
                 Last synced: {lastSynced.toLocaleString()}
               </span>
             )}
@@ -1184,16 +1193,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
             <button
               onClick={syncToCloud}
               disabled={isSyncing}
-              className="w-full flex items-center justify-between p-5 bg-white/5 rounded-2xl hover:bg-white/10 transition-all group disabled:opacity-50"
+              className="group flex w-full items-center justify-between rounded-2xl bg-[var(--app-ghost)] p-5 transition-all hover:bg-[var(--app-ghost-strong)] disabled:opacity-50"
             >
               <div className="flex items-center gap-4">
                 {isSyncing ? (
                   <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  <RefreshCw size={24} className="text-white" />
+                  <RefreshCw size={24} className="text-[var(--app-text)]" />
                 )}
                 <div className="text-left">
-                  <span className="block font-bold text-white">
+                  <span className="block font-bold text-[var(--app-text)]">
                     {isSyncing ? "Loading..." : "Reload from Drive"}
                   </span>
                   <span className="block text-[10px] text-fintech-muted">Read budget.json from your Drive folder</span>
@@ -1214,12 +1223,12 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
               }}
-              className="w-full flex items-center justify-between p-5 bg-white/5 rounded-2xl hover:bg-white/10 transition-all group"
+              className="group flex w-full items-center justify-between rounded-2xl bg-[var(--app-ghost)] p-5 transition-all hover:bg-[var(--app-ghost-strong)]"
             >
               <div className="flex items-center gap-4">
-                <Download size={24} className="text-white" />
+                <Download size={24} className="text-[var(--app-text)]" />
                 <div className="text-left">
-                  <span className="block font-bold text-white">Download Local JSON</span>
+                  <span className="block font-bold text-[var(--app-text)]">Download Local JSON</span>
                   <span className="block text-[10px] text-fintech-muted">Save a device backup</span>
                 </div>
               </div>
@@ -1234,8 +1243,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       {activeTab === "maintenance" && (
       <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
       <section className="grid gap-4 xl:grid-cols-2">
-        <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 flex items-center gap-5">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[#214b58] bg-[#122836] text-fintech-accent">
+        <div className="flex items-center gap-5 rounded-xl border bg-[var(--app-panel)] p-6" style={{ borderColor: "var(--app-border)" }}>
+          <div className="flex h-14 w-14 items-center justify-center rounded-full border bg-[var(--app-panel-strong)] text-fintech-accent" style={{ borderColor: "var(--app-border-strong)" }}>
             <Shield size={24} />
           </div>
           <div>
@@ -1243,8 +1252,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
             <div className="mt-1 text-xs text-fintech-muted">Your data is locked tight.</div>
           </div>
         </div>
-        <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 flex items-center gap-5">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full border border-[#244c62] bg-[#12283a] text-[#78d8ff]">
+        <div className="flex items-center gap-5 rounded-xl border bg-[var(--app-panel)] p-6" style={{ borderColor: "var(--app-border)" }}>
+          <div className="flex h-14 w-14 items-center justify-center rounded-full border bg-[var(--app-panel-strong)] text-[#78d8ff]" style={{ borderColor: "var(--app-border-strong)" }}>
             <CloudDownload size={24} />
           </div>
           <div>
@@ -1256,7 +1265,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
 
       <section className="space-y-4">
         <h3 className="text-base font-bold">Maintenance</h3>
-        <div className="rounded-xl border border-white/5 bg-[#0f1930] p-6 space-y-4">
+        <div className="rounded-xl border bg-[var(--app-panel)] p-6 space-y-4" style={{ borderColor: "var(--app-border)" }}>
           <p className="text-xs text-fintech-muted mb-4">Selectively wipe your local data. Use with caution.</p>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1270,7 +1279,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 key={item.id}
                 onClick={() => setConfirmWipe(item.id)}
                 disabled={wiping !== null}
-                className="flex items-center justify-between p-4 bg-white/5 rounded-2xl hover:bg-fintech-danger/10 group transition-colors disabled:opacity-50"
+                className="group flex items-center justify-between rounded-2xl bg-[var(--app-ghost)] p-4 transition-colors hover:bg-fintech-danger/10 disabled:opacity-50"
               >
                 <span className="text-sm font-medium group-hover:text-fintech-danger transition-colors">{item.label}</span>
                 <Trash2 size={18} className="text-fintech-muted group-hover:text-fintech-danger transition-colors" />

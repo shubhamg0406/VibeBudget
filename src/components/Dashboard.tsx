@@ -98,7 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       tone: "text-fintech-accent",
       delta: incomeChange,
       icon: ArrowDownRight,
-      iconBg: "bg-[#16352e]",
+      iconBg: "bg-[var(--app-success-soft)]",
     },
     {
       label: "Total Spent",
@@ -106,7 +106,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       tone: "text-fintech-danger",
       delta: -spendChange,
       icon: ArrowUpRight,
-      iconBg: "bg-[#3a1f2a]",
+      iconBg: "bg-[var(--app-danger-soft)]",
     },
     {
       label: "Current Balance",
@@ -114,15 +114,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
       tone: balance >= 0 ? "text-[#78d8ff]" : "text-fintech-danger",
       delta: null,
       icon: Wallet,
-      iconBg: "bg-[#18304a]",
+      iconBg: "bg-[var(--app-info-soft)]",
     },
     {
-      label: "Active Targets",
-      value: activeTargets.length,
-      tone: "text-white",
+      label: "Tracked Targets",
+      value: activeTargets.length + activeIncomeTargets.length,
+      tone: "text-[var(--app-text)]",
       delta: null,
       icon: Sparkles,
-      iconBg: "bg-[#21284b]",
+      iconBg: "bg-[var(--app-violet-soft)]",
     },
   ];
 
@@ -132,20 +132,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {kpis.map((item) => {
           const Icon = item.icon;
           return (
-            <div key={item.label} className="rounded-xl border border-white/5 bg-[#151f38] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+            <div
+              key={item.label}
+              className="rounded-xl border bg-[var(--app-panel)] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+              style={{ borderColor: "var(--app-border)" }}
+            >
               <div className="flex items-start justify-between">
                 <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${item.iconBg}`}>
                   <Icon size={16} className={item.tone} />
                 </div>
                 {item.delta !== null && (
-                  <div className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold ${item.delta >= 0 ? "bg-[#17352f] text-fintech-accent" : "bg-[#3b2027] text-fintech-danger"}`}>
+                  <div className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold ${item.delta >= 0 ? "bg-[var(--app-pill-success)] text-fintech-accent" : "bg-[var(--app-pill-danger)] text-fintech-danger"}`}>
                     {item.delta >= 0 ? "+" : ""}{item.delta.toFixed(1)}%
                   </div>
                 )}
               </div>
               <div className="mt-2.5 text-xs font-bold uppercase tracking-[0.16em] text-fintech-muted">{item.label}</div>
               <div className={`mt-1 text-[1.35rem] font-bold tracking-tight ${item.tone}`}>
-                {typeof item.value === "number" && item.label !== "Active Targets"
+                {typeof item.value === "number" && item.label !== "Tracked Targets"
                   ? `${baseSymbol}${item.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   : item.value}
               </div>
@@ -155,11 +159,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </section>
 
       <section className={`grid gap-3 ${isEmptyState ? "xl:grid-cols-[1.24fr_0.56fr]" : "xl:grid-cols-[1.18fr_0.58fr]"}`}>
-        <div className="rounded-xl border border-white/5 bg-[#151f38] p-4">
+        <div className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
           <div className="flex flex-col gap-2.5 xl:flex-row xl:justify-between">
             <div>
-              <div className="text-2xl font-semibold tracking-tight text-[#d9e1f9]">Available Balance</div>
-              <div className={`mt-1 font-bold tracking-tight text-white ${isEmptyState ? "text-[2rem]" : "text-[2.15rem]"}`}>
+              <div className="text-2xl font-semibold tracking-tight text-[var(--app-text-soft)]">Available Balance</div>
+              <div className={`mt-1 font-bold tracking-tight text-[var(--app-text)] ${isEmptyState ? "text-[2rem]" : "text-[2.15rem]"}`}>
                 {baseSymbol}{balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
@@ -170,7 +174,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-fintech-muted">Spend Pace</div>
-                <div className="mt-1 text-[1.25rem] font-bold text-white">{Math.round(spendingRatio)}%</div>
+                <div className="mt-1 text-[1.25rem] font-bold text-[var(--app-text)]">{Math.round(spendingRatio)}%</div>
               </div>
             </div>
           </div>
@@ -180,7 +184,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <span>Spending Ratio</span>
               <span>Optimized</span>
             </div>
-            <div className="h-3.5 rounded-full bg-[#202c4b] p-1">
+            <div className="h-3.5 rounded-full bg-[var(--app-progress-bg)] p-1">
               <motion.div
                 initial={{ width: 0 }}
                 animate={{ width: `${Math.max(3, spendingRatio)}%` }}
@@ -193,13 +197,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {isEmptyState ? (
-            <div className="mt-4 rounded-xl border border-dashed border-white/8 bg-[#121a2d] p-3">
+            <div className="mt-4 rounded-xl border border-dashed bg-[var(--app-panel-muted)] p-3" style={{ borderColor: "var(--app-border)" }}>
               <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#14263d] text-fintech-accent">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--app-panel-strong)] text-fintech-accent">
                   <Sparkles size={15} />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-white">No activity yet</div>
+                  <div className="text-sm font-semibold text-[var(--app-text)]">No activity yet</div>
                   <p className="mt-1 text-xs leading-5 text-fintech-muted">
                     Add your first income or expense to unlock forecasts, savings signals, and cashflow insights.
                   </p>
@@ -208,9 +212,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           ) : (
             <div className="mt-5 grid gap-2.5 xl:grid-cols-2">
-              <div className="rounded-xl border border-white/5 bg-[#121a2d] p-3.5">
+              <div className="rounded-xl border bg-[var(--app-panel-muted)] p-3.5" style={{ borderColor: "var(--app-border)" }}>
                 <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#14263d] text-fintech-accent">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--app-panel-strong)] text-fintech-accent">
                     <Sparkles size={16} />
                   </div>
                   <div className="text-sm font-semibold">Smart Forecast</div>
@@ -218,14 +222,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <p className="mt-1.5 text-xs leading-5 text-fintech-muted">
                   Based on your activity, we predict your end-of-month balance will be stable.
                 </p>
-                <div className="mt-3 h-2 rounded-full bg-[#25304f]">
+                <div className="mt-3 h-2 rounded-full bg-[var(--app-chart-bg)]">
                   <div className="h-full w-[34%] rounded-full bg-fintech-accent" />
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/5 bg-[#121a2d] p-3.5">
+              <div className="rounded-xl border bg-[var(--app-panel-muted)] p-3.5" style={{ borderColor: "var(--app-border)" }}>
                 <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#341f2a] text-fintech-danger">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--app-danger-soft)] text-fintech-danger">
                     <PiggyBank size={16} />
                   </div>
                   <div className="text-sm font-semibold">Saving Velocity</div>
@@ -233,7 +237,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <p className="mt-1.5 text-xs leading-5 text-fintech-muted">
                   You are currently in an accumulation phase. Keep up the momentum.
                 </p>
-                <div className="mt-3 inline-flex rounded-lg bg-[#17352f] px-3 py-1.5 text-xs font-semibold text-fintech-accent">
+                <div className="mt-3 inline-flex rounded-lg bg-[var(--app-pill-success)] px-3 py-1.5 text-xs font-semibold text-fintech-accent">
                   Steady Growth
                 </div>
               </div>
@@ -242,15 +246,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         <div className={isEmptyState ? "space-y-4" : "space-y-4"}>
-          <section className="rounded-xl border border-white/5 bg-[#151f38] p-4">
+          <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
             <div className="flex items-center justify-between">
-              <h3 className="text-[1.1rem] font-bold">Budget Targets</h3>
+              <h3 className="text-[1.1rem] font-bold">Expense Targets</h3>
               <Edit2 size={16} className="text-fintech-muted" />
             </div>
 
             {activeTargets.length === 0 ? (
               <div className="mt-6 text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-[#23405b] bg-[#15253d] text-[#6fbdf5]">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-[var(--app-border-strong)] bg-[var(--app-panel-strong)] text-[#6fbdf5]">
                   <Sparkles size={22} />
                 </div>
                 <div className="mt-3 text-base font-bold">No budget targets set.</div>
@@ -258,7 +262,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   Go to Settings to import your transactions or set custom targets manually.
                 </p>
                 <button className="mt-4 text-sm font-semibold text-fintech-accent">Navigate to Settings</button>
-                <div className="mt-3 rounded-xl border border-[#58d8ff] bg-[#1b2744] p-3 text-left">
+                <div className="mt-3 rounded-xl border border-[#58d8ff] bg-[var(--app-info-soft)] p-3 text-left">
                   <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#74d5ff]">Quick Tip</div>
                   <p className="mt-1.5 text-xs leading-5 text-fintech-muted">
                     Setting targets can help you save up to 15% more annually by visualizing your limits.
@@ -268,11 +272,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
             ) : (
               <div className="mt-4 space-y-3">
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-white/5 bg-[#121a2d] px-3 py-2">
+                  <div className="rounded-lg border bg-[var(--app-panel-muted)] px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fintech-muted">Active</div>
-                    <div className="mt-1 text-base font-semibold text-white">{activeTargets.length} categories</div>
+                    <div className="mt-1 text-base font-semibold text-[var(--app-text)]">{activeTargets.length} categories</div>
                   </div>
-                  <div className="rounded-lg border border-white/5 bg-[#121a2d] px-3 py-2">
+                  <div className="rounded-lg border bg-[var(--app-panel-muted)] px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fintech-muted">Over Limit</div>
                     <div className={`mt-1 text-base font-semibold ${overTargetCount > 0 ? "text-fintech-danger" : "text-fintech-accent"}`}>
                       {overTargetCount}
@@ -282,7 +286,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                 <div className="max-h-[280px] space-y-2 overflow-y-auto pr-1 no-scrollbar">
                   {activeTargets.map((cat) => (
-                    <div key={cat.id} className="rounded-lg border border-white/5 bg-[#121a2d] px-2.5 py-2">
+                    <div key={cat.id} className="rounded-lg border bg-[var(--app-panel-muted)] px-2.5 py-2" style={{ borderColor: "var(--app-border)" }}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold leading-5">{cat.name}</div>
@@ -302,7 +306,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 type="number"
                                 value={editValue}
                                 onChange={(event) => setEditValue(event.target.value)}
-                                className="w-20 rounded-lg border border-white/10 bg-[#202c4b] px-2 py-1 text-xs text-white"
+                                className="w-20 rounded-lg border bg-[var(--app-progress-bg)] px-2 py-1 text-xs text-[var(--app-text)]"
+                                style={{ borderColor: "var(--app-border)" }}
                               />
                               <button onClick={() => handleEditSave(cat.id)} className="text-fintech-accent">
                                 <Check size={16} />
@@ -317,7 +322,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 setEditingCategory(cat.id);
                                 setEditValue(cat.target_amount.toString());
                               }}
-                              className="mt-1 inline-flex items-center gap-1 text-[11px] text-white"
+                              className="mt-1 inline-flex items-center gap-1 text-[11px] text-[var(--app-text)]"
                             >
                               <span>Edit</span>
                               <Edit2 size={12} className="text-fintech-muted" />
@@ -325,7 +330,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           )}
                         </div>
                       </div>
-                      <div className="mt-2 h-1.5 rounded-full bg-[#25304f]">
+                      <div className="mt-2 h-1.5 rounded-full bg-[var(--app-chart-bg)]">
                         <div
                           className={`h-full rounded-full ${cat.progress > 100 ? "bg-fintech-danger" : "bg-fintech-accent"}`}
                           style={{ width: `${Math.max(4, Math.min(100, cat.progress))}%` }}
@@ -338,7 +343,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             )}
           </section>
 
-          <section className="rounded-xl border border-white/5 bg-[#151f38] p-4">
+          <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
             <div className="flex items-center justify-between">
               <h3 className="text-[1.1rem] font-bold">Income Targets</h3>
               <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">
@@ -347,13 +352,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             {activeIncomeTargets.length === 0 ? (
-              <div className="mt-4 rounded-xl border border-dashed border-white/8 bg-[#121a2d] p-3 text-sm text-fintech-muted">
+              <div className="mt-4 rounded-xl border border-dashed bg-[var(--app-panel-muted)] p-3 text-sm text-fintech-muted" style={{ borderColor: "var(--app-border)" }}>
                 Add income category targets in Settings to track where money comes from.
               </div>
             ) : (
               <div className="mt-4 space-y-2">
                 {activeIncomeTargets.slice(0, 6).map((cat) => (
-                  <div key={cat.id} className="rounded-lg border border-white/5 bg-[#121a2d] px-2.5 py-2">
+                  <div key={cat.id} className="rounded-lg border bg-[var(--app-panel-muted)] px-2.5 py-2" style={{ borderColor: "var(--app-border)" }}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold leading-5">{cat.name}</div>
@@ -363,11 +368,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           {baseSymbol}{cat.proratedTarget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                       </div>
-                      <div className={`shrink-0 text-[11px] font-bold ${cat.progress >= 100 ? "text-fintech-accent" : "text-white"}`}>
+                      <div className={`shrink-0 text-[11px] font-bold ${cat.progress >= 100 ? "text-fintech-accent" : "text-[var(--app-text)]"}`}>
                         {Math.round(cat.progress)}%
                       </div>
                     </div>
-                    <div className="mt-2 h-1.5 rounded-full bg-[#25304f]">
+                    <div className="mt-2 h-1.5 rounded-full bg-[var(--app-chart-bg)]">
                       <div
                         className="h-full rounded-full bg-[linear-gradient(90deg,_#77e6ff,_#63f0bf)]"
                         style={{ width: `${Math.max(4, Math.min(100, cat.progress))}%` }}

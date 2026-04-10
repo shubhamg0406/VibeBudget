@@ -10,11 +10,92 @@
   --color-fintech-muted: #94a3b8;
 }
 
+:root {
+  --app-shell: #060e20;
+  --app-sidebar: #0f1930;
+  --app-panel: #151f38;
+  --app-panel-muted: #121a2d;
+  --app-panel-strong: #192540;
+  --app-overlay: rgba(4, 8, 20, 0.8);
+  --app-hover: #1f2b49;
+  --app-border: rgba(255, 255, 255, 0.08);
+  --app-border-strong: rgba(255, 255, 255, 0.14);
+  --app-divider: rgba(255, 255, 255, 0.1);
+  --app-text: #f8fafc;
+  --app-text-muted: #94a3b8;
+  --app-text-soft: #d9e1f9;
+  --app-input: #192540;
+  --app-input-muted: #141f38;
+  --app-ghost: rgba(255, 255, 255, 0.05);
+  --app-ghost-strong: rgba(255, 255, 255, 0.1);
+  --app-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  --app-success-soft: #16352e;
+  --app-danger-soft: #3a1f2a;
+  --app-info-soft: #18304a;
+  --app-violet-soft: #21284b;
+  --app-pill-success: #17352f;
+  --app-pill-danger: #3b2027;
+  --app-progress-bg: #202c4b;
+  --app-chart-bg: #25304f;
+  --app-tooltip-bg: #0f172a;
+  --app-tooltip-border: #1e293b;
+  --app-table-head: rgba(255, 255, 255, 0.05);
+  --app-pill-muted: rgba(255, 255, 255, 0.08);
+  --app-chip-muted: rgba(255, 255, 255, 0.05);
+  --app-neutral-soft: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="light"] {
+  --color-fintech-bg: #eef4ff;
+  --color-fintech-card: #ffffff;
+  --color-fintech-text: #172033;
+  --color-fintech-muted: #64748b;
+  --app-shell: linear-gradient(180deg, #f7fbff 0%, #edf4ff 55%, #e8f0ff 100%);
+  --app-sidebar: rgba(255, 255, 255, 0.88);
+  --app-panel: rgba(255, 255, 255, 0.94);
+  --app-panel-muted: #f8fbff;
+  --app-panel-strong: #edf4ff;
+  --app-overlay: rgba(148, 163, 184, 0.28);
+  --app-hover: #e4eefc;
+  --app-border: rgba(148, 163, 184, 0.22);
+  --app-border-strong: rgba(100, 116, 139, 0.24);
+  --app-divider: rgba(148, 163, 184, 0.22);
+  --app-text: #172033;
+  --app-text-muted: #64748b;
+  --app-text-soft: #1e293b;
+  --app-input: #ffffff;
+  --app-input-muted: #f8fbff;
+  --app-ghost: rgba(255, 255, 255, 0.65);
+  --app-ghost-strong: rgba(226, 232, 240, 0.9);
+  --app-shadow: 0 24px 48px rgba(148, 163, 184, 0.18);
+  --app-success-soft: #dcfce7;
+  --app-danger-soft: #fee2e2;
+  --app-info-soft: #dbeafe;
+  --app-violet-soft: #ede9fe;
+  --app-pill-success: #d1fae5;
+  --app-pill-danger: #fee2e2;
+  --app-progress-bg: #dbe7fb;
+  --app-chart-bg: #dfe9f9;
+  --app-tooltip-bg: #ffffff;
+  --app-tooltip-border: #dbe7f4;
+  --app-table-head: #f5f9ff;
+  --app-pill-muted: #eef4ff;
+  --app-chip-muted: #f8fbff;
+  --app-neutral-soft: rgba(100, 116, 139, 0.18);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
-  background-color: var(--color-fintech-bg);
-  color: var(--color-fintech-text);
+  background: var(--app-shell);
+  color: var(--app-text);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-size: 13px;
+  transition: background-color 0.25s ease, background-image 0.25s ease, color 0.25s ease;
 }
 
 @media (min-width: 1024px) {
@@ -24,24 +105,33 @@ body {
 }
 
 .glass-card {
-  background: rgba(21, 28, 44, 0.8);
+  background: color-mix(in srgb, var(--app-panel) 90%, transparent);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--app-border);
 }
 
 @layer base {
+  * {
+    border-color: var(--app-border);
+  }
+
   input, select, textarea {
-    background-color: #1e293b;
-    border: 1px solid #334155;
-    color: white;
+    background-color: var(--app-input);
+    border: 1px solid var(--app-border);
+    color: var(--app-text);
     border-radius: 0.5rem;
     padding: 0.5rem 0.75rem;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--app-text-muted);
   }
 
   input:focus, select:focus, textarea:focus {
     outline: none;
     border-color: var(--color-fintech-accent);
-    ring: 2px solid var(--color-fintech-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-fintech-accent) 18%, transparent);
   }
 
   button {
@@ -61,4 +151,56 @@ body {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+[data-theme="light"] .text-white {
+  color: var(--app-text);
+}
+
+[data-theme="light"] .text-white\/40 {
+  color: color-mix(in srgb, var(--app-text) 40%, transparent);
+}
+
+[data-theme="light"] .text-white\/30 {
+  color: color-mix(in srgb, var(--app-text) 30%, transparent);
+}
+
+[data-theme="light"] .bg-white\/5 {
+  background-color: var(--app-ghost);
+}
+
+[data-theme="light"] .bg-white\/10 {
+  background-color: var(--app-ghost-strong);
+}
+
+[data-theme="light"] .bg-white\/20 {
+  background-color: color-mix(in srgb, var(--app-text-muted) 14%, transparent);
+}
+
+[data-theme="light"] .border-white\/5,
+[data-theme="light"] .border-white\/8,
+[data-theme="light"] .border-white\/10,
+[data-theme="light"] .border-white\/20 {
+  border-color: var(--app-border);
+}
+
+[data-theme="light"] .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--app-border);
+}
+
+[data-theme="light"] .hover\:bg-white\/5:hover {
+  background-color: var(--app-ghost);
+}
+
+[data-theme="light"] .hover\:bg-white\/10:hover,
+[data-theme="light"] .hover\:bg-white\/20:hover {
+  background-color: var(--app-ghost-strong);
+}
+
+[data-theme="light"] .hover\:text-white:hover {
+  color: var(--app-text);
+}
+
+[data-theme="light"] .group:hover .group-hover\:text-white {
+  color: var(--app-text);
 }

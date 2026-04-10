@@ -84,7 +84,7 @@ export const parseBudgetDataFile = (raw: string): BudgetDataFile => {
     ? parsed.expenseCategories
     : legacyExpenseCategories;
   const income = Array.isArray(parsed.income) ? parsed.income : [];
-  const incomeCategories = Array.isArray(parsed.incomeCategories)
+  const incomeCategories = Array.isArray(parsed.incomeCategories) && parsed.incomeCategories.length > 0
     ? parsed.incomeCategories
     : Array.from(new Set(income.map((item) => item.category).filter(Boolean)))
         .sort((a, b) => a.localeCompare(b))

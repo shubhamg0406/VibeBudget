@@ -15,7 +15,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { TransactionEntry } from "./TransactionEntry";
 import { TransactionIcon } from "./TransactionIcon";
-import { formatDisplayDate, getMonthYearLabel } from "../utils/dateUtils";
+import { compareDateStrings, formatDisplayDate, getMonthYearLabel, isDateInRange } from "../utils/dateUtils";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 
@@ -87,7 +87,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       original: i
     }));
 
-    return [...expenses, ...incomes].sort((a, b) => b.date.localeCompare(a.date));
+    return [...expenses, ...incomes].sort((a, b) => compareDateStrings(b.date, a.date));
   }, [transactions, income]);
 
   const filtered = unifiedData.filter(t => {
@@ -98,8 +98,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     
     const matchesMinAmount = minAmount ? t.amount >= parseFloat(minAmount) : true;
     const matchesMaxAmount = maxAmount ? t.amount <= parseFloat(maxAmount) : true;
-    const matchesStartDate = startDate ? t.date >= startDate : true;
-    const matchesEndDate = endDate ? t.date <= endDate : true;
+    const matchesStartDate = startDate ? isDateInRange(t.date, startDate, "9999-12-31") : true;
+    const matchesEndDate = endDate ? isDateInRange(t.date, "0001-01-01", endDate) : true;
 
     return matchesSearch && matchesCategory && matchesType && 
            matchesMinAmount && matchesMaxAmount && 
@@ -110,8 +110,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     return [...filtered].sort((a, b) => {
       if (sortBy === "date") {
         return sortOrder === "desc" 
-          ? b.date.localeCompare(a.date) 
-          : a.date.localeCompare(b.date);
+          ? compareDateStrings(b.date, a.date) 
+          : compareDateStrings(a.date, b.date);
       } else {
         return sortOrder === "desc" 
           ? b.amount - a.amount 
@@ -163,20 +163,21 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 placeholder="Search transactions..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full rounded-xl border border-white/5 bg-[#192540] py-4 pl-12 pr-4 text-sm text-white placeholder:text-fintech-muted"
+                className="w-full rounded-xl border bg-[var(--app-input)] py-4 pl-12 pr-4 text-sm text-[var(--app-text)] placeholder:text-fintech-muted"
+                style={{ borderColor: "var(--app-border)" }}
               />
             </div>
           </div>
 
           <div className="space-y-2 lg:col-span-3">
             <label className="ml-1 text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Transaction Type</label>
-            <div className="flex gap-1 rounded-xl bg-[#0f1930] p-1">
+            <div className="flex gap-1 rounded-xl bg-[var(--app-panel)] p-1">
               <button
                 onClick={() => setFilterType("all")}
                 className={`flex-1 rounded-lg py-2.5 text-xs font-bold transition-all ${
                   filterType === "all"
                     ? "bg-fintech-accent text-[#002919]"
-                    : "text-fintech-muted hover:text-white"
+                    : "text-fintech-muted hover:text-[var(--app-text)]"
                 }`}
               >
                 All
@@ -186,7 +187,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 className={`flex-1 rounded-lg py-2.5 text-xs font-medium transition-all ${
                   filterType === "expense"
                     ? "bg-[#ff716a] text-white"
-                    : "text-fintech-muted hover:text-white"
+                    : "text-fintech-muted hover:text-[var(--app-text)]"
                 }`}
               >
                 Expenses
@@ -196,7 +197,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 className={`flex-1 rounded-lg py-2.5 text-xs font-medium transition-all ${
                   filterType === "income"
                     ? "bg-fintech-accent text-[#002919]"
-                    : "text-fintech-muted hover:text-white"
+                    : "text-fintech-muted hover:text-[var(--app-text)]"
                 }`}
               >
                 Income
@@ -209,7 +210,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <select
               value={selectedCategory || ""}
               onChange={(e) => setSelectedCategory(e.target.value || null)}
-              className="w-full appearance-none rounded-xl border border-white/5 bg-[#141f38] px-4 py-4 text-sm font-medium text-white outline-none"
+              className="w-full appearance-none rounded-xl border bg-[var(--app-input-muted)] px-4 py-4 text-sm font-medium text-[var(--app-text)] outline-none"
+              style={{ borderColor: "var(--app-border)" }}
             >
               <option value="">All Categories</option>
               {allCategoryNames.map(cat => (
@@ -225,8 +227,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold uppercase tracking-wider transition-all ${
               showFilters || minAmount || maxAmount || startDate || endDate
                 ? "border-fintech-accent bg-fintech-accent/10 text-fintech-accent" 
-                : "border-white/10 bg-[#0f1930] text-fintech-muted"
+                : "border bg-[var(--app-panel)] text-fintech-muted"
             }`}
+            style={!showFilters && !minAmount && !maxAmount && !startDate && !endDate ? { borderColor: "var(--app-border)" } : undefined}
           >
             <Filter size={14} />
             Advanced Filters
@@ -260,7 +263,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden"
             >
-              <div className="space-y-4 rounded-xl border border-white/5 bg-[#0f1930] p-5">
+              <div className="space-y-4 rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Min Amount</label>
@@ -269,7 +272,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       value={minAmount}
                       onChange={(e) => setMinAmount(e.target.value)}
                       placeholder="0.00"
-                      className="w-full bg-fintech-bg border border-white/5 rounded-xl px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      style={{ borderColor: "var(--app-border)" }}
                     />
                   </div>
                   <div className="space-y-1">
@@ -279,7 +283,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       value={maxAmount}
                       onChange={(e) => setMaxAmount(e.target.value)}
                       placeholder="9999"
-                      className="w-full bg-fintech-bg border border-white/5 rounded-xl px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      style={{ borderColor: "var(--app-border)" }}
                     />
                   </div>
                 </div>
@@ -290,7 +295,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       type="date" 
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full bg-fintech-bg border border-white/5 rounded-xl px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      style={{ borderColor: "var(--app-border)" }}
                     />
                   </div>
                   <div className="space-y-1">
@@ -299,7 +305,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       type="date" 
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full bg-fintech-bg border border-white/5 rounded-xl px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      style={{ borderColor: "var(--app-border)" }}
                     />
                   </div>
                 </div>
@@ -309,7 +316,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       onClick={() => {
                         setSortBy(sortBy === "date" ? "amount" : "date");
                       }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-white/10 transition-colors"
+                      className="flex items-center gap-1.5 rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-[var(--app-ghost-strong)]"
                     >
                       <ArrowUpDown size={12} /> Sort: {sortBy}
                     </button>
@@ -317,7 +324,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       onClick={() => {
                         setSortOrder(sortOrder === "asc" ? "desc" : "asc");
                       }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-white/10 transition-colors"
+                      className="flex items-center gap-1.5 rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-[var(--app-ghost-strong)]"
                     >
                       {sortOrder === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {sortOrder}
                     </button>
@@ -348,11 +355,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         {Object.entries(groupedByMonth).map(([month, txs]) => (
           <div key={month} className="space-y-4">
             <div className="flex items-center gap-4">
-              <div className="h-px flex-1 bg-white/10" />
+              <div className="h-px flex-1 bg-[var(--app-divider)]" />
               <h3 className="text-[10px] font-bold text-fintech-muted uppercase tracking-[0.2em] whitespace-nowrap">
                 {month}
               </h3>
-              <div className="h-px flex-1 bg-white/10" />
+              <div className="h-px flex-1 bg-[var(--app-divider)]" />
             </div>
             
             <div className="grid gap-3 xl:grid-cols-2">
@@ -363,7 +370,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                   transition={{ delay: Math.min(index * 0.03, 0.5) }}
                   key={`${t.type}-${t.id}`} 
                   onClick={() => setEditingTransaction(t.original ? { ...t.original, type: t.type } : { ...t, type: t.type })}
-                  className="glass-card min-w-0 rounded-xl p-4 flex items-center justify-between hover:border-white/20 transition-all group cursor-pointer active:scale-[0.98]"
+                  className="glass-card group flex min-w-0 items-center justify-between rounded-xl p-4 transition-all hover:border-[var(--app-border-strong)] active:scale-[0.98] cursor-pointer"
                 >
                   <div className="flex items-center gap-4 min-w-0">
                     <TransactionIcon 
@@ -404,17 +411,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         ))}
         
         {sortedAndFiltered.length === 0 && (
-          <div className="flex min-h-[500px] flex-col items-center justify-center rounded-[1.75rem] border border-dashed border-white/10 bg-[rgba(15,25,48,0.3)] px-8 py-16 text-center">
+          <div className="flex min-h-[500px] flex-col items-center justify-center rounded-[1.75rem] border border-dashed bg-[var(--app-ghost)] px-8 py-16 text-center" style={{ borderColor: "var(--app-border)" }}>
             <div className="relative mb-8">
               <div className="absolute inset-0 rounded-full bg-fintech-accent/10 blur-3xl" />
-              <div className="relative flex h-44 w-44 items-center justify-center rounded-full border border-white/8 bg-[#0f1930] text-white/30">
+              <div className="relative flex h-44 w-44 items-center justify-center rounded-full border bg-[var(--app-panel)] text-[color:var(--app-text)]/30" style={{ borderColor: "var(--app-border)" }}>
                 <Receipt size={72} />
-                <div className="absolute -bottom-2 -right-2 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#1f2b49] text-fintech-accent shadow-xl">
+                <div className="absolute -bottom-2 -right-2 flex h-14 w-14 items-center justify-center rounded-2xl border bg-[var(--app-panel-strong)] text-fintech-accent shadow-xl" style={{ borderColor: "var(--app-border)" }}>
                   <SearchX size={28} />
                 </div>
               </div>
             </div>
-            <div className="text-xl font-semibold text-white">No transactions found</div>
+            <div className="text-xl font-semibold text-[var(--app-text)]">No transactions found</div>
             <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-fintech-muted">
               We couldn't find any transactions matching your current filters. Try adjusting your search or category selection.
             </p>
@@ -428,7 +435,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 setSelectedCategory(null);
                 setFilterType("all");
               }}
-              className="mt-8 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#192540] px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#1f2b49]"
+              className="mt-8 inline-flex items-center gap-2 rounded-xl border bg-[var(--app-panel-strong)] px-6 py-3 text-sm font-semibold text-[var(--app-text)] transition-colors hover:bg-[var(--app-hover)]"
+              style={{ borderColor: "var(--app-border)" }}
             >
               <RotateCcw size={18} />
               <span>Clear All Filters</span>
@@ -438,19 +446,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       </div>
 
       <section className="grid grid-cols-1 gap-6 md:grid-cols-4">
-        <div className="rounded-2xl border border-white/5 bg-[#0f1930] p-6 md:col-span-1">
+        <div className="rounded-2xl border bg-[var(--app-panel)] p-6 md:col-span-1" style={{ borderColor: "var(--app-border)" }}>
           <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Period In ({preferences?.baseCurrency || "CAD"})</div>
           <div className="text-2xl font-bold text-fintech-accent">
             {getCurrencySymbol(preferences?.baseCurrency)}{totalIncoming.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
-        <div className="rounded-2xl border border-white/5 bg-[#0f1930] p-6 md:col-span-1">
+        <div className="rounded-2xl border bg-[var(--app-panel)] p-6 md:col-span-1" style={{ borderColor: "var(--app-border)" }}>
           <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Period Out ({preferences?.baseCurrency || "CAD"})</div>
           <div className="text-2xl font-bold text-fintech-danger">
             {getCurrencySymbol(preferences?.baseCurrency)}{totalOutgoing.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
         </div>
-        <div className="rounded-2xl border border-white/5 bg-gradient-to-r from-[#0f1930] to-[#141f38] p-6 md:col-span-2">
+        <div className="rounded-2xl border bg-[var(--app-panel)] p-6 md:col-span-2" style={{ borderColor: "var(--app-border)" }}>
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.22em] text-fintech-muted">Net Flow ({preferences?.baseCurrency || "CAD"})</div>
@@ -458,12 +466,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 {getCurrencySymbol(preferences?.baseCurrency)}{netFlow.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
-            <div className="flex h-10 w-32 items-end gap-1 overflow-hidden rounded bg-[#192540] px-2 pb-1 opacity-25">
-              <div className="h-1/2 w-full rounded-t-sm bg-white/40" />
-              <div className="h-3/4 w-full rounded-t-sm bg-white/40" />
-              <div className="h-1/4 w-full rounded-t-sm bg-white/40" />
-              <div className="h-1/2 w-full rounded-t-sm bg-white/40" />
-              <div className="h-2/3 w-full rounded-t-sm bg-white/40" />
+            <div className="flex h-10 w-32 items-end gap-1 overflow-hidden rounded bg-[var(--app-panel-strong)] px-2 pb-1 opacity-35">
+              <div className="h-1/2 w-full rounded-t-sm bg-[var(--app-text-muted)]/45" />
+              <div className="h-3/4 w-full rounded-t-sm bg-[var(--app-text-muted)]/45" />
+              <div className="h-1/4 w-full rounded-t-sm bg-[var(--app-text-muted)]/45" />
+              <div className="h-1/2 w-full rounded-t-sm bg-[var(--app-text-muted)]/45" />
+              <div className="h-2/3 w-full rounded-t-sm bg-[var(--app-text-muted)]/45" />
             </div>
           </div>
         </div>
@@ -493,21 +501,23 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                 setShowAddModal(false);
                 setEditingTransaction(null);
               }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 backdrop-blur-sm"
+              style={{ backgroundColor: "var(--app-overlay)" }}
             />
             <motion.div
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="relative w-full max-w-2xl overflow-y-auto rounded-t-[2rem] border border-white/10 bg-fintech-bg p-8 shadow-2xl max-h-[85vh] sm:rounded-[2rem]"
+              className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-t-[2rem] border bg-fintech-bg p-8 shadow-2xl sm:rounded-[2rem]"
+              style={{ borderColor: "var(--app-border-strong)" }}
             >
               <button 
                 onClick={() => {
                   setShowAddModal(false);
                   setEditingTransaction(null);
                 }}
-                className="absolute top-6 right-6 p-2 hover:bg-white/5 rounded-full transition-colors text-fintech-muted z-10"
+                className="absolute right-6 top-6 z-10 rounded-full p-2 text-fintech-muted transition-colors hover:bg-[var(--app-ghost)]"
               >
                 <X size={24} />
               </button>

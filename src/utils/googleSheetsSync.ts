@@ -4,7 +4,7 @@ import {
   GoogleSheetsSyncConfig,
   Income,
   IncomeSheetMapping,
-  PublicSheetImportColumnSelection,
+  PublicSheetImportCellCoordinate,
   Transaction,
 } from "../types";
 
@@ -64,7 +64,7 @@ export interface HeaderRowDetectionResult {
   matchedFields: string[];
 }
 
-export interface SheetColumnOption extends PublicSheetImportColumnSelection {
+export interface SheetColumnOption extends PublicSheetImportCellCoordinate {
   value: string;
 }
 
@@ -91,6 +91,35 @@ const getColumnLetter = (index: number) => {
 
   return result;
 };
+
+export const buildCellRef = (rowIndex: number, columnIndex: number) => (
+  `${getColumnLetter(columnIndex)}${rowIndex}`
+);
+
+export const parseA1CellReference = (value: string) => {
+  const trimmed = value.trim().toUpperCase();
+  const match = trimmed.match(/^([A-Z]+)(\d+)$/);
+  if (!match) return null;
+
+  const [, letters, rowPart] = match;
+  let columnIndex = 0;
+  for (const character of letters) {
+    columnIndex = (columnIndex * 26) + (character.charCodeAt(0) - 64);
+  }
+
+  const rowIndex = Number.parseInt(rowPart, 10);
+  if (!Number.isFinite(rowIndex) || rowIndex < 1) return null;
+
+  return {
+    rowIndex,
+    columnIndex: columnIndex - 1,
+    cellRef: trimmed,
+  };
+};
+
+export const buildA1Range = (sheetName: string, startCellRef: string, endCellRef: string) => (
+  `${escapeSheetName(sheetName)}!${startCellRef}:${endCellRef}`
+);
 
 const buildRowRange = (sheetName: string, rowNumber: number, columnCount: number) => (
   `${escapeSheetName(sheetName)}!A${rowNumber}:${getColumnLetter(Math.max(columnCount - 1, 0))}${rowNumber}`
@@ -361,7 +390,9 @@ export const buildSheetColumnOptions = (headerRow: string[]): SheetColumnOption[
     const headerLabel = normalizedHeader || `Column ${index + 1}`;
     return {
       columnIndex: index,
-      headerLabel,
+      rowIndex: 1,
+      cellRef: buildCellRef(1, index),
+      displayValue: headerLabel,
       value: `${headerLabel} (${getColumnLetter(index)})`,
     };
   });

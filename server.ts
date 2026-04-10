@@ -41,10 +41,10 @@ db.exec(`
 const categoryCount = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
 if (categoryCount.count === 0) {
   const initialCategories = [
-    "Alcohol + Weed", "Canada Investments", "Car fuel", "Car maintenance", 
+    "Alcohol + Weed", "Canada Transfer", "Car fuel", "Car maintenance", 
     "Car Parking", "Clothing", "Donation", "Electronics", "Entertainment", 
     "Gifts", "Going out food", "Groceries", "Household Items", 
-    "India Transfer - Parents", "India Transfer Investment", "Insurance", 
+    "India Transfer - Parents", "India Transfer - Self", "Insurance", 
     "Medical", "Misc.", "Nagar/Bamor Expenses", "Public transportation", 
     "Rent", "Shopping", "Telecom", "Travel", "Utilities"
   ];
@@ -240,12 +240,6 @@ async function startServer() {
       console.error("Expense import error:", error);
       res.status(500).json({ error: "Failed to import expenses" });
     }
-  });
-
-  app.post("/api/import/investments", (req, res) => {
-    // For now, investments are just a type of income or handled similarly
-    // We'll just return success to prevent 404s if the user tries to use the UI I added
-    res.json({ success: true, message: "Investment import received (placeholder)" });
   });
 
   // Global Error Handler for JSON responses

@@ -172,7 +172,7 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
 
       {/* Type Toggle */}
       {!initialData && (
-        <div className="flex p-1 bg-fintech-card rounded-xl border border-white/5">
+        <div className="flex rounded-xl border bg-fintech-card p-1" style={{ borderColor: "var(--app-border)" }}>
           <button
             onClick={() => setType("expense")}
             className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${
@@ -243,7 +243,7 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
                 required
               />
               {isVendorFocused && filteredVendors.length > 0 && (
-                <div className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto glass-card rounded-xl border border-white/10 shadow-2xl">
+                <div className="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-xl border glass-card shadow-2xl" style={{ borderColor: "var(--app-border-strong)" }}>
                   {filteredVendors.map((sug, idx) => (
                     <button
                       key={idx}
@@ -252,7 +252,8 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
                         setVendor(sug);
                         setIsVendorFocused(false);
                       }}
-                      className="w-full text-left px-4 py-3 text-sm hover:bg-fintech-accent hover:text-white transition-colors border-b border-white/5 last:border-0"
+                      className="w-full border-b px-4 py-3 text-left text-sm transition-colors hover:bg-fintech-accent hover:text-white last:border-0"
+                      style={{ borderColor: "var(--app-border)" }}
                     >
                       {sug}
                     </button>
@@ -271,7 +272,8 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
               <select 
                 value={currency} 
                 onChange={(e) => setCurrency(e.target.value)}
-                className="w-24 text-sm font-bold bg-white/5 border border-white/10 rounded-xl px-3"
+                className="w-24 rounded-xl border bg-[var(--app-ghost)] px-3 text-sm font-bold"
+                style={{ borderColor: "var(--app-border)" }}
               >
                 {CURRENCIES.map(c => (
                   <option key={c.code} value={c.code}>{c.code}</option>
@@ -332,7 +334,7 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
                 
                 {/* Dropdown Results */}
                 {isFocused && !categoryId && (
-                  <div className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto glass-card rounded-xl border border-white/10 shadow-2xl">
+                  <div className="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-xl border glass-card shadow-2xl" style={{ borderColor: "var(--app-border-strong)" }}>
                     {filteredCategories.length > 0 ? (
                       filteredCategories.map((cat) => (
                         <button
@@ -344,7 +346,8 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
                             setSearch(cat.name);
                             setIsFocused(false);
                           }}
-                          className="w-full text-left px-4 py-3 text-sm hover:bg-fintech-accent hover:text-white transition-colors border-b border-white/5 last:border-0"
+                          className="w-full border-b px-4 py-3 text-left text-sm transition-colors hover:bg-fintech-accent hover:text-white last:border-0"
+                          style={{ borderColor: "var(--app-border)" }}
                         >
                           {cat.name}
                         </button>

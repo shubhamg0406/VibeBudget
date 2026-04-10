@@ -1,32 +1,38 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./components/Dashboard";
 import { Analysis } from "./components/Analysis";
 import { Settings } from "./components/Settings";
 import { DateRangeSelector } from "./components/DateRangeSelector";
 import { TransactionsView } from "./components/TransactionsView";
-import { formatDate } from "./utils/dateUtils";
-import { View, DateRange } from "./types";
+import { formatDate, getMonthCountForDateRangeOption, getPresetDateRange, isDateInRange, parseDateString, resolveDateRange } from "./utils/dateUtils";
+import { View, DateRange, Theme } from "./types";
 import { useFirebase } from "./contexts/FirebaseContext";
 
 export default function App() {
   const { loading, expenseCategories, incomeCategories, transactions, income, updateExpenseCategoryTarget } = useFirebase();
   const [view, setView] = useState<View>("dashboard");
-
-  // Default date range: This Month
-  const [dateRange, setDateRange] = useState<DateRange>(() => {
-    const now = new Date();
-    const start = formatDate(new Date(now.getFullYear(), now.getMonth(), 1));
-    const end = formatDate(now);
-    return { start, end, option: "this-month" };
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === "undefined") return "dark";
+    const savedTheme = window.localStorage.getItem("vibebudget-theme");
+    return savedTheme === "light" || savedTheme === "dark" ? savedTheme : "dark";
   });
 
-  const filteredTransactions = transactions.filter(t => t.date >= dateRange.start && t.date <= dateRange.end);
-  const filteredIncome = income.filter(i => i.date >= dateRange.start && i.date <= dateRange.end);
+  // Default date range: This Month
+  const [dateRange, setDateRange] = useState<DateRange>(() => getPresetDateRange("this-month"));
+  const effectiveDateRange = resolveDateRange(dateRange);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("vibebudget-theme", theme);
+  }, [theme]);
+
+  const filteredTransactions = transactions.filter((t) => isDateInRange(t.date, effectiveDateRange.start, effectiveDateRange.end));
+  const filteredIncome = income.filter((i) => isDateInRange(i.date, effectiveDateRange.start, effectiveDateRange.end));
 
   const getPreviousDateRange = (range: DateRange) => {
-    const start = new Date(range.start + 'T00:00:00');
-    const end = new Date(range.end + 'T00:00:00');
+    const start = parseDateString(range.start);
+    const end = parseDateString(range.end);
     
     const isLastDayOfMonth = (date: Date) => {
       const nextDay = new Date(date);
@@ -73,19 +79,16 @@ export default function App() {
     return { start: formatDate(prevStart), end: formatDate(prevEnd) };
   };
 
-  const prevRange = getPreviousDateRange(dateRange);
-  const previousTransactions = transactions.filter(t => t.date >= prevRange.start && t.date <= prevRange.end);
-  const previousIncome = income.filter(i => i.date >= prevRange.start && i.date <= prevRange.end);
+  const prevRange = getPreviousDateRange(effectiveDateRange);
+  const previousTransactions = transactions.filter((t) => isDateInRange(t.date, prevRange.start, prevRange.end));
+  const previousIncome = income.filter((i) => isDateInRange(i.date, prevRange.start, prevRange.end));
 
   const getMonthMultiplier = () => {
-    if (dateRange.option === "this-month") return 1;
-    if (dateRange.option === "last-month") return 1;
-    if (dateRange.option === "last-3-months") return 3;
-    if (dateRange.option === "last-6-months") return 6;
-    if (dateRange.option === "last-12-months") return 12;
+    const presetMonthCount = getMonthCountForDateRangeOption(effectiveDateRange.option);
+    if (presetMonthCount) return presetMonthCount;
     
-    const start = new Date(dateRange.start);
-    const end = new Date(dateRange.end);
+    const start = parseDateString(effectiveDateRange.start);
+    const end = parseDateString(effectiveDateRange.end);
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     
@@ -105,7 +108,7 @@ export default function App() {
                 <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
                 <p className="mt-1 text-xs text-fintech-muted">Track your balance, budget targets, and financial momentum.</p>
               </div>
-              <DateRangeSelector range={dateRange} onChange={setDateRange} />
+              <DateRangeSelector range={effectiveDateRange} onChange={setDateRange} />
             </div>
             <Dashboard 
               expenseCategories={expenseCategories}
@@ -141,7 +144,7 @@ export default function App() {
               income={income} 
               allTransactions={transactions}
               allIncome={income}
-              currentRange={dateRange}
+              currentRange={effectiveDateRange}
             />
           </div>
         );
@@ -154,14 +157,19 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-fintech-bg text-fintech-accent">
+      <div className="flex h-screen items-center justify-center bg-[var(--app-shell)] text-fintech-accent">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-fintech-accent"></div>
       </div>
     );
   }
 
   return (
-    <Layout currentView={view} setView={setView}>
+    <Layout
+      currentView={view}
+      setView={setView}
+      theme={theme}
+      onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+    >
       {renderView()}
     </Layout>
   );

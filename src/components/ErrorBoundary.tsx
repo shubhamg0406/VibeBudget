@@ -47,8 +47,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen bg-fintech-bg flex items-center justify-center p-6">
-          <div className="glass-card p-8 rounded-3xl max-w-md w-full text-center space-y-6 border border-white/10">
+        <div className="flex min-h-screen items-center justify-center bg-[var(--app-shell)] p-6">
+          <div className="glass-card max-w-md w-full space-y-6 rounded-3xl border p-8 text-center" style={{ borderColor: "var(--app-border)" }}>
             <div className="w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 mx-auto">
               <AlertTriangle size={32} />
             </div>

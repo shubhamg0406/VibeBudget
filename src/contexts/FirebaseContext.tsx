@@ -43,10 +43,14 @@ const LOCAL_STATE_KEY = "vibebudgetLocalState";
 const LOCAL_BUDGET_ID_KEY = "vibebudgetLocalBudgetId";
 const DEFAULT_SYNC_INTERVAL_SECONDS = 30;
 const DEFAULT_BUDGET_FILE_NAME = "budget.json";
+const LEGACY_CATEGORY_RENAMES: Record<string, string> = {
+  "Canada Investments": "Canada Transfer",
+  "India Transfer Investment": "India Transfer - Self",
+};
 
 const DEFAULT_CATEGORY_NAMES = [
   "Alcohol + Weed",
-  "Canada Investments",
+  "Canada Transfer",
   "Car fuel",
   "Car maintenance",
   "Car Parking",
@@ -59,7 +63,7 @@ const DEFAULT_CATEGORY_NAMES = [
   "Groceries",
   "Household Items",
   "India Transfer - Parents",
-  "India Transfer Investment",
+  "India Transfer - Self",
   "Insurance",
   "Medical",
   "Misc.",
@@ -73,13 +77,15 @@ const DEFAULT_CATEGORY_NAMES = [
 ];
 
 const DEFAULT_CORE_EXCLUDED = [
-  "Canada Investments", 
-  "India Transfer Investment", 
+  "Canada Transfer", 
+  "India Transfer - Self", 
   "India Transfer - Parents", 
   "Nagar/Bamor Expenses"
 ];
 
 const getIsoNow = () => new Date().toISOString();
+
+const renameLegacyCategory = (name: string) => LEGACY_CATEGORY_RENAMES[name] || name;
 
 const createDefaultExpenseCategories = (): ExpenseCategory[] => (
   DEFAULT_CATEGORY_NAMES
@@ -92,6 +98,31 @@ const createDefaultExpenseCategories = (): ExpenseCategory[] => (
     }))
 );
 
+const migrateExpenseCategories = (categories: ExpenseCategory[]) => (
+  categories.map((category) => ({
+    ...category,
+    name: renameLegacyCategory(category.name),
+  }))
+);
+
+const migrateTransactions = (transactions: Transaction[]) => (
+  transactions.map((transaction) => ({
+    ...transaction,
+    category_name: renameLegacyCategory(transaction.category_name),
+  }))
+);
+
+const migrateIncomeRecords = (incomeRecords: Income[]) => (
+  incomeRecords.map((record) => ({
+    ...record,
+    category: renameLegacyCategory(record.category),
+  }))
+);
+
+const migrateExcludedCategories = (categories?: string[]) => (
+  (categories || DEFAULT_CORE_EXCLUDED).map(renameLegacyCategory)
+);
+
 const createIncomeCategoriesFromRecords = (incomeRecords: Income[]): IncomeCategory[] => (
   Array.from(new Set(incomeRecords.map((item) => item.category).filter(Boolean)))
     .sort((a, b) => a.localeCompare(b))
@@ -101,6 +132,16 @@ const createIncomeCategoriesFromRecords = (incomeRecords: Income[]): IncomeCateg
       target_amount: 0,
     }))
 );
+
+const resolveIncomeCategories = (
+  storedIncomeCategories: IncomeCategory[] | undefined,
+  incomeRecords: Income[]
+) => {
+  if (Array.isArray(storedIncomeCategories) && storedIncomeCategories.length > 0) {
+    return storedIncomeCategories;
+  }
+  return createIncomeCategoriesFromRecords(incomeRecords);
+};
 
 const getLocalBudgetId = () => {
   const existing = localStorage.getItem(LOCAL_BUDGET_ID_KEY);
@@ -140,25 +181,26 @@ const loadLocalState = (): LocalStatePayload => {
 
   try {
     const parsed = JSON.parse(raw) as Partial<LocalStatePayload>;
+    const parsedIncome = Array.isArray(parsed.income) ? migrateIncomeRecords(parsed.income) : [];
+    const parsedExpenseCategories =
+      Array.isArray(parsed.expenseCategories) && parsed.expenseCategories.length > 0
+        ? migrateExpenseCategories(parsed.expenseCategories)
+        : Array.isArray(parsed.categories) && parsed.categories.length > 0
+          ? migrateExpenseCategories(parsed.categories)
+          : createDefaultExpenseCategories();
+    const parsedTransactions = Array.isArray(parsed.transactions) ? migrateTransactions(parsed.transactions) : [];
+
     return {
-      transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
-      income: Array.isArray(parsed.income) ? parsed.income : [],
-      expenseCategories:
-        Array.isArray(parsed.expenseCategories) && parsed.expenseCategories.length > 0
-          ? parsed.expenseCategories
-          : Array.isArray(parsed.categories) && parsed.categories.length > 0
-            ? parsed.categories
-            : createDefaultExpenseCategories(),
-      incomeCategories:
-        Array.isArray(parsed.incomeCategories)
-          ? parsed.incomeCategories
-          : createIncomeCategoriesFromRecords(Array.isArray(parsed.income) ? parsed.income : []),
+      transactions: parsedTransactions,
+      income: parsedIncome,
+      expenseCategories: parsedExpenseCategories,
+      incomeCategories: resolveIncomeCategories(parsed.incomeCategories, parsedIncome),
       googleSheetsConfig: parsed.googleSheetsConfig || null,
       driveConnection: parsed.driveConnection || null,
       lastSyncedAt: typeof parsed.lastSyncedAt === "string" ? parsed.lastSyncedAt : null,
-      preferences: parsed.preferences ? { 
+      preferences: parsed.preferences ? {
         ...parsed.preferences, 
-        coreExcludedCategories: parsed.preferences.coreExcludedCategories || DEFAULT_CORE_EXCLUDED 
+        coreExcludedCategories: migrateExcludedCategories(parsed.preferences.coreExcludedCategories)
       } : { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED },
     };
   } catch {
