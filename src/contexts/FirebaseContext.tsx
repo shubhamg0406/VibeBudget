@@ -1,13 +1,27 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  getRedirectResult,
   GoogleAuthProvider,
+  getRedirectResult,
   onAuthStateChanged,
+  signInWithPopup,
   signInWithRedirect,
   signOut,
   User,
 } from "firebase/auth";
-import { auth, googleProvider } from "../firebase";
+import {
+  CollectionReference,
+  DocumentData,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  setDoc,
+  Unsubscribe,
+  writeBatch,
+} from "firebase/firestore";
+import { auth, db, firebaseDataNamespace, googleDriveProvider, googleProvider } from "../firebase";
 import {
   Category,
   DriveConnection,
@@ -17,8 +31,8 @@ import {
   GoogleSheetsSyncDirection,
   Income,
   IncomeCategory,
-  Transaction,
   Preferences,
+  Transaction,
 } from "../types";
 import {
   clearSheetRowForItem,
@@ -38,19 +52,18 @@ import {
 } from "../utils/googleDrive";
 
 const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
-const GOOGLE_REDIRECT_KEY = "vibebudgetGoogleRedirectInProgress";
 const LOCAL_STATE_KEY = "vibebudgetLocalState";
-const LOCAL_BUDGET_ID_KEY = "vibebudgetLocalBudgetId";
 const DEFAULT_SYNC_INTERVAL_SECONDS = 30;
 const DEFAULT_BUDGET_FILE_NAME = "budget.json";
+const FIRESTORE_BATCH_WRITE_LIMIT = 450;
 const LEGACY_CATEGORY_RENAMES: Record<string, string> = {
-  "Canada Investments": "Canada Transfer",
-  "India Transfer Investment": "India Transfer - Self",
+  "Canada Transfer": "Canada Investments",
+  "India Transfer - Self": "India Transfer Investment",
 };
 
 const DEFAULT_CATEGORY_NAMES = [
   "Alcohol + Weed",
-  "Canada Transfer",
+  "Canada Investments",
   "Car fuel",
   "Car maintenance",
   "Car Parking",
@@ -63,7 +76,7 @@ const DEFAULT_CATEGORY_NAMES = [
   "Groceries",
   "Household Items",
   "India Transfer - Parents",
-  "India Transfer - Self",
+  "India Transfer Investment",
   "Insurance",
   "Medical",
   "Misc.",
@@ -77,54 +90,121 @@ const DEFAULT_CATEGORY_NAMES = [
 ];
 
 const DEFAULT_CORE_EXCLUDED = [
-  "Canada Transfer", 
-  "India Transfer - Self", 
-  "India Transfer - Parents", 
-  "Nagar/Bamor Expenses"
+  "Canada Investments",
+  "India Transfer Investment",
+  "India Transfer - Parents",
+  "Nagar/Bamor Expenses",
 ];
+
+const DEFAULT_PREFERENCES: Preferences = {
+  baseCurrency: "CAD",
+  exchangeRates: [],
+  coreExcludedCategories: DEFAULT_CORE_EXCLUDED,
+};
 
 const getIsoNow = () => new Date().toISOString();
 
 const renameLegacyCategory = (name: string) => LEGACY_CATEGORY_RENAMES[name] || name;
+const normalizeCategoryName = (name: string) => renameLegacyCategory(name).trim().replace(/\s+/g, " ");
+const CANONICAL_EXPENSE_CATEGORY_NAMES = DEFAULT_CATEGORY_NAMES
+  .map((name) => normalizeCategoryName(name))
+  .sort((a, b) => a.localeCompare(b));
+const CANONICAL_EXPENSE_CATEGORY_NAME_SET = new Set(CANONICAL_EXPENSE_CATEGORY_NAMES);
+const FALLBACK_EXPENSE_CATEGORY_NAME = "Misc.";
+
+const normalizeExpenseCategoryName = (name: string) => {
+  const normalizedName = normalizeCategoryName(name);
+  if (CANONICAL_EXPENSE_CATEGORY_NAME_SET.has(normalizedName)) {
+    return normalizedName;
+  }
+  return FALLBACK_EXPENSE_CATEGORY_NAME;
+};
+
+const dedupeCategoriesByName = <T extends { id: string; name: string; target_amount: number }>(categories: T[]) => {
+  const categoriesByName = new Map<string, T>();
+
+  categories.forEach((category) => {
+    const normalizedName = normalizeCategoryName(category.name);
+    if (!normalizedName) return;
+
+    const existing = categoriesByName.get(normalizedName);
+    if (!existing) {
+      categoriesByName.set(normalizedName, { ...category, name: normalizedName });
+      return;
+    }
+
+    if ((existing.target_amount || 0) === 0 && (category.target_amount || 0) !== 0) {
+      categoriesByName.set(normalizedName, { ...existing, name: normalizedName, target_amount: category.target_amount });
+    }
+  });
+
+  return Array.from(categoriesByName.values()).sort((a, b) => a.name.localeCompare(b.name));
+};
 
 const createDefaultExpenseCategories = (): ExpenseCategory[] => (
-  DEFAULT_CATEGORY_NAMES
-    .slice()
-    .sort((a, b) => a.localeCompare(b))
-    .map((name) => ({
-      id: crypto.randomUUID(),
-      name,
-      target_amount: 0,
-    }))
+  CANONICAL_EXPENSE_CATEGORY_NAMES.map((name) => ({
+    id: crypto.randomUUID(),
+    name,
+    target_amount: 0,
+  }))
 );
 
 const migrateExpenseCategories = (categories: ExpenseCategory[]) => (
-  categories.map((category) => ({
-    ...category,
-    name: renameLegacyCategory(category.name),
-  }))
+  (() => {
+    const normalizedCategories = dedupeCategoriesByName(
+      categories.map((category) => ({
+        ...category,
+        name: normalizeExpenseCategoryName(category.name),
+      }))
+    );
+    const categoriesByName = new Map(normalizedCategories.map((category) => [category.name, category]));
+
+    return CANONICAL_EXPENSE_CATEGORY_NAMES.map((name) => {
+      const existing = categoriesByName.get(name);
+      return existing || {
+        id: crypto.randomUUID(),
+        name,
+        target_amount: 0,
+      };
+    });
+  })()
+);
+
+const migrateIncomeCategories = (categories: IncomeCategory[]) => (
+  dedupeCategoriesByName(
+    categories.map((category) => ({
+      ...category,
+      name: normalizeCategoryName(category.name),
+    }))
+  )
 );
 
 const migrateTransactions = (transactions: Transaction[]) => (
   transactions.map((transaction) => ({
     ...transaction,
-    category_name: renameLegacyCategory(transaction.category_name),
+    category_name: normalizeExpenseCategoryName(transaction.category_name),
   }))
 );
 
 const migrateIncomeRecords = (incomeRecords: Income[]) => (
   incomeRecords.map((record) => ({
     ...record,
-    category: renameLegacyCategory(record.category),
+    category: normalizeCategoryName(record.category),
   }))
 );
 
 const migrateExcludedCategories = (categories?: string[]) => (
-  (categories || DEFAULT_CORE_EXCLUDED).map(renameLegacyCategory)
+  Array.from(new Set((categories || DEFAULT_CORE_EXCLUDED).map(normalizeCategoryName)))
 );
 
+const normalizePreferences = (preferences?: Preferences | null): Preferences => ({
+  baseCurrency: preferences?.baseCurrency || DEFAULT_PREFERENCES.baseCurrency,
+  exchangeRates: Array.isArray(preferences?.exchangeRates) ? preferences!.exchangeRates : [],
+  coreExcludedCategories: migrateExcludedCategories(preferences?.coreExcludedCategories),
+});
+
 const createIncomeCategoriesFromRecords = (incomeRecords: Income[]): IncomeCategory[] => (
-  Array.from(new Set(incomeRecords.map((item) => item.category).filter(Boolean)))
+  Array.from(new Set(incomeRecords.map((item) => normalizeCategoryName(item.category)).filter(Boolean)))
     .sort((a, b) => a.localeCompare(b))
     .map((name) => ({
       id: crypto.randomUUID(),
@@ -138,17 +218,9 @@ const resolveIncomeCategories = (
   incomeRecords: Income[]
 ) => {
   if (Array.isArray(storedIncomeCategories) && storedIncomeCategories.length > 0) {
-    return storedIncomeCategories;
+    return migrateIncomeCategories(storedIncomeCategories);
   }
   return createIncomeCategoriesFromRecords(incomeRecords);
-};
-
-const getLocalBudgetId = () => {
-  const existing = localStorage.getItem(LOCAL_BUDGET_ID_KEY);
-  if (existing) return existing;
-  const next = crypto.randomUUID();
-  localStorage.setItem(LOCAL_BUDGET_ID_KEY, next);
-  return next;
 };
 
 interface LocalStatePayload {
@@ -163,20 +235,22 @@ interface LocalStatePayload {
   preferences?: Preferences;
 }
 
+const createEmptyLocalState = (): LocalStatePayload => ({
+  categories: createDefaultExpenseCategories(),
+  expenseCategories: createDefaultExpenseCategories(),
+  incomeCategories: [],
+  transactions: [],
+  income: [],
+  googleSheetsConfig: null,
+  driveConnection: null,
+  lastSyncedAt: null,
+  preferences: DEFAULT_PREFERENCES,
+});
+
 const loadLocalState = (): LocalStatePayload => {
   const raw = localStorage.getItem(LOCAL_STATE_KEY);
   if (!raw) {
-    return {
-      categories: createDefaultExpenseCategories(),
-      expenseCategories: createDefaultExpenseCategories(),
-      incomeCategories: [],
-      transactions: [],
-      income: [],
-      googleSheetsConfig: null,
-      driveConnection: null,
-      lastSyncedAt: null,
-      preferences: { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED },
-    };
+    return createEmptyLocalState();
   }
 
   try {
@@ -198,33 +272,33 @@ const loadLocalState = (): LocalStatePayload => {
       googleSheetsConfig: parsed.googleSheetsConfig || null,
       driveConnection: parsed.driveConnection || null,
       lastSyncedAt: typeof parsed.lastSyncedAt === "string" ? parsed.lastSyncedAt : null,
-      preferences: parsed.preferences ? {
-        ...parsed.preferences, 
-        coreExcludedCategories: migrateExcludedCategories(parsed.preferences.coreExcludedCategories)
-      } : { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED },
+      preferences: normalizePreferences(parsed.preferences),
     };
   } catch {
-    return {
-      categories: createDefaultExpenseCategories(),
-      expenseCategories: createDefaultExpenseCategories(),
-      incomeCategories: [],
-      transactions: [],
-      income: [],
-      googleSheetsConfig: null,
-      driveConnection: null,
-      lastSyncedAt: null,
-      preferences: { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED },
-    };
+    return createEmptyLocalState();
   }
 };
 
-const persistLocalState = (payload: LocalStatePayload) => {
-  localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(payload));
+const clearLocalState = () => {
+  localStorage.removeItem(LOCAL_STATE_KEY);
 };
 
-interface FirebaseContextType {
+interface UserProfileDocument {
+  budgetId: string;
+  email: string;
+  displayName?: string | null;
+  photoURL?: string | null;
+  preferences?: Preferences;
+  googleSheetsConfig?: GoogleSheetsSyncConfig | null;
+  driveConnection?: DriveConnection | null;
+  lastSyncedAt?: string | null;
+}
+
+export interface FirebaseContextType {
   user: User | null;
   loading: boolean;
+  authError: string | null;
+  clearAuthError: () => void;
   budgetId: string | null;
   ownerEmail: string | null;
   sharedUsers: string[];
@@ -237,11 +311,11 @@ interface FirebaseContextType {
   updatePreferences: (prefs: Partial<Preferences>) => Promise<void>;
   signIn: () => Promise<void>;
   logout: () => Promise<void>;
-  addTransaction: (data: any) => Promise<void>;
-  updateTransaction: (id: string, data: any) => Promise<void>;
+  addTransaction: (data: Omit<Transaction, "id">) => Promise<void>;
+  updateTransaction: (id: string, data: Partial<Transaction>) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
-  addIncome: (data: any) => Promise<void>;
-  updateIncome: (id: string, data: any) => Promise<void>;
+  addIncome: (data: Omit<Income, "id">) => Promise<void>;
+  updateIncome: (id: string, data: Partial<Income>) => Promise<void>;
   deleteIncome: (id: string) => Promise<void>;
   updateExpenseCategoryTarget: (id: string, target: number) => Promise<void>;
   updateIncomeCategoryTarget: (id: string, target: number) => Promise<void>;
@@ -272,22 +346,37 @@ interface FirebaseContextType {
   googleSheetsAccessToken: string | null;
 }
 
-const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
+export const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
+
+const isSameAsDefaultPreferences = (preferences: Preferences) => (
+  JSON.stringify(normalizePreferences(preferences)) === JSON.stringify(DEFAULT_PREFERENCES)
+);
+
+const hasMeaningfulLocalData = (payload: LocalStatePayload) => (
+  payload.transactions.length > 0 ||
+  payload.income.length > 0 ||
+  payload.incomeCategories.length > 0 ||
+  payload.googleSheetsConfig !== null ||
+  payload.driveConnection !== null ||
+  payload.lastSyncedAt !== null ||
+  !isSameAsDefaultPreferences(normalizePreferences(payload.preferences))
+);
 
 export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const initialLocalState = useMemo(loadLocalState, []);
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [budgetId] = useState<string>(getLocalBudgetId);
-  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>(initialLocalState.expenseCategories);
-  const [incomeCategories, setIncomeCategories] = useState<IncomeCategory[]>(initialLocalState.incomeCategories);
-  const [transactions, setTransactions] = useState<Transaction[]>(initialLocalState.transactions);
-  const [income, setIncome] = useState<Income[]>(initialLocalState.income);
-  const [preferences, setPreferences] = useState<Preferences>(initialLocalState.preferences || { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED });
-  const [googleSheetsConfig, setGoogleSheetsConfig] = useState<GoogleSheetsSyncConfig | null>(initialLocalState.googleSheetsConfig);
-  const [driveConnection, setDriveConnection] = useState<DriveConnection | null>(initialLocalState.driveConnection);
-  const [lastSynced, setLastSynced] = useState<Date | null>(initialLocalState.lastSyncedAt ? new Date(initialLocalState.lastSyncedAt) : null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [budgetId, setBudgetId] = useState<string | null>(null);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>(createDefaultExpenseCategories());
+  const [incomeCategories, setIncomeCategories] = useState<IncomeCategory[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [income, setIncome] = useState<Income[]>([]);
+  const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
+  const [googleSheetsConfig, setGoogleSheetsConfig] = useState<GoogleSheetsSyncConfig | null>(null);
+  const [driveConnection, setDriveConnection] = useState<DriveConnection | null>(null);
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
   const [googleSheetsAccessToken, setGoogleSheetsAccessToken] = useState<string | null>(sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY));
   const [googleSheetsSyncing, setGoogleSheetsSyncing] = useState(false);
   const [googleSheetsError, setGoogleSheetsError] = useState<string | null>(null);
@@ -305,6 +394,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const autoSaveTimerRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
   const loadingDriveRef = useRef(false);
+  const bootstrappedUsersRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { expenseCategoriesRef.current = expenseCategories; }, [expenseCategories]);
   useEffect(() => { incomeCategoriesRef.current = incomeCategories; }, [incomeCategories]);
@@ -314,80 +404,57 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => { sheetsConfigRef.current = googleSheetsConfig; }, [googleSheetsConfig]);
   useEffect(() => { driveConnectionRef.current = driveConnection; }, [driveConnection]);
 
-  const persistSnapshot = (
-    nextExpenseCategories = expenseCategoriesRef.current,
-    nextIncomeCategories = incomeCategoriesRef.current,
-    nextTransactions = transactionsRef.current,
-    nextIncome = incomeRef.current,
-    nextPreferences = preferencesRef.current,
-    nextSheetsConfig = sheetsConfigRef.current,
-    nextDriveConnection = driveConnectionRef.current,
-    nextLastSynced = lastSynced
-  ) => {
-    persistLocalState({
-      categories: nextExpenseCategories,
-      expenseCategories: nextExpenseCategories,
-      incomeCategories: nextIncomeCategories,
-      transactions: nextTransactions,
-      income: nextIncome,
-      preferences: nextPreferences,
-      googleSheetsConfig: nextSheetsConfig,
-      driveConnection: nextDriveConnection,
-      lastSyncedAt: nextLastSynced ? nextLastSynced.toISOString() : null,
-    });
+  const resetBudgetState = useCallback(() => {
+    const defaults = createEmptyLocalState();
+    setBudgetId(null);
+    setExpenseCategories(defaults.expenseCategories);
+    setIncomeCategories(defaults.incomeCategories);
+    setTransactions(defaults.transactions);
+    setIncome(defaults.income);
+    setPreferences(DEFAULT_PREFERENCES);
+    setGoogleSheetsConfig(null);
+    setDriveConnection(null);
+    setLastSynced(null);
+    setAuthError(null);
+    setGoogleSheetsError(null);
+    setDriveSyncError(null);
+  }, []);
+
+  const formatAuthBootstrapError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || "");
+    const normalized = message.toLowerCase();
+
+    if (
+      normalized.includes("missing or insufficient permissions")
+      || normalized.includes("permission-denied")
+      || normalized.includes("insufficient permissions")
+    ) {
+      return "Google sign-in worked, but Firestore denied access. Publish Firestore rules for authenticated users, then try again.";
+    }
+
+    return message || "Unable to load your account data from Firestore.";
   };
 
-  const setBudgetState = ({
-    nextExpenseCategories = expenseCategoriesRef.current,
-    nextIncomeCategories = incomeCategoriesRef.current,
-    nextTransactions = transactionsRef.current,
-    nextIncome = incomeRef.current,
-    nextPreferences = preferencesRef.current,
-    nextSheetsConfig = sheetsConfigRef.current,
-    nextDriveConnection = driveConnectionRef.current,
-    nextLastSynced = lastSynced,
-  }: {
-    nextExpenseCategories?: ExpenseCategory[];
-    nextIncomeCategories?: IncomeCategory[];
-    nextTransactions?: Transaction[];
-    nextIncome?: Income[];
-    nextPreferences?: Preferences;
-    nextSheetsConfig?: GoogleSheetsSyncConfig | null;
-    nextDriveConnection?: DriveConnection | null;
-    nextLastSynced?: Date | null;
-  }) => {
-    expenseCategoriesRef.current = nextExpenseCategories;
-    incomeCategoriesRef.current = nextIncomeCategories;
-    transactionsRef.current = nextTransactions;
-    incomeRef.current = nextIncome;
-    preferencesRef.current = nextPreferences;
-    sheetsConfigRef.current = nextSheetsConfig;
-    driveConnectionRef.current = nextDriveConnection;
-
-    setExpenseCategories(nextExpenseCategories);
-    setIncomeCategories(nextIncomeCategories);
-    setTransactions(nextTransactions);
-    setIncome(nextIncome);
-    setPreferences(nextPreferences);
-    setGoogleSheetsConfig(nextSheetsConfig);
-    setDriveConnection(nextDriveConnection);
-    setLastSynced(nextLastSynced);
-
-    persistSnapshot(
-      nextExpenseCategories,
-      nextIncomeCategories,
-      nextTransactions,
-      nextIncome,
-      nextPreferences,
-      nextSheetsConfig,
-      nextDriveConnection,
-      nextLastSynced
-    );
-  };
-
-  const updatePreferences = async (prefs: Partial<Preferences>) => {
-    setBudgetState({ nextPreferences: { ...preferencesRef.current, ...prefs } });
-  };
+  const getUserDocRef = useCallback(
+    (uid: string) => doc(db, "environments", firebaseDataNamespace, "users", uid),
+    []
+  );
+  const getExpenseCategoriesCollection = useCallback(
+    (uid: string) => collection(db, "environments", firebaseDataNamespace, "users", uid, "categories"),
+    []
+  );
+  const getIncomeCategoriesCollection = useCallback(
+    (uid: string) => collection(db, "environments", firebaseDataNamespace, "users", uid, "incomeCategories"),
+    []
+  );
+  const getTransactionsCollection = useCallback(
+    (uid: string) => collection(db, "environments", firebaseDataNamespace, "users", uid, "transactions"),
+    []
+  );
+  const getIncomeCollection = useCallback(
+    (uid: string) => collection(db, "environments", firebaseDataNamespace, "users", uid, "income"),
+    []
+  );
 
   const storeAccessToken = (token: string | null) => {
     setGoogleSheetsAccessToken(token);
@@ -398,18 +465,191 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const beginGoogleAuth = async () => {
-    sessionStorage.setItem(GOOGLE_REDIRECT_KEY, "true");
-    await signInWithRedirect(auth, googleProvider);
+  const saveUserProfilePatch = useCallback(async (patch: Partial<UserProfileDocument>) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const currentUser = auth.currentUser;
+    await setDoc(
+      getUserDocRef(currentUser.uid),
+      {
+        budgetId: currentUser.uid,
+        email: currentUser.email || "",
+        displayName: currentUser.displayName || null,
+        photoURL: currentUser.photoURL || null,
+        ...patch,
+      },
+      { merge: true }
+    );
+  }, [getUserDocRef]);
+
+  const bootstrapUserData = useCallback(async (nextUser: User) => {
+    if (bootstrappedUsersRef.current.has(nextUser.uid)) {
+      return;
+    }
+    bootstrappedUsersRef.current.add(nextUser.uid);
+
+    const [profileSnap, categoriesSnap, incomeCategoriesSnap, transactionsSnap, incomeSnap] = await Promise.all([
+      getDoc(getUserDocRef(nextUser.uid)),
+      getDocs(getExpenseCategoriesCollection(nextUser.uid)),
+      getDocs(getIncomeCategoriesCollection(nextUser.uid)),
+      getDocs(getTransactionsCollection(nextUser.uid)),
+      getDocs(getIncomeCollection(nextUser.uid)),
+    ]);
+
+    const hasRemoteData =
+      profileSnap.exists() ||
+      !categoriesSnap.empty ||
+      !incomeCategoriesSnap.empty ||
+      !transactionsSnap.empty ||
+      !incomeSnap.empty;
+
+    if (hasRemoteData) {
+      clearLocalState();
+      return;
+    }
+
+    const localState = initialLocalState;
+    const batch = writeBatch(db);
+
+    batch.set(getUserDocRef(nextUser.uid), {
+      budgetId: nextUser.uid,
+      email: nextUser.email || "",
+      displayName: nextUser.displayName || null,
+      photoURL: nextUser.photoURL || null,
+      preferences: normalizePreferences(localState.preferences),
+      googleSheetsConfig: localState.googleSheetsConfig,
+      driveConnection: localState.driveConnection,
+      lastSyncedAt: localState.lastSyncedAt,
+    } satisfies UserProfileDocument);
+
+    const categoriesToSeed =
+      hasMeaningfulLocalData(localState) || localState.expenseCategories.length > 0
+        ? localState.expenseCategories
+        : createDefaultExpenseCategories();
+
+    categoriesToSeed.forEach((category) => {
+      batch.set(doc(getExpenseCategoriesCollection(nextUser.uid), category.id), category);
+    });
+    migrateIncomeCategories(localState.incomeCategories).forEach((category) => {
+      batch.set(doc(getIncomeCategoriesCollection(nextUser.uid), category.id), category);
+    });
+    localState.transactions.forEach((transaction) => {
+      batch.set(doc(getTransactionsCollection(nextUser.uid), transaction.id), transaction);
+    });
+    localState.income.forEach((item) => {
+      batch.set(doc(getIncomeCollection(nextUser.uid), item.id), item);
+    });
+
+    await batch.commit();
+    clearLocalState();
+  }, [
+    getExpenseCategoriesCollection,
+    getIncomeCategoriesCollection,
+    getIncomeCollection,
+    getTransactionsCollection,
+    getUserDocRef,
+    initialLocalState,
+  ]);
+
+  const replaceCollection = useCallback(async <T extends { id: string }>(
+    collectionRef: CollectionReference<DocumentData>,
+    items: T[],
+  ) => {
+    const snapshot = await getDocs(collectionRef);
+
+    const operations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+    snapshot.docs.forEach((snapshotDoc) => {
+      operations.push((batch) => {
+        batch.delete(snapshotDoc.ref);
+      });
+    });
+    items.forEach((item) => {
+      operations.push((batch) => {
+        batch.set(doc(collectionRef, item.id), item);
+      });
+    });
+
+    for (let index = 0; index < operations.length; index += FIRESTORE_BATCH_WRITE_LIMIT) {
+      const batch = writeBatch(db);
+      operations
+        .slice(index, index + FIRESTORE_BATCH_WRITE_LIMIT)
+        .forEach((runOperation) => runOperation(batch));
+      await batch.commit();
+    }
+  }, []);
+
+  const replaceBudgetDataInFirestore = useCallback(async (payload: {
+    nextExpenseCategories: ExpenseCategory[];
+    nextIncomeCategories: IncomeCategory[];
+    nextTransactions: Transaction[];
+    nextIncome: Income[];
+    nextPreferences: Preferences;
+    nextSheetsConfig: GoogleSheetsSyncConfig | null;
+    nextDriveConnection: DriveConnection | null;
+    nextLastSynced: Date | null;
+  }) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const uid = auth.currentUser.uid;
+    await Promise.all([
+      replaceCollection(getExpenseCategoriesCollection(uid), payload.nextExpenseCategories),
+      replaceCollection(getIncomeCategoriesCollection(uid), payload.nextIncomeCategories),
+      replaceCollection(getTransactionsCollection(uid), payload.nextTransactions),
+      replaceCollection(getIncomeCollection(uid), payload.nextIncome),
+      saveUserProfilePatch({
+        preferences: normalizePreferences(payload.nextPreferences),
+        googleSheetsConfig: payload.nextSheetsConfig,
+        driveConnection: payload.nextDriveConnection,
+        lastSyncedAt: payload.nextLastSynced ? payload.nextLastSynced.toISOString() : null,
+      }),
+    ]);
+  }, [
+    getExpenseCategoriesCollection,
+    getIncomeCategoriesCollection,
+    getIncomeCollection,
+    getTransactionsCollection,
+    replaceCollection,
+    saveUserProfilePatch,
+  ]);
+
+  const beginGoogleAuth = async (withDriveScopes = false) => {
+    const provider = withDriveScopes ? googleDriveProvider : googleProvider;
+
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (withDriveScopes) {
+        storeAccessToken(credential?.accessToken || null);
+      }
+      return;
+    } catch (error) {
+      const code = typeof error === "object" && error && "code" in error ? String((error as { code?: string }).code) : "";
+      const shouldFallbackToRedirect = [
+        "auth/popup-blocked",
+        "auth/popup-closed-by-user",
+        "auth/cancelled-popup-request",
+        "auth/operation-not-supported-in-this-environment",
+      ].includes(code);
+
+      if (!shouldFallbackToRedirect) {
+        throw error;
+      }
+    }
+
+    await signInWithRedirect(auth, provider);
   };
 
   useEffect(() => {
     const consumeRedirect = async () => {
-      if (sessionStorage.getItem(GOOGLE_REDIRECT_KEY) !== "true") return;
-
       try {
         const result = await getRedirectResult(auth);
-        const credential = result ? GoogleAuthProvider.credentialFromResult(result) : null;
+        const credential = result?.providerId === GoogleAuthProvider.PROVIDER_ID
+          ? GoogleAuthProvider.credentialFromResult(result)
+          : null;
         if (credential?.accessToken) {
           storeAccessToken(credential.accessToken);
         }
@@ -417,8 +657,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const message = error instanceof Error ? error.message : "Google authentication failed.";
         setGoogleSheetsError(message);
         setDriveSyncError(message);
-      } finally {
-        sessionStorage.removeItem(GOOGLE_REDIRECT_KEY);
       }
     };
 
@@ -426,17 +664,137 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
-      setLoading(false);
+      if (!nextUser) {
+        resetBudgetState();
+        setLoading(false);
+        return;
+      }
+
+      setBudgetId(nextUser.uid);
+      setAuthError(null);
+      setLoading(true);
+      void bootstrapUserData(nextUser).catch((error) => {
+        console.error("Failed to bootstrap user data", error);
+        setAuthError(formatAuthBootstrapError(error));
+        setLoading(false);
+      });
     });
 
     return unsubscribe;
-  }, []);
+  }, [bootstrapUserData, resetBudgetState]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const loadedState = {
+      profile: false,
+      categories: false,
+      incomeCategories: false,
+      transactions: false,
+      income: false,
+    };
+
+    const markLoaded = () => {
+      if (Object.values(loadedState).every(Boolean)) {
+        setAuthError(null);
+        setLoading(false);
+      }
+    };
+
+    const handleSnapshotError = (scope: string, error: unknown) => {
+      console.error(`Firestore ${scope} listener failed`, error);
+      setAuthError(formatAuthBootstrapError(error));
+      setLoading(false);
+    };
+
+    const unsubscribers: Unsubscribe[] = [];
+
+    unsubscribers.push(onSnapshot(
+      getUserDocRef(user.uid),
+      (snapshot) => {
+        const data = snapshot.data() as UserProfileDocument | undefined;
+        setPreferences(normalizePreferences(data?.preferences));
+        setGoogleSheetsConfig(data?.googleSheetsConfig || null);
+        setDriveConnection(data?.driveConnection || null);
+        setLastSynced(data?.lastSyncedAt ? new Date(data.lastSyncedAt) : null);
+        loadedState.profile = true;
+        markLoaded();
+      },
+      (error) => handleSnapshotError("profile", error)
+    ));
+
+    unsubscribers.push(onSnapshot(
+      getExpenseCategoriesCollection(user.uid),
+      (snapshot) => {
+        const nextCategories = snapshot.docs.map((item) => item.data() as ExpenseCategory);
+        setExpenseCategories(nextCategories.length > 0 ? migrateExpenseCategories(nextCategories) : createDefaultExpenseCategories());
+        loadedState.categories = true;
+        markLoaded();
+      },
+      (error) => handleSnapshotError("categories", error)
+    ));
+
+    unsubscribers.push(onSnapshot(
+      getIncomeCategoriesCollection(user.uid),
+      (snapshot) => {
+        const nextIncomeCategories = snapshot.docs.map((item) => item.data() as IncomeCategory);
+        setIncomeCategories(migrateIncomeCategories(nextIncomeCategories));
+        loadedState.incomeCategories = true;
+        markLoaded();
+      },
+      (error) => handleSnapshotError("income categories", error)
+    ));
+
+    unsubscribers.push(onSnapshot(
+      getTransactionsCollection(user.uid),
+      (snapshot) => {
+        setTransactions(migrateTransactions(snapshot.docs.map((item) => item.data() as Transaction)));
+        loadedState.transactions = true;
+        markLoaded();
+      },
+      (error) => handleSnapshotError("transactions", error)
+    ));
+
+    unsubscribers.push(onSnapshot(
+      getIncomeCollection(user.uid),
+      (snapshot) => {
+        setIncome(migrateIncomeRecords(snapshot.docs.map((item) => item.data() as Income)));
+        loadedState.income = true;
+        markLoaded();
+      },
+      (error) => handleSnapshotError("income", error)
+    ));
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [
+    getExpenseCategoriesCollection,
+    getIncomeCategoriesCollection,
+    getIncomeCollection,
+    getTransactionsCollection,
+    getUserDocRef,
+    user,
+  ]);
 
   const ensureSignedInWithDriveScopes = async () => {
     if (!user || !googleSheetsAccessToken) {
-      await beginGoogleAuth();
+      await beginGoogleAuth(true);
       throw new Error("Redirecting to Google to authorize Drive access.");
     }
+  };
+
+  const updatePreferences = async (prefs: Partial<Preferences>) => {
+    const nextPreferences = {
+      ...preferencesRef.current,
+      ...prefs,
+      coreExcludedCategories: prefs.coreExcludedCategories
+        ? migrateExcludedCategories(prefs.coreExcludedCategories)
+        : preferencesRef.current.coreExcludedCategories,
+    };
+    await saveUserProfilePatch({ preferences: normalizePreferences(nextPreferences) });
   };
 
   const saveBudgetToDrive = async () => {
@@ -464,7 +822,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     await updateBudgetFileContent(token, ensuredFile.fileId, content);
     const syncedAt = new Date();
-    setBudgetState({ nextDriveConnection: nextConnection, nextLastSynced: syncedAt });
+    await saveUserProfilePatch({
+      driveConnection: nextConnection,
+      lastSyncedAt: syncedAt.toISOString(),
+    });
     setDriveSyncError(null);
   };
 
@@ -480,12 +841,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const raw = await readBudgetFileContent(token, currentConnection.budgetFileId);
       const parsed = parseBudgetDataFile(raw);
-      setBudgetState({
+      await replaceBudgetDataInFirestore({
         nextExpenseCategories: parsed.expenseCategories.length > 0 ? parsed.expenseCategories : createDefaultExpenseCategories(),
         nextIncomeCategories: parsed.incomeCategories,
         nextTransactions: parsed.transactions,
         nextIncome: parsed.income,
+        nextPreferences: preferencesRef.current,
         nextSheetsConfig: parsed.googleSheetsConfig,
+        nextDriveConnection: currentConnection,
         nextLastSynced: new Date(),
       });
       setDriveSyncError(null);
@@ -510,7 +873,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         incomeRef.current,
         sheetsConfigRef.current
       );
-      const budgetFile = await ensureBudgetFile(token, { folderId: folder.folderId, budgetFileName: DEFAULT_BUDGET_FILE_NAME }, JSON.stringify(payload, null, 2));
+      const budgetFile = await ensureBudgetFile(
+        token,
+        { folderId: folder.folderId, budgetFileName: DEFAULT_BUDGET_FILE_NAME },
+        JSON.stringify(payload, null, 2)
+      );
 
       const nextConnection: DriveConnection = {
         folderId: folder.folderId,
@@ -521,7 +888,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         connectedAt: getIsoNow(),
       };
 
-      setBudgetState({ nextDriveConnection: nextConnection });
+      await saveUserProfilePatch({ driveConnection: nextConnection });
       setDriveSyncError(null);
 
       try {
@@ -535,7 +902,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const disconnectDriveFolder = () => {
-    setBudgetState({ nextDriveConnection: null });
+    void saveUserProfilePatch({ driveConnection: null });
     setDriveSyncError(null);
   };
 
@@ -564,7 +931,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         window.clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [expenseCategories, incomeCategories, transactions, income, googleSheetsConfig, driveConnection, googleSheetsAccessToken]);
+  }, [driveConnection, expenseCategories, googleSheetsAccessToken, googleSheetsConfig, income, incomeCategories, transactions]);
 
   const inspectGoogleSheetsSpreadsheet = async (
     spreadsheetUrl: string,
@@ -584,8 +951,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const disconnectGoogleSheets = () => {
     setGoogleSheetsError(null);
-    setGoogleSheetsConfig(null);
-    setBudgetState({ nextSheetsConfig: null });
+    void saveUserProfilePatch({ googleSheetsConfig: null });
   };
 
   const saveGoogleSheetsConfig = async (config: Omit<GoogleSheetsSyncConfig, "connectedAt" | "connectedBy">) => {
@@ -616,66 +982,62 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       getRequiredHeadersForConfig(payload, "income")
     );
 
-    setBudgetState({ nextSheetsConfig: payload });
+    await saveUserProfilePatch({ googleSheetsConfig: payload });
     setGoogleSheetsError(null);
   };
 
   const ensureExpenseCategoryId = async (name: string) => {
-    const existing = expenseCategoriesRef.current.find((category) => category.name === name);
+    const normalizedName = normalizeExpenseCategoryName(name);
+    const existing = expenseCategoriesRef.current.find((category) => normalizeCategoryName(category.name) === normalizedName);
     if (existing) return existing.id;
+
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
 
     const nextCategory: ExpenseCategory = {
       id: crypto.randomUUID(),
-      name,
+      name: normalizedName,
       target_amount: 0,
     };
-    const nextExpenseCategories = [...expenseCategoriesRef.current, nextCategory].sort((a, b) => a.name.localeCompare(b.name));
-    setBudgetState({ nextExpenseCategories });
+    await setDoc(doc(getExpenseCategoriesCollection(auth.currentUser.uid), nextCategory.id), nextCategory);
     return nextCategory.id;
   };
 
   const ensureIncomeCategoryId = async (name: string) => {
-    const existing = incomeCategoriesRef.current.find((category) => category.name === name);
+    const normalizedName = normalizeCategoryName(name);
+    const existing = incomeCategoriesRef.current.find((category) => normalizeCategoryName(category.name) === normalizedName);
     if (existing) return existing.id;
+
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
 
     const nextCategory: IncomeCategory = {
       id: crypto.randomUUID(),
-      name,
+      name: normalizedName,
       target_amount: 0,
     };
-    const nextIncomeCategories = [...incomeCategoriesRef.current, nextCategory].sort((a, b) => a.name.localeCompare(b.name));
-    setBudgetState({ nextIncomeCategories });
+    await setDoc(doc(getIncomeCategoriesCollection(auth.currentUser.uid), nextCategory.id), nextCategory);
     return nextCategory.id;
   };
 
   const upsertTransactionFromSync = async (id: string | null, data: Omit<Transaction, "id">) => {
-    const nextTransactions = [...transactionsRef.current];
-    const finalId = id || crypto.randomUUID();
-    const existingIndex = nextTransactions.findIndex((item) => item.id === finalId);
-    const payload: Transaction = { id: finalId, ...data };
-
-    if (existingIndex >= 0) {
-      nextTransactions[existingIndex] = payload;
-    } else {
-      nextTransactions.push(payload);
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
     }
 
-    setBudgetState({ nextTransactions });
+    const finalId = id || crypto.randomUUID();
+    await setDoc(doc(getTransactionsCollection(auth.currentUser.uid), finalId), { id: finalId, ...data });
   };
 
   const upsertIncomeFromSync = async (id: string | null, data: Omit<Income, "id">) => {
-    const nextIncome = [...incomeRef.current];
-    const finalId = id || crypto.randomUUID();
-    const existingIndex = nextIncome.findIndex((item) => item.id === finalId);
-    const payload: Income = { id: finalId, ...data };
-
-    if (existingIndex >= 0) {
-      nextIncome[existingIndex] = payload;
-    } else {
-      nextIncome.push(payload);
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
     }
 
-    setBudgetState({ nextIncome });
+    const finalId = id || crypto.randomUUID();
+    await setDoc(doc(getIncomeCollection(auth.currentUser.uid), finalId), { id: finalId, ...data });
   };
 
   const syncGoogleSheets = async (direction: GoogleSheetsSyncDirection = "both") => {
@@ -724,16 +1086,18 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         lastError: null,
       };
 
-      setBudgetState({ nextSheetsConfig: nextConfig, nextLastSynced: new Date() });
+      await saveUserProfilePatch({
+        googleSheetsConfig: nextConfig,
+        lastSyncedAt: timestamp,
+      });
       setGoogleSheetsError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Google Sheets sync failed.";
       setGoogleSheetsError(message);
-      const currentConfig = sheetsConfigRef.current;
-      if (currentConfig) {
-        setBudgetState({
-          nextSheetsConfig: {
-            ...currentConfig,
+      if (sheetsConfigRef.current) {
+        await saveUserProfilePatch({
+          googleSheetsConfig: {
+            ...sheetsConfigRef.current,
             lastError: message,
           },
         });
@@ -757,117 +1121,157 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [googleSheetsAccessToken, googleSheetsConfig]);
 
   const signIn = async () => {
-    await beginGoogleAuth();
+    await beginGoogleAuth(false);
   };
 
   const logout = async () => {
+    clearLocalState();
     storeAccessToken(null);
     await signOut(auth);
   };
 
   const addTransaction = async (data: Omit<Transaction, "id">) => {
-    const nextTransactions = [
-      ...transactionsRef.current,
-      {
-        id: crypto.randomUUID(),
-        ...data,
-        updated_at: getIsoNow(),
-      },
-    ];
-    setBudgetState({ nextTransactions });
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const id = crypto.randomUUID();
+    await setDoc(doc(getTransactionsCollection(auth.currentUser.uid), id), {
+      id,
+      ...data,
+      updated_at: getIsoNow(),
+    });
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
       void syncGoogleSheets("push").catch(() => undefined);
     }
   };
 
   const updateTransaction = async (id: string, data: Partial<Transaction>) => {
-    const nextTransactions = transactionsRef.current.map((item) => (
-      item.id === id ? { ...item, ...data, updated_at: getIsoNow() } : item
-    ));
-    setBudgetState({ nextTransactions });
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const existing = transactionsRef.current.find((item) => item.id === id);
+    if (!existing) return;
+
+    await setDoc(doc(getTransactionsCollection(auth.currentUser.uid), id), {
+      ...existing,
+      ...data,
+      id,
+      updated_at: getIsoNow(),
+    });
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
       void syncGoogleSheets("push").catch(() => undefined);
     }
   };
 
   const deleteTransaction = async (id: string) => {
-    const nextTransactions = transactionsRef.current.filter((item) => item.id !== id);
-    setBudgetState({ nextTransactions });
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    await deleteDoc(doc(getTransactionsCollection(auth.currentUser.uid), id));
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
       await clearSheetRowForItem(googleSheetsAccessToken, sheetsConfigRef.current, "expenses", id).catch(() => undefined);
     }
   };
 
   const addIncome = async (data: Omit<Income, "id">) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
     const categoryId = await ensureIncomeCategoryId(data.category);
-    const nextIncome = [
-      ...incomeRef.current,
-      {
-        id: crypto.randomUUID(),
-        ...data,
-        category_id: data.category_id || categoryId,
-        updated_at: getIsoNow(),
-      },
-    ];
-    setBudgetState({ nextIncome });
+    const id = crypto.randomUUID();
+    await setDoc(doc(getIncomeCollection(auth.currentUser.uid), id), {
+      id,
+      ...data,
+      category_id: data.category_id || categoryId,
+      updated_at: getIsoNow(),
+    });
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
       void syncGoogleSheets("push").catch(() => undefined);
     }
   };
 
   const updateIncome = async (id: string, data: Partial<Income>) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const existing = incomeRef.current.find((item) => item.id === id);
+    if (!existing) return;
+
     const categoryId = data.category ? await ensureIncomeCategoryId(data.category) : undefined;
-    const nextIncome = incomeRef.current.map((item) => (
-      item.id === id ? { ...item, ...data, category_id: categoryId || item.category_id, updated_at: getIsoNow() } : item
-    ));
-    setBudgetState({ nextIncome });
+    await setDoc(doc(getIncomeCollection(auth.currentUser.uid), id), {
+      ...existing,
+      ...data,
+      id,
+      category_id: categoryId || data.category_id || existing.category_id,
+      updated_at: getIsoNow(),
+    });
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
       void syncGoogleSheets("push").catch(() => undefined);
     }
   };
 
   const deleteIncome = async (id: string) => {
-    const nextIncome = incomeRef.current.filter((item) => item.id !== id);
-    setBudgetState({ nextIncome });
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    await deleteDoc(doc(getIncomeCollection(auth.currentUser.uid), id));
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
       await clearSheetRowForItem(googleSheetsAccessToken, sheetsConfigRef.current, "income", id).catch(() => undefined);
     }
   };
 
   const updateExpenseCategoryTarget = async (id: string, target: number) => {
-    const nextExpenseCategories = expenseCategoriesRef.current.map((item) => (
-      item.id === id ? { ...item, target_amount: target } : item
-    ));
-    setBudgetState({ nextExpenseCategories });
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const existing = expenseCategoriesRef.current.find((item) => item.id === id);
+    if (!existing) return;
+    await setDoc(doc(getExpenseCategoriesCollection(auth.currentUser.uid), id), { ...existing, target_amount: target });
   };
 
   const updateIncomeCategoryTarget = async (id: string, target: number) => {
-    const nextIncomeCategories = incomeCategoriesRef.current.map((item) => (
-      item.id === id ? { ...item, target_amount: target } : item
-    ));
-    setBudgetState({ nextIncomeCategories });
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const existing = incomeCategoriesRef.current.find((item) => item.id === id);
+    if (!existing) return;
+    await setDoc(doc(getIncomeCategoriesCollection(auth.currentUser.uid), id), { ...existing, target_amount: target });
   };
 
   const updateCategoryTarget = updateExpenseCategoryTarget;
 
   const importData = async (type: string, rows: any[], isUpsert = false, onProgress?: (current: number, total: number) => void) => {
-    let nextExpenseCategories = [...expenseCategoriesRef.current];
-    let nextIncomeCategories = [...incomeCategoriesRef.current];
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    let nextExpenseCategories = migrateExpenseCategories([...expenseCategoriesRef.current]);
+    let nextIncomeCategories = migrateIncomeCategories([...incomeCategoriesRef.current]);
     let nextTransactions = [...transactionsRef.current];
     let nextIncome = [...incomeRef.current];
 
     const getOrCreateExpenseCategoryId = (name: string) => {
-      const existing = nextExpenseCategories.find((item) => item.name === name);
+      const normalizedName = normalizeExpenseCategoryName(name);
+      const existing = nextExpenseCategories.find((item) => normalizeCategoryName(item.name) === normalizedName);
       if (existing) return existing.id;
-      const created: ExpenseCategory = { id: crypto.randomUUID(), name, target_amount: 0 };
+      const created: ExpenseCategory = { id: crypto.randomUUID(), name: normalizedName, target_amount: 0 };
       nextExpenseCategories = [...nextExpenseCategories, created].sort((a, b) => a.name.localeCompare(b.name));
       return created.id;
     };
 
     const getOrCreateIncomeCategoryId = (name: string) => {
-      const existing = nextIncomeCategories.find((item) => item.name === name);
+      const normalizedName = normalizeCategoryName(name);
+      const existing = nextIncomeCategories.find((item) => normalizeCategoryName(item.name) === normalizedName);
       if (existing) return existing.id;
-      const created: IncomeCategory = { id: crypto.randomUUID(), name, target_amount: 0 };
+      const created: IncomeCategory = { id: crypto.randomUUID(), name: normalizedName, target_amount: 0 };
       nextIncomeCategories = [...nextIncomeCategories, created].sort((a, b) => a.name.localeCompare(b.name));
       return created.id;
     };
@@ -887,7 +1291,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (type === "expenses") {
         const [date, vendor, amount, categoryName, notes] = row;
-        const categoryId = getOrCreateExpenseCategoryId(categoryName);
+        const normalizedCategoryName = normalizeExpenseCategoryName(categoryName);
+        const categoryId = getOrCreateExpenseCategoryId(normalizedCategoryName);
         const existingIndex = isUpsert ? nextTransactions.findIndex((item) => item.date === date && item.vendor === vendor) : -1;
         const payload: Transaction = {
           id: existingIndex >= 0 ? nextTransactions[existingIndex].id : crypto.randomUUID(),
@@ -895,7 +1300,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           vendor,
           amount,
           category_id: categoryId,
-          category_name: categoryName,
+          category_name: normalizedCategoryName,
           notes,
           updated_at: getIsoNow(),
         };
@@ -908,7 +1313,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       if (type === "income") {
         const [date, source, amount, category, notes] = row;
-        const categoryId = getOrCreateIncomeCategoryId(category);
+        const normalizedCategoryName = normalizeCategoryName(category);
+        const categoryId = getOrCreateIncomeCategoryId(normalizedCategoryName);
         const existingIndex = isUpsert ? nextIncome.findIndex((item) => item.date === date && item.source === source) : -1;
         const payload: Income = {
           id: existingIndex >= 0 ? nextIncome[existingIndex].id : crypto.randomUUID(),
@@ -916,7 +1322,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           source,
           amount,
           category_id: existingIndex >= 0 ? nextIncome[existingIndex].category_id || categoryId : categoryId,
-          category,
+          category: normalizedCategoryName,
           notes,
           updated_at: getIsoNow(),
         };
@@ -930,28 +1336,42 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       onProgress?.(index + 1, rows.length);
     });
 
-    setBudgetState({ nextExpenseCategories, nextIncomeCategories, nextTransactions, nextIncome });
+    await replaceBudgetDataInFirestore({
+      nextExpenseCategories,
+      nextIncomeCategories,
+      nextTransactions,
+      nextIncome,
+      nextPreferences: preferencesRef.current,
+      nextSheetsConfig: sheetsConfigRef.current,
+      nextDriveConnection: driveConnectionRef.current,
+      nextLastSynced: lastSynced,
+    });
   };
 
   const wipeData = async (type: string) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
     if (type === "expenses") {
-      setBudgetState({ nextTransactions: [] });
+      await replaceCollection(getTransactionsCollection(auth.currentUser.uid), []);
       return;
     }
     if (type === "income") {
-      setBudgetState({ nextIncome: [] });
+      await replaceCollection(getIncomeCollection(auth.currentUser.uid), []);
       return;
     }
     if (type === "categories" || type === "targets" || type === "expenseCategories") {
-      setBudgetState({ nextExpenseCategories: createDefaultExpenseCategories() });
+      await replaceCollection(getExpenseCategoriesCollection(auth.currentUser.uid), createDefaultExpenseCategories());
+      return;
     }
     if (type === "incomeCategories") {
-      setBudgetState({ nextIncomeCategories: createIncomeCategoriesFromRecords(incomeRef.current) });
+      await replaceCollection(getIncomeCategoriesCollection(auth.currentUser.uid), createIncomeCategoriesFromRecords(incomeRef.current));
     }
   };
 
   const shareBudget = async () => {
-    throw new Error("Shared budgets are not available in private Drive mode yet.");
+    throw new Error("Shared budgets are disabled. Each Google account only sees its own data.");
   };
 
   const backupToDrive = async () => {
@@ -977,6 +1397,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       value={{
         user,
         loading,
+        authError,
+        clearAuthError: () => setAuthError(null),
         budgetId,
         ownerEmail: user?.email || null,
         sharedUsers: [],

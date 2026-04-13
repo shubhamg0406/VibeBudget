@@ -10,33 +10,91 @@ export const formatDate = (date: Date): string => {
 export const normalizeDateString = (dateStr: string): string => {
   if (!dateStr) return "";
 
-  const trimmed = dateStr.trim();
+  const trimmed = dateStr.trim().replace(/^"|"$/g, "");
   if (!trimmed) return "";
 
+  const isValidYmd = (year: number, month: number, day: number) => {
+    if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+    if (month < 1 || month > 12 || day < 1) return false;
+    const maxDay = new Date(year, month, 0).getDate();
+    return day <= maxDay;
+  };
+
+  const formatYmd = (year: number, month: number, day: number) => (
+    `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+  );
+
+  const parseGoogleSheetsSerialDate = (candidate: string) => {
+    if (!/^-?\d+(\.\d+)?$/.test(candidate)) return "";
+    const numeric = Number.parseFloat(candidate);
+    if (!Number.isFinite(numeric)) return "";
+
+    const serialDay = Math.floor(numeric);
+    // Google Sheets serial dates are days since 1899-12-30.
+    if (serialDay < 20000 || serialDay > 80000) return "";
+    const unixMillis = (serialDay - 25569) * 86400 * 1000;
+    const parsed = new Date(unixMillis);
+    if (Number.isNaN(parsed.getTime())) return "";
+
+    return formatYmd(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
+  };
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return trimmed;
+    const [yearStr, monthStr, dayStr] = trimmed.split("-");
+    const year = Number.parseInt(yearStr, 10);
+    const month = Number.parseInt(monthStr, 10);
+    const day = Number.parseInt(dayStr, 10);
+    return isValidYmd(year, month, day) ? trimmed : "";
   }
 
   const parts = trimmed.split(/[-/]/).map((part) => part.trim());
   if (parts.length === 3) {
     if (parts[0].length === 4) {
-      const [year, month, day] = parts;
-      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+      const [yearStr, monthStr, dayStr] = parts;
+      const year = Number.parseInt(yearStr, 10);
+      const month = Number.parseInt(monthStr, 10);
+      const day = Number.parseInt(dayStr, 10);
+      return isValidYmd(year, month, day) ? formatYmd(year, month, day) : "";
     }
 
     if (parts[2].length === 4 || parts[2].length === 2) {
-      const [month, day, year] = parts;
-      const normalizedYear = year.length === 2 ? `20${year}` : year;
-      return `${normalizedYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+      const [leftStr, rightStr, yearStr] = parts;
+      const left = Number.parseInt(leftStr, 10);
+      const right = Number.parseInt(rightStr, 10);
+      const year = Number.parseInt(yearStr.length === 2 ? `20${yearStr}` : yearStr, 10);
+
+      if (!Number.isFinite(left) || !Number.isFinite(right) || !Number.isFinite(year)) {
+        // Keep going so month-name formats like 1-Apr-2024 can be parsed
+        // by the Date fallback below.
+      } else {
+        // Disambiguate DD/MM/YYYY and MM/DD/YYYY when year is in the last position.
+        let month = left;
+        let day = right;
+        if (left > 12 && right <= 12) {
+          day = left;
+          month = right;
+        }
+
+        return isValidYmd(year, month, day) ? formatYmd(year, month, day) : "";
+      }
     }
+  }
+
+  const serialDate = parseGoogleSheetsSerialDate(trimmed);
+  if (serialDate) {
+    return serialDate;
+  }
+
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return "";
   }
 
   const parsed = new Date(trimmed);
   if (Number.isNaN(parsed.getTime())) {
-    return trimmed;
+    return "";
   }
 
-  return formatDate(parsed);
+  return formatYmd(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate());
 };
 
 export const parseDateString = (dateStr: string): Date => {
@@ -47,7 +105,9 @@ export const parseDateString = (dateStr: string): Date => {
 export const formatDisplayDate = (dateStr: string): string => {
   if (!dateStr) return "";
   const normalized = normalizeDateString(dateStr);
+  if (!normalized) return dateStr;
   const date = new Date(normalized + 'T00:00:00'); // Use T00:00:00 to avoid timezone shifts
+  if (Number.isNaN(date.getTime())) return dateStr;
   const d = date.getDate();
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const m = monthNames[date.getMonth()];
@@ -58,7 +118,9 @@ export const formatDisplayDate = (dateStr: string): string => {
 export const getMonthYearLabel = (dateStr: string): string => {
   if (!dateStr) return "";
   const normalized = normalizeDateString(dateStr);
+  if (!normalized) return "Unknown Date";
   const date = new Date(normalized + 'T00:00:00');
+  if (Number.isNaN(date.getTime())) return "Unknown Date";
   const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   return `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
 };

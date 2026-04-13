@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ExpenseCategory, Income, IncomeCategory, Transaction } from "../types";
 import {
   ArrowDownRight,
@@ -13,6 +13,7 @@ import {
 import { motion } from "motion/react";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
+import { getCategoryDropdownNames } from "../utils/categoryOptions";
 
 interface DashboardProps {
   expenseCategories: ExpenseCategory[];
@@ -40,8 +41,37 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const { preferences } = useFirebase();
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const normalizeCategoryKey = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase();
 
   const baseSymbol = getCurrencySymbol(preferences?.baseCurrency);
+
+  const expenseCategoryNames = useMemo(
+    () => getCategoryDropdownNames("expense", expenseCategories, incomeCategories),
+    [expenseCategories, incomeCategories]
+  );
+  const expenseCategoryGroups = useMemo(() => {
+    const groups = new Map<string, { id: string; ids: string[]; name: string; target_amount: number }>();
+    expenseCategories.forEach((category) => {
+      const key = normalizeCategoryKey(category.name);
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          id: category.id,
+          ids: [category.id],
+          name: category.name,
+          target_amount: category.target_amount || 0,
+        });
+        return;
+      }
+      if (!existing.ids.includes(category.id)) {
+        existing.ids.push(category.id);
+      }
+      if ((existing.target_amount || 0) === 0 && (category.target_amount || 0) !== 0) {
+        existing.target_amount = category.target_amount;
+      }
+    });
+    return groups;
+  }, [expenseCategories]);
 
   const totalSpend = transactions.reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
   const totalIncome = income.reduce((acc, i) => acc + convertToBaseCurrency(i.amount, i.currency, preferences), 0);
@@ -49,13 +79,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const prevSpend = previousTransactions.reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
   const prevIncome = previousIncome.reduce((acc, i) => acc + convertToBaseCurrency(i.amount, i.currency, preferences), 0);
 
-  const categorySpending = expenseCategories.map((cat) => {
+  const categorySpending = expenseCategoryNames.map((categoryName) => {
+    const categoryGroup = expenseCategoryGroups.get(normalizeCategoryKey(categoryName));
+    const categoryIds = categoryGroup?.ids || [];
+    const targetAmount = categoryGroup?.target_amount || 0;
     const spend = transactions
-      .filter((transaction) => transaction.category_id === cat.id)
+      .filter((transaction) => (
+        categoryIds.includes(transaction.category_id)
+        || normalizeCategoryKey(transaction.category_name || "") === normalizeCategoryKey(categoryName)
+      ))
       .reduce((acc, transaction) => acc + convertToBaseCurrency(transaction.amount, transaction.currency, preferences), 0);
-    const proratedTarget = cat.target_amount * monthMultiplier;
+    const proratedTarget = targetAmount * monthMultiplier;
     const progress = proratedTarget > 0 ? (spend / proratedTarget) * 100 : 0;
-    return { ...cat, spend, progress, proratedTarget };
+    return {
+      id: categoryGroup?.id || categoryName,
+      name: categoryName,
+      target_amount: targetAmount,
+      spend,
+      progress,
+      proratedTarget,
+    };
   });
 
   const incomeCategoryProgress = incomeCategories.map((cat) => {
@@ -68,12 +111,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   });
 
   const activeTargets = categorySpending.filter((category) => category.target_amount > 0);
+  const visibleExpenseTargets = categorySpending;
   const activeIncomeTargets = incomeCategoryProgress.filter((category) => category.target_amount > 0);
   const overTargetCount = activeTargets.filter((category) => category.spend > category.proratedTarget).length;
   const incomeTargetCount = activeIncomeTargets.filter((category) => category.received >= category.proratedTarget).length;
   const spendingRatio = totalIncome > 0 ? Math.min(100, (totalSpend / totalIncome) * 100) : 0;
   const hasRecords = transactions.length > 0 || income.length > 0;
-  const isEmptyState = !hasRecords && activeTargets.length === 0;
+  const isEmptyState = !hasRecords && visibleExpenseTargets.length === 0;
 
   const calculatePercentageChange = (current: number, previous: number) => {
     if (previous === 0) return current > 0 ? 100 : 0;
@@ -252,7 +296,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <Edit2 size={16} className="text-fintech-muted" />
             </div>
 
-            {activeTargets.length === 0 ? (
+            {visibleExpenseTargets.length === 0 ? (
               <div className="mt-6 text-center">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-[var(--app-border-strong)] bg-[var(--app-panel-strong)] text-[#6fbdf5]">
                   <Sparkles size={22} />
@@ -274,7 +318,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-lg border bg-[var(--app-panel-muted)] px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fintech-muted">Active</div>
-                    <div className="mt-1 text-base font-semibold text-[var(--app-text)]">{activeTargets.length} categories</div>
+                    <div className="mt-1 text-base font-semibold text-[var(--app-text)]">{visibleExpenseTargets.length} categories</div>
                   </div>
                   <div className="rounded-lg border bg-[var(--app-panel-muted)] px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
                     <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-fintech-muted">Over Limit</div>
@@ -285,7 +329,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
 
                 <div className="max-h-[280px] space-y-2 overflow-y-auto pr-1 no-scrollbar">
-                  {activeTargets.map((cat) => (
+                  {visibleExpenseTargets.map((cat) => (
                     <div key={cat.id} className="rounded-lg border bg-[var(--app-panel-muted)] px-2.5 py-2" style={{ borderColor: "var(--app-border)" }}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">

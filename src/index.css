@@ -93,7 +93,7 @@ body,
 body {
   background: var(--app-shell);
   color: var(--app-text);
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: "Sora", "Inter", system-ui, -apple-system, sans-serif;
   font-size: 13px;
   transition: background-color 0.25s ease, background-image 0.25s ease, color 0.25s ease;
 }

@@ -7,6 +7,7 @@ import {
   PublicSheetImportCellCoordinate,
   Transaction,
 } from "../types";
+import { normalizeDateString } from "./dateUtils";
 
 const GOOGLE_SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets";
 const DEFAULT_EXPENSE_HEADERS = ["Date", "Vendor", "Amount", "Category", "Notes", "VibeBudget ID", "Updated At"];
@@ -40,6 +41,14 @@ interface SpreadsheetMetadataResponse {
 
 interface ValueRangeResponse {
   values?: string[][];
+}
+
+interface GoogleApiErrorPayload {
+  error?: {
+    code?: number;
+    status?: string;
+    message?: string;
+  };
 }
 
 export interface SheetTabPreview {
@@ -131,30 +140,95 @@ const parseAmount = (value: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const parseSheetDate = (value: string) => {
+type DateOrder = "mdy" | "dmy";
+
+const isValidYmd = (year: number, month: number, day: number) => {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12 || day < 1) return false;
+  const maxDay = new Date(year, month, 0).getDate();
+  return day <= maxDay;
+};
+
+const formatYmd = (year: number, month: number, day: number) => (
+  `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+);
+
+const inferDateOrderFromValues = (values: string[]): DateOrder => {
+  let mdyVotes = 0;
+  let dmyVotes = 0;
+
+  for (const rawValue of values) {
+    const trimmed = rawValue.trim();
+    if (!trimmed || /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(trimmed)) continue;
+
+    const parts = trimmed.split(/[-/]/).map((part) => part.trim());
+    if (parts.length !== 3) continue;
+    if (!(parts[2].length === 4 || parts[2].length === 2)) continue;
+
+    const left = Number.parseInt(parts[0], 10);
+    const right = Number.parseInt(parts[1], 10);
+    if (!Number.isFinite(left) || !Number.isFinite(right)) continue;
+
+    if (left > 12 && right <= 12) dmyVotes += 1;
+    if (right > 12 && left <= 12) mdyVotes += 1;
+  }
+
+  return dmyVotes > mdyVotes ? "dmy" : "mdy";
+};
+
+const parseSheetDate = (value: string, preferredOrder: DateOrder = "mdy") => {
   const trimmed = value.trim();
   if (!trimmed) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const [yearStr, monthStr, dayStr] = trimmed.split("-");
+    const year = Number.parseInt(yearStr, 10);
+    const month = Number.parseInt(monthStr, 10);
+    const day = Number.parseInt(dayStr, 10);
+    return isValidYmd(year, month, day) ? trimmed : "";
+  }
 
   const parts = trimmed.split(/[-/]/);
   if (parts.length === 3) {
     if (parts[0].length === 4) {
-      const [year, month, day] = parts;
-      return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+      const [yearStr, monthStr, dayStr] = parts;
+      const year = Number.parseInt(yearStr, 10);
+      const month = Number.parseInt(monthStr, 10);
+      const day = Number.parseInt(dayStr, 10);
+      return isValidYmd(year, month, day) ? formatYmd(year, month, day) : "";
     }
 
-    const [month, day, year] = parts;
-    const normalizedYear = year.length === 2 ? `20${year}` : year;
-    return `${normalizedYear}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+    const [leftStr, rightStr, yearStr] = parts;
+    if (yearStr.length === 4 || yearStr.length === 2) {
+      const left = Number.parseInt(leftStr, 10);
+      const right = Number.parseInt(rightStr, 10);
+      const year = Number.parseInt(yearStr.length === 2 ? `20${yearStr}` : yearStr, 10);
+
+      if (Number.isFinite(left) && Number.isFinite(right) && Number.isFinite(year)) {
+        let month: number;
+        let day: number;
+
+        if (left > 12 && right <= 12) {
+          day = left;
+          month = right;
+        } else if (right > 12 && left <= 12) {
+          month = left;
+          day = right;
+        } else if (preferredOrder === "dmy") {
+          day = left;
+          month = right;
+        } else {
+          month = left;
+          day = right;
+        }
+
+        if (isValidYmd(year, month, day)) {
+          return formatYmd(year, month, day);
+        }
+      }
+    }
   }
 
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) return trimmed;
-
-  const year = parsed.getFullYear();
-  const month = String(parsed.getMonth() + 1).padStart(2, "0");
-  const day = String(parsed.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return normalizeDateString(trimmed);
 };
 
 const getDefaultExpenseMapping = (): ExpenseSheetMapping => ({
@@ -188,8 +262,26 @@ const fetchGoogleSheets = async <T>(token: string, url: string, init?: RequestIn
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Google Sheets request failed with ${response.status}`);
+    const rawMessage = await response.text();
+    let parsedMessage = "";
+    let parsedStatus = "";
+
+    try {
+      const payload = JSON.parse(rawMessage) as GoogleApiErrorPayload;
+      parsedMessage = payload.error?.message || "";
+      parsedStatus = payload.error?.status || "";
+    } catch {
+      parsedMessage = "";
+    }
+
+    const message = parsedMessage || rawMessage || `Google Sheets request failed with ${response.status}`;
+    const normalizedError = new Error(message) as Error & {
+      statusCode?: number;
+      googleStatus?: string;
+    };
+    normalizedError.statusCode = response.status;
+    normalizedError.googleStatus = parsedStatus;
+    throw normalizedError;
   }
 
   if (response.status === 204) {
@@ -197,6 +289,46 @@ const fetchGoogleSheets = async <T>(token: string, url: string, init?: RequestIn
   }
 
   return response.json() as Promise<T>;
+};
+
+export const getGoogleSheetsAccessErrorMessage = (error: unknown) => {
+  const fallback = "Unable to open this Google Sheet right now.";
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+
+  const candidate = error as Error & {
+    statusCode?: number;
+    googleStatus?: string;
+  };
+  const message = error.message || "";
+  const normalizedMessage = message.toLowerCase();
+
+  if (
+    candidate.statusCode === 401 ||
+    candidate.googleStatus === "UNAUTHENTICATED"
+  ) {
+    return "Your Google Sheets session expired. Reconnect Google and try again.";
+  }
+
+  if (
+    candidate.statusCode === 403 ||
+    normalizedMessage.includes("permission") ||
+    normalizedMessage.includes("caller does not have permission") ||
+    candidate.googleStatus === "PERMISSION_DENIED"
+  ) {
+    return "The signed-in Google account does not have access to this sheet. Share the sheet with that same email or paste a different sheet link.";
+  }
+
+  if (
+    candidate.statusCode === 404 ||
+    normalizedMessage.includes("requested entity was not found") ||
+    candidate.googleStatus === "NOT_FOUND"
+  ) {
+    return "This Google Sheet could not be found for the signed-in Google account. Check the link, or make sure that same Google email can access it.";
+  }
+
+  return message || fallback;
 };
 
 export const parseSpreadsheetId = (input: string) => {
@@ -742,13 +874,19 @@ export const syncSheetDataToApp = async ({
 
   const expenseSheet = await readSheetRecords(token, config.spreadsheetId, config.expensesSheetName);
   const incomeSheet = await readSheetRecords(token, config.spreadsheetId, config.incomeSheetName);
+  const expenseDateOrder = inferDateOrderFromValues(
+    expenseSheet.records.map((row) => row.values[config.expenseMapping.date] || "")
+  );
+  const incomeDateOrder = inferDateOrderFromValues(
+    incomeSheet.records.map((row) => row.values[config.incomeMapping.date] || "")
+  );
 
   const transactionsById = new Map(transactions.map((item) => [item.id, item]));
   const incomeById = new Map(income.map((item) => [item.id, item]));
 
   for (const row of expenseSheet.records) {
     const id = row.values[config.expenseMapping.id] || null;
-    const date = parseSheetDate(row.values[config.expenseMapping.date] || "");
+    const date = parseSheetDate(row.values[config.expenseMapping.date] || "", expenseDateOrder);
     const vendor = row.values[config.expenseMapping.vendor] || "";
     const amount = parseAmount(row.values[config.expenseMapping.amount] || "");
     const categoryName = row.values[config.expenseMapping.category] || "";
@@ -758,7 +896,14 @@ export const syncSheetDataToApp = async ({
     if (!date || !vendor || !categoryName) continue;
 
     const existing = id ? transactionsById.get(id) : undefined;
-    if (existing && existing.updated_at && existing.updated_at >= updatedAt) {
+    const hasDifferentData = existing
+      ? existing.date !== date
+        || existing.vendor !== vendor
+        || existing.amount !== amount
+        || existing.category_name !== categoryName
+        || (existing.notes || "") !== notes
+      : true;
+    if (existing && existing.updated_at && existing.updated_at >= updatedAt && !hasDifferentData) {
       continue;
     }
 
@@ -776,7 +921,7 @@ export const syncSheetDataToApp = async ({
 
   for (const row of incomeSheet.records) {
     const id = row.values[config.incomeMapping.id] || null;
-    const date = parseSheetDate(row.values[config.incomeMapping.date] || "");
+    const date = parseSheetDate(row.values[config.incomeMapping.date] || "", incomeDateOrder);
     const source = row.values[config.incomeMapping.source] || "";
     const amount = parseAmount(row.values[config.incomeMapping.amount] || "");
     const category = row.values[config.incomeMapping.category] || "";
@@ -786,7 +931,14 @@ export const syncSheetDataToApp = async ({
     if (!date || !source || !category) continue;
 
     const existing = id ? incomeById.get(id) : undefined;
-    if (existing && existing.updated_at && existing.updated_at >= updatedAt) {
+    const hasDifferentData = existing
+      ? existing.date !== date
+        || existing.source !== source
+        || existing.amount !== amount
+        || existing.category !== category
+        || (existing.notes || "") !== notes
+      : true;
+    if (existing && existing.updated_at && existing.updated_at >= updatedAt && !hasDifferentData) {
       continue;
     }
 

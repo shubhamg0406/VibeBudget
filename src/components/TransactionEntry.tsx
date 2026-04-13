@@ -1,10 +1,11 @@
-import React, { useState } from "react";
-import { ExpenseCategory, IncomeCategory } from "../types";
+import React, { useMemo, useState } from "react";
+import { ExpenseCategory, Income, IncomeCategory, Transaction } from "../types";
 import { Plus, Search, Calendar, DollarSign, Tag, FileText, User } from "lucide-react";
 import { getTodayStr, formatDisplayDate } from "../utils/dateUtils";
 import { TransactionIcon } from "./TransactionIcon";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { CURRENCIES, getCurrencySymbol } from "../utils/currencyUtils";
+import { getCategoryDropdownNames } from "../utils/categoryOptions";
 
 const evaluateMath = (input: string): number | null => {
   try {
@@ -69,8 +70,28 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
   const [isFocused, setIsFocused] = useState(false);
   const [isVendorFocused, setIsVendorFocused] = useState(false);
 
-  const filteredCategories = expenseCategories.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase())
+  const expenseCategoryNames = useMemo(
+    () => getCategoryDropdownNames("expense", expenseCategories, incomeCategories),
+    [expenseCategories, incomeCategories]
+  );
+  const incomeCategoryOptions = useMemo(
+    () =>
+      incomeCategories
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [incomeCategories]
+  );
+  const expenseCategoryByName = useMemo(() => {
+    const map = new Map<string, ExpenseCategory>();
+    expenseCategories.forEach((category) => {
+      if (!map.has(category.name)) {
+        map.set(category.name, category);
+      }
+    });
+    return map;
+  }, [expenseCategories]);
+  const filteredCategories = expenseCategoryNames.filter((name) =>
+    name.toLowerCase().includes(search.toLowerCase())
   );
 
   const pastVendors = Array.from(new Set(transactions.map(t => t.vendor))).filter(Boolean);
@@ -89,25 +110,25 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
 
     setSubmitting(true);
     try {
-      const body = type === "expense" ? {
-        date,
-        vendor,
-        amount: finalAmount,
-        currency,
-        category_id: categoryId,
-        category_name: search,
-        notes
-      } : {
-        date,
-        source: vendor,
-        amount: finalAmount,
-        currency,
-        category_id: incomeCategoryId,
-        category: incomeCategory,
-        notes
-      };
-
       if (initialData) {
+        const body = type === "expense" ? {
+          date,
+          vendor,
+          amount: finalAmount,
+          currency,
+          category_id: categoryId,
+          category_name: search,
+          notes
+        } : {
+          date,
+          source: vendor,
+          amount: finalAmount,
+          currency,
+          category_id: incomeCategoryId,
+          category: incomeCategory,
+          notes
+        };
+
         if (type === "expense") {
           await updateTransaction(initialData.id, body);
         } else {
@@ -115,8 +136,26 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
         }
       } else {
         if (type === "expense") {
+          const body: Omit<Transaction, "id"> = {
+            date,
+            vendor,
+            amount: finalAmount,
+            currency,
+            category_id: categoryId,
+            category_name: search,
+            notes,
+          };
           await addTransaction(body);
         } else {
+          const body: Omit<Income, "id"> = {
+            date,
+            source: vendor,
+            amount: finalAmount,
+            currency,
+            category_id: incomeCategoryId,
+            category: incomeCategory,
+            notes,
+          };
           await addIncome(body);
         }
       }
@@ -129,7 +168,7 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
         setCategoryId("");
         setSearch("");
         setIncomeCategoryId("");
-        setIncomeCategory(incomeCategories[0]?.name || "Job");
+        setIncomeCategory(incomeCategoryOptions[0]?.name || "Job");
         setNotes("");
       }
       
@@ -336,20 +375,21 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
                 {isFocused && !categoryId && (
                   <div className="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-xl border glass-card shadow-2xl" style={{ borderColor: "var(--app-border-strong)" }}>
                     {filteredCategories.length > 0 ? (
-                      filteredCategories.map((cat) => (
+                      filteredCategories.map((categoryName) => (
                         <button
-                          key={cat.id}
+                          key={categoryName}
                           type="button"
                           onMouseDown={() => {
+                            const category = expenseCategoryByName.get(categoryName);
                             // Use onMouseDown to trigger before onBlur
-                            setCategoryId(cat.id.toString());
-                            setSearch(cat.name);
+                            setCategoryId(category?.id || "");
+                            setSearch(categoryName);
                             setIsFocused(false);
                           }}
                           className="w-full border-b px-4 py-3 text-left text-sm transition-colors hover:bg-fintech-accent hover:text-white last:border-0"
                           style={{ borderColor: "var(--app-border)" }}
                         >
-                          {cat.name}
+                          {categoryName}
                         </button>
                       ))
                     ) : (
@@ -374,7 +414,7 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
                 value={incomeCategoryId}
                 onChange={(e) => {
                   const nextId = e.target.value;
-                  const nextCategory = incomeCategories.find((item) => item.id === nextId);
+                  const nextCategory = incomeCategoryOptions.find((item) => item.id === nextId);
                   setIncomeCategoryId(nextId);
                   setIncomeCategory(nextCategory?.name || "");
                 }}
@@ -382,7 +422,7 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
                 required
               >
                 <option value="" disabled>Select income category</option>
-                {incomeCategories.map((item) => (
+                {incomeCategoryOptions.map((item) => (
                   <option key={item.id} value={item.id}>{item.name}</option>
                 ))}
               </select>

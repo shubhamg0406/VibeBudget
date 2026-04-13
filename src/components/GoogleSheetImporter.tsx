@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import {
+  getGoogleSheetsAccessErrorMessage,
   ImportFieldDefinition,
   SheetTabPreview,
   buildCellRef,
@@ -20,6 +21,7 @@ import {
   parseA1CellReference,
   parseSpreadsheetId,
 } from "../utils/googleSheetsSync";
+import { normalizeDateString } from "../utils/dateUtils";
 import {
   PublicSheetImportCellCoordinate,
   PublicSheetImportConfig,
@@ -158,33 +160,10 @@ const parseAmount = (value: string) => {
   return Number.parseFloat(cleaned) || 0;
 };
 
-const getTodayStr = () => new Date().toISOString().split("T")[0];
-
 const parseDate = (value: string) => {
-  if (!value) return getTodayStr();
-
-  const trimmed = value.trim().replace(/^"|"$/g, "");
-  const parts = trimmed.split(/[-/]/);
-  if (parts.length === 3) {
-    let year;
-    let month;
-    let day;
-
-    if (parts[0].length === 4) {
-      [year, month, day] = parts;
-    } else if (parts[2].length === 4 || parts[2].length === 2) {
-      [month, day, year] = parts;
-    } else {
-      return trimmed;
-    }
-
-    return `${(year.length === 2 ? `20${year}` : year)}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
-
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) return trimmed;
-
-  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+  if (!value) return "";
+  const normalized = normalizeDateString(value.trim().replace(/^"|"$/g, ""));
+  return normalized || "";
 };
 
 const normalizeCellDraft = (value: string) => value.trim().toUpperCase();
@@ -281,6 +260,7 @@ export const GoogleSheetImporter: React.FC<GoogleSheetImporterProps> = ({ initia
   const [previewLoading, setPreviewLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sharedUrlError, setSharedUrlError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [detectedTabs, setDetectedTabs] = useState<SheetTabPreview[]>([]);
   const [previewRows, setPreviewRows] = useState<string[][]>([]);
@@ -463,6 +443,7 @@ export const GoogleSheetImporter: React.FC<GoogleSheetImporterProps> = ({ initia
   useEffect(() => {
     const nextSpreadsheetId = parseSpreadsheetId(activeSourceUrl) || "";
     setSpreadsheetId(nextSpreadsheetId);
+    setSharedUrlError(null);
 
     if (!nextSpreadsheetId || !googleSheetsAccessToken) {
       setDetectedTabs([]);
@@ -474,9 +455,11 @@ export const GoogleSheetImporter: React.FC<GoogleSheetImporterProps> = ({ initia
       try {
         const tabs = await getSheetTabPreviews(googleSheetsAccessToken, nextSpreadsheetId, 6);
         setDetectedTabs(tabs);
+        setSharedUrlError(null);
       } catch (loadError) {
         console.error("Tab detection failed", loadError);
         setDetectedTabs([]);
+        setSharedUrlError(getGoogleSheetsAccessErrorMessage(loadError));
       } finally {
         setTabsLoading(false);
       }
@@ -508,7 +491,11 @@ export const GoogleSheetImporter: React.FC<GoogleSheetImporterProps> = ({ initia
     }
 
     if (googleSheetsAccessToken) {
-      return getFullSheetGridRows(googleSheetsAccessToken, resolvedSpreadsheetId, sheetTabName);
+      try {
+        return await getFullSheetGridRows(googleSheetsAccessToken, resolvedSpreadsheetId, sheetTabName);
+      } catch (error) {
+        throw new Error(getGoogleSheetsAccessErrorMessage(error));
+      }
     }
 
     const targetUrl = `https://docs.google.com/spreadsheets/d/${resolvedSpreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetTabName)}`;
@@ -536,6 +523,11 @@ export const GoogleSheetImporter: React.FC<GoogleSheetImporterProps> = ({ initia
 
     if (!spreadsheetId) {
       setError("Enter a valid Google Sheet URL or spreadsheet ID.");
+      return;
+    }
+
+    if (sharedUrlError) {
+      setError(sharedUrlError);
       return;
     }
 
@@ -919,6 +911,7 @@ export const GoogleSheetImporter: React.FC<GoogleSheetImporterProps> = ({ initia
                         setPreviewRows([]);
                         setDetectedTabs([]);
                         setError(null);
+                        setSharedUrlError(null);
                       }}
                       onBlur={() => {
                         const trimmed = sharedUrl.trim();
@@ -936,6 +929,12 @@ export const GoogleSheetImporter: React.FC<GoogleSheetImporterProps> = ({ initia
                   <p className="text-xs text-fintech-muted">
                     Enter this once and reuse it for expense categories, income categories, expenses, and income imports.
                   </p>
+                  {sharedUrlError && (
+                    <div className="flex items-start gap-2 rounded-xl border border-fintech-danger/20 bg-fintech-danger/10 px-3 py-2 text-xs text-fintech-danger">
+                      <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                      <span>{sharedUrlError}</span>
+                    </div>
+                  )}
                 </label>
               )}
             </div>

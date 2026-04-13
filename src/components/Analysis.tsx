@@ -58,12 +58,44 @@ export const Analysis: React.FC<AnalysisProps> = ({
   const [activeTab, setActiveTab] = useState<"overview" | "comparison" | "deep-dive">("overview");
   const [comparisonPeriod, setComparisonPeriod] = useState<ComparisonPeriodOption>("latest-month-vs-prev-month");
   const [comparisonMode, setComparisonMode] = useState<"previous" | "last-year">("last-year");
-  const categories = expenseCategories;
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(expenseCategories[0]?.id || null);
+  const normalizeExpenseCategoryName = (name: string) => name.trim().replace(/\s+/g, " ");
+  const normalizeExpenseCategoryKey = (name: string) => normalizeExpenseCategoryName(name).toLowerCase();
+  const categories = useMemo(() => {
+    const byName = new Map<string, { id: string; ids: string[]; name: string; target_amount: number; normalizedName: string }>();
+    expenseCategories.forEach((category) => {
+      const normalizedName = normalizeExpenseCategoryName(category.name);
+      if (!normalizedName) return;
+      const key = normalizeExpenseCategoryKey(normalizedName);
+      const existing = byName.get(key);
+      if (!existing) {
+        byName.set(key, {
+          id: category.id,
+          ids: [category.id],
+          name: normalizedName,
+          target_amount: category.target_amount || 0,
+          normalizedName,
+        });
+        return;
+      }
+      if (!existing.ids.includes(category.id)) {
+        existing.ids.push(category.id);
+      }
+      if ((existing.target_amount || 0) === 0 && (category.target_amount || 0) !== 0) {
+        existing.target_amount = category.target_amount;
+      }
+    });
+    return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [expenseCategories]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(categories[0]?.id || null);
   const { preferences, updatePreferences } = useFirebase();
   const baseSymbol = getCurrencySymbol(preferences?.baseCurrency);
   const [showCoreFilter, setShowCoreFilter] = useState(false);
   const coreExcluded = useMemo(() => preferences?.coreExcludedCategories || [], [preferences?.coreExcludedCategories]);
+  const coreFilterCategoryNames = useMemo(
+    () => Array.from(new Set(expenseCategories.map((category) => category.name).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b)),
+    [expenseCategories]
+  );
   
   // Independent date ranges for Overview, Comparison, and Category Trends
   const [overviewRange, setOverviewRange] = useState<DateRange>(currentRange);
@@ -75,15 +107,20 @@ export const Analysis: React.FC<AnalysisProps> = ({
   const resolvedCategoryRange = useMemo(() => resolveDateRange(categoryRange), [categoryRange]);
 
   useEffect(() => {
-    if (expenseCategories.length === 0) {
+    if (categories.length === 0) {
       setSelectedCategoryId(null);
       return;
     }
 
-    if (!selectedCategoryId || !expenseCategories.some((category) => category.id === selectedCategoryId)) {
-      setSelectedCategoryId(expenseCategories[0].id);
+    if (!selectedCategoryId || !categories.some((category) => category.id === selectedCategoryId)) {
+      setSelectedCategoryId(categories[0].id);
     }
-  }, [expenseCategories, selectedCategoryId]);
+  }, [categories, selectedCategoryId]);
+
+  const transactionMatchesCategory = (transaction: Transaction, category: { ids: string[]; normalizedName: string }) => (
+    category.ids.includes(transaction.category_id) ||
+    normalizeExpenseCategoryKey(transaction.category_name || "") === normalizeExpenseCategoryKey(category.normalizedName)
+  );
 
   // Filter transactions based on mode and local range
   const filteredTransactions = useMemo(() => {
@@ -241,10 +278,10 @@ export const Analysis: React.FC<AnalysisProps> = ({
     
     const data = categories.map(cat => {
       const current = currentTransactions
-        .filter(t => t.category_id === cat.id)
+        .filter(t => transactionMatchesCategory(t, cat))
         .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       const previous = prevTransactions
-        .filter(t => t.category_id === cat.id)
+        .filter(t => transactionMatchesCategory(t, cat))
         .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       
       // Prorate current if it's exactly the current month and we are comparing against a full month
@@ -399,7 +436,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
   const pieData = useMemo(() => {
     const raw = categories.map(cat => {
       const value = filteredTransactions
-        .filter(t => t.category_id === cat.id)
+        .filter(t => transactionMatchesCategory(t, cat))
         .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       return { name: cat.name, value };
     }).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
@@ -465,7 +502,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
     const data = timePoints.map(point => {
       const actual = allTransactions
         .filter(t => 
-          t.category_id === selectedCategoryId && 
+          Boolean(selectedCategory && transactionMatchesCategory(t, selectedCategory)) &&
           (isDaily ? normalizeDateString(t.date) === point : getMonthKey(t.date) === point) &&
           isDateInRange(t.date, resolvedCategoryRange.start, resolvedCategoryRange.end)
         )
@@ -547,25 +584,25 @@ export const Analysis: React.FC<AnalysisProps> = ({
                       <div className="text-[10px] text-fintech-muted">Checked categories are dropped when CORE is active.</div>
                     </div>
                     <div className="max-h-64 overflow-y-auto p-2">
-                      {categories.map(c => {
-                        const isExcluded = coreExcluded.includes(c.name);
+                      {coreFilterCategoryNames.map((categoryName) => {
+                        const isExcluded = coreExcluded.includes(categoryName);
                         return (
-                          <label key={c.id} className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-[var(--app-ghost)]">
+                          <label key={categoryName} className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-[var(--app-ghost)]">
                             <input
                               type="checkbox"
                               checked={isExcluded}
                               onChange={(e) => {
                                 if (updatePreferences && preferences) {
-                                  const newExcluded = e.target.checked 
-                                    ? [...coreExcluded, c.name]
-                                    : coreExcluded.filter(n => n !== c.name);
+                                  const newExcluded = e.target.checked
+                                    ? Array.from(new Set([...coreExcluded, categoryName]))
+                                    : coreExcluded.filter((name) => name !== categoryName);
                                   updatePreferences({ ...preferences, coreExcludedCategories: newExcluded });
                                 }
                               }}
                               className="h-4 w-4 rounded border text-fintech-accent focus:ring-fintech-accent/20 bg-[var(--app-panel-muted)]"
                               style={{ borderColor: "var(--app-border)" }}
                             />
-                            <span className="text-xs text-white">{c.name}</span>
+                            <span className="text-xs text-white">{categoryName}</span>
                           </label>
                         );
                       })}

@@ -1,52 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: /users/{userId}
-    // Fields:
-    //   - budgetId: string (required)
-    //   - email: string (required)
-    //
-    // Collection: /budgets/{budgetId}/categories
-    // Fields:
-    //   - name: string (required)
-    //   - target_amount: number (required)
-    //   - uid: string (required, creator's uid)
-    //
-    // Collection: /budgets/{budgetId}/transactions
-    // Fields:
-    //   - date: string (required, YYYY-MM-DD)
-    //   - vendor: string (required)
-    //   - amount: number (required)
-    //   - category_id: string (required)
-    //   - category_name: string (required)
-    //   - notes: string (optional)
-    //   - uid: string (required, creator's uid)
-    //
-    // Collection: /budgets/{budgetId}/income
-    // Fields:
-    //   - date: string (required, YYYY-MM-DD)
-    //   - source: string (required)
-    //   - amount: number (required)
-    //   - category: string (required)
-    //   - notes: string (optional)
-    //   - uid: string (required, creator's uid)
-    //
-    // Collection: /invites/{inviteId}
-    // Fields:
-    //   - email: string (required)
-    //   - inviterBudgetId: string (required)
-    //   - inviterEmail: string (required)
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -55,111 +9,46 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function getBudgetId() {
-      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
-      return exists(userPath) ? get(userPath).data.budgetId : null;
-    }
-
-    function isGuestBudget(budgetId) {
-      return budgetId.matches("^guest_.*");
-    }
-
-    function canAccessBudget(budgetId) {
-      return isGuestBudget(budgetId) || (isAuthenticated() && (request.auth.uid == budgetId || getBudgetId() == budgetId));
-    }
-
-    function isValidDateString(dateStr) {
-      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}$");
-    }
-
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-
-    function isValidCategory(data) {
-      return data.keys().hasAll(['name', 'target_amount', 'uid']) &&
-             data.keys().hasOnly(['name', 'target_amount', 'uid']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.target_amount is number && data.target_amount >= 0 &&
-             data.uid is string;
-    }
-
-    function isValidTransaction(data) {
-      return data.keys().hasAll(['date', 'vendor', 'amount', 'category_id', 'category_name', 'uid']) &&
-             data.keys().hasOnly(['date', 'vendor', 'amount', 'category_id', 'category_name', 'notes', 'updated_at', 'uid']) &&
-             isValidDateString(data.date) &&
-             data.vendor is string && data.vendor.size() > 0 && data.vendor.size() < 200 &&
-             data.amount is number &&
-             data.category_id is string &&
-             data.category_name is string &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
-             (!('updated_at' in data) || data.updated_at is string) &&
-             data.uid is string;
-    }
-
-    function isValidIncome(data) {
-      return data.keys().hasAll(['date', 'source', 'amount', 'category', 'uid']) &&
-             data.keys().hasOnly(['date', 'source', 'amount', 'category', 'notes', 'updated_at', 'uid']) &&
-             isValidDateString(data.date) &&
-             data.source is string && data.source.size() > 0 && data.source.size() < 200 &&
-             data.amount is number &&
-             data.category is string &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() < 1000)) &&
-             (!('updated_at' in data) || data.updated_at is string) &&
-             data.uid is string;
-    }
-
-    // ===============================================================
-    // Rules
-    // ===============================================================
-
     match /users/{userId} {
-      allow read: if isAuthenticated(); // Allow reading profiles for sharing/lookup
-      allow write: if isOwner(userId);
-    }
+      allow read, write: if isOwner(userId);
 
-    match /invites/{inviteId} {
-      allow read: if isAuthenticated() && (request.auth.token.email == resource.data.email || getBudgetId() == resource.data.inviterBudgetId);
-      allow create: if isAuthenticated() && getBudgetId() == request.resource.data.inviterBudgetId;
-      allow delete: if isAuthenticated() && (request.auth.token.email == resource.data.email || getBudgetId() == resource.data.inviterBudgetId);
-    }
-
-    match /budgets/{budgetId} {
-      allow read: if canAccessBudget(budgetId);
-      allow write: if canAccessBudget(budgetId);
-      
-      match /sync/{syncId} {
-        allow read, write: if canAccessBudget(budgetId);
-      }
-      
       match /categories/{categoryId} {
-        allow read: if canAccessBudget(budgetId);
-        allow create: if canAccessBudget(budgetId) && isValidCategory(request.resource.data);
-        allow update: if canAccessBudget(budgetId) && isValidCategory(request.resource.data);
-        allow delete: if canAccessBudget(budgetId);
+        allow read, write: if isOwner(userId);
+      }
+
+      match /incomeCategories/{categoryId} {
+        allow read, write: if isOwner(userId);
       }
 
       match /transactions/{transactionId} {
-        allow read: if canAccessBudget(budgetId);
-        allow create: if canAccessBudget(budgetId) && isValidTransaction(request.resource.data);
-        allow update: if canAccessBudget(budgetId) && isValidTransaction(request.resource.data);
-        allow delete: if canAccessBudget(budgetId);
+        allow read, write: if isOwner(userId);
       }
 
       match /income/{incomeId} {
-        allow read: if canAccessBudget(budgetId);
-        allow create: if canAccessBudget(budgetId) && isValidIncome(request.resource.data);
-        allow update: if canAccessBudget(budgetId) && isValidIncome(request.resource.data);
-        allow delete: if canAccessBudget(budgetId);
+        allow read, write: if isOwner(userId);
       }
     }
 
-    // Legacy support for existing users (optional, but good for migration)
-    match /users/{userId}/categories/{id} { allow read, write: if isOwner(userId); }
-    match /users/{userId}/transactions/{id} { allow read, write: if isOwner(userId); }
-    match /users/{userId}/income/{id} { allow read, write: if isOwner(userId); }
+    match /environments/{environmentId}/users/{userId} {
+      allow read, write: if isOwner(userId);
 
-    // Default deny
+      match /categories/{categoryId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /incomeCategories/{categoryId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /transactions/{transactionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /income/{incomeId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

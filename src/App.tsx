@@ -5,12 +5,24 @@ import { Analysis } from "./components/Analysis";
 import { Settings } from "./components/Settings";
 import { DateRangeSelector } from "./components/DateRangeSelector";
 import { TransactionsView } from "./components/TransactionsView";
+import { LoggedOutHome } from "./components/LoggedOutHome";
 import { formatDate, getMonthCountForDateRangeOption, getPresetDateRange, isDateInRange, parseDateString, resolveDateRange } from "./utils/dateUtils";
 import { View, DateRange, Theme } from "./types";
 import { useFirebase } from "./contexts/FirebaseContext";
 
 export default function App() {
-  const { loading, expenseCategories, incomeCategories, transactions, income, updateExpenseCategoryTarget } = useFirebase();
+  const {
+    loading,
+    user,
+    authError,
+    clearAuthError,
+    logout,
+    expenseCategories,
+    incomeCategories,
+    transactions,
+    income,
+    updateExpenseCategoryTarget,
+  } = useFirebase();
   const [view, setView] = useState<View>("dashboard");
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
@@ -159,6 +171,44 @@ export default function App() {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--app-shell)] text-fintech-accent">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-fintech-accent"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <LoggedOutHome
+        theme={theme}
+        onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+      />
+    );
+  }
+
+  if (authError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--app-shell)] px-4">
+        <div className="w-full max-w-xl rounded-2xl border bg-[var(--app-panel)] p-6 text-[var(--app-text)]" style={{ borderColor: "var(--app-border)" }}>
+          <h1 className="text-xl font-bold">Couldn&apos;t Load Your Data</h1>
+          <p className="mt-3 text-sm text-fintech-muted">{authError}</p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button
+              onClick={() => {
+                clearAuthError();
+                window.location.reload();
+              }}
+              className="rounded-xl bg-fintech-accent px-4 py-2 text-sm font-semibold text-[#002919]"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => void logout()}
+              className="rounded-xl border px-4 py-2 text-sm font-semibold"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

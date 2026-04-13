@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Transaction, Income, ExpenseCategory, IncomeCategory } from "../types";
 import { 
   Search, 
@@ -18,6 +18,7 @@ import { TransactionIcon } from "./TransactionIcon";
 import { compareDateStrings, formatDisplayDate, getMonthYearLabel, isDateInRange } from "../utils/dateUtils";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
+import { getCategoryDropdownNames } from "../utils/categoryOptions";
 
 interface TransactionsViewProps {
   transactions: Transaction[];
@@ -130,11 +131,17 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     return groups;
   }, [sortedAndFiltered]);
 
-  const allCategoryNames = useMemo(() => {
-    const expenseCats = expenseCategories.map(c => c.name);
-    const incomeCats = incomeCategories.map(c => c.name);
-    return Array.from(new Set([...expenseCats, ...incomeCats])).sort();
-  }, [expenseCategories, incomeCategories]);
+  const categoryOptions = useMemo(
+    () => getCategoryDropdownNames(filterType, expenseCategories, incomeCategories),
+    [expenseCategories, filterType, incomeCategories]
+  );
+
+  useEffect(() => {
+    if (!selectedCategory) return;
+    if (!categoryOptions.includes(selectedCategory)) {
+      setSelectedCategory(null);
+    }
+  }, [categoryOptions, selectedCategory]);
 
   const totalIncoming = sortedAndFiltered
     .filter((item) => item.type === "income")
@@ -214,7 +221,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               style={{ borderColor: "var(--app-border)" }}
             >
               <option value="">All Categories</option>
-              {allCategoryNames.map(cat => (
+              {categoryOptions.map(cat => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
@@ -482,6 +489,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         <div className="mx-auto flex w-full max-w-[1240px] justify-end px-4 sm:px-6 lg:px-8">
           <button
             onClick={() => setShowAddModal(true)}
+            aria-label="Add transaction"
             className="pointer-events-auto flex h-16 w-16 items-center justify-center rounded-full bg-[linear-gradient(135deg,_#63f0bf_0%,_#31c987_100%)] text-[#07121f] shadow-[0_18px_40px_rgba(73,240,181,0.26)] transition-all hover:scale-110 active:scale-95"
           >
             <Plus size={30} />
