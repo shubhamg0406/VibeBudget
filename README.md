@@ -1,73 +1,125 @@
 # VibeBudget
 
-VibeBudget is a Vite + React budgeting app backed by Firebase Authentication and Firestore.
+VibeBudget is a personal budgeting product that helps users understand spending, track income, set targets, and stay in control of monthly cash flow without spreadsheet sprawl.
 
-## Run locally
+This app is built for people who want one clear financial command center: fast daily logging, clean trends, and practical visibility into where money is going.
 
-Prerequisites:
+## Product Snapshot
+
+### What users can do
+- Sign in with Google and keep their data tied to their own account.
+- Track both expenses and income in one timeline.
+- Set category targets and monitor progress in real time.
+- Analyze spending patterns across flexible date ranges.
+- Import/export data (CSV and Google Sheets workflows).
+- Configure base currency and exchange rates for multi-currency tracking.
+- Connect Google Drive for backup/load (`budget.json`) and optional cloud continuity.
+
+### Who this is for
+- Individuals managing monthly budgets.
+- Users transitioning from spreadsheets to a structured budgeting workflow.
+- Anyone who wants to track income + expenses together (not just spending).
+
+### Product principles
+- Clarity first: dashboards emphasize decisions, not noise.
+- Local-first feel with cloud safety nets.
+- User-controlled data movement through Drive/Sheets integrations.
+
+## Feature Walkthrough
+
+### 1) Dashboard (Home)
+- Financial KPIs: total income, total spent, balance, tracked targets.
+- Budget pace and target-performance indicators.
+- Date range controls (this month, last month, 3/6/12 months, YTD, custom).
+- Prior-period comparison context to quickly see momentum.
+
+### 2) Transactions
+- Unified ledger for both expense and income records.
+- Quick add/edit/delete entries.
+- Search + advanced filters (type, category, amount range, date range).
+- Sort by date or amount.
+- Supports original transaction currency and converted base-currency view.
+
+### 3) Stats (Analysis)
+- Category-level spending and income breakdowns.
+- Comparison views: current vs previous period or last year equivalents.
+- Date-range aware trend analysis.
+- Core-vs-all expense analysis controls.
+
+### 4) Settings
+- **Data Hub**: import/export and selective data-domain operations.
+- **Currency**: choose base currency and maintain custom exchange rates.
+- **Cloud Sync**:
+  - Connect Drive folder for `budget.json` load/save flows.
+  - Connect Google Sheets for optional two-way mirror/sync.
+  - Configure sheet tabs, column mapping, and sync cadence.
+- **Maintenance**: controlled reset/cleanup operations by data domain.
+
+## Data & Access Model
+
+- Authentication: Google Sign-In (Firebase Auth).
+- App data: isolated per signed-in user and namespace.
+- Multi-user shared budgets are intentionally disabled in the current product.
+- Optional integrations:
+  - Google Drive: backup/load budget file.
+  - Google Sheets: structured external editing/mirroring.
+
+## Run Locally
+
+### Prerequisites
 - Node.js 20+
 
-Setup:
-1. Install dependencies with `npm install`.
-2. Copy `.env.example` to `.env.local`.
-3. Fill in your Firebase web app values in `.env.local`.
-4. Start the frontend with `npm run dev`.
+### Setup
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Create local env file:
+   ```bash
+   cp .env.example .env.local
+   ```
+3. Fill Firebase values in `.env.local`.
+4. Start app:
+   ```bash
+   npm run dev
+   ```
 
-Data isolation in the same Firebase project:
-- Set `VITE_FIREBASE_DATA_NAMESPACE="local-dev"` in `.env.local` for local testing data.
-- Set `VITE_FIREBASE_DATA_NAMESPACE="prod"` in Vercel production env vars for live user data.
-- Both environments can use the same Firebase project, but data stays separated under different Firestore paths.
-- If `VITE_FIREBASE_DATA_NAMESPACE` is omitted, the app defaults to `local-dev` in local development and `prod` in production builds.
+### Environment separation (important)
+- Use `VITE_FIREBASE_DATA_NAMESPACE="local-dev"` in local development.
+- Use `VITE_FIREBASE_DATA_NAMESPACE="prod"` in production.
+- This keeps local/dev data isolated from live production data, even in the same Firebase project.
 
-Local testing identity:
-- `VITE_TEST_USER_EMAIL` controls the default signed-in user email in `VITE_TEST_MODE=mock`.
-- Default is `shubhamg266@gmail.com` for local testing.
+### Local mock identity for tests
+- `VITE_TEST_USER_EMAIL` sets the default user email when running `VITE_TEST_MODE=mock`.
 
 ## Scripts
 
-- `npm run dev` starts the Vite development server.
-- `npm run dev:test` starts the app in deterministic mock mode for browser smoke tests.
-- `npm run build` creates a production build in `dist/`.
-- `npm run preview` serves the production build locally.
-- `npm run lint` runs the TypeScript typecheck.
-- `npm run test:unit` runs utility-focused Vitest coverage.
-- `npm run test:component` runs React component tests with Testing Library.
-- `npm run test:api` runs the legacy Express/SQLite API tests.
-- `npm run test:smoke` runs the Playwright browser smoke test suite.
-- `npm run test` runs the full test stack in CI-style order.
-- `npm run verify` runs tests, build, and typecheck in one command.
+- `npm run dev` - run dev server.
+- `npm run dev:test` - run deterministic mock-mode app for smoke tests.
+- `npm run build` - build production artifacts to `dist/`.
+- `npm run preview` - preview production build locally.
+- `npm run lint` - TypeScript typecheck.
+- `npm run test:unit` - utility/unit tests (Vitest).
+- `npm run test:component` - React component tests.
+- `npm run test:api` - API-focused tests for `server.ts`.
+- `npm run test:smoke` - browser smoke tests (Playwright).
+- `npm run test` - full test pipeline.
+- `npm run verify` - tests + build + typecheck.
 
-## Testing Framework
+## Testing Stack
 
-The repository now includes a layered testing setup:
+- `Vitest` + `Testing Library` for unit/component confidence.
+- `Supertest` for API coverage.
+- `Playwright` for browser smoke coverage.
 
-- `Vitest` for unit and component tests
-- `Testing Library` for UI behavior tests
-- `Supertest` for `server.ts` API coverage
-- `Playwright` for browser smoke verification against a local mock-data app boot
-
-### First-time setup
-
-1. Install dependencies with `npm install`.
-2. Install the Playwright browser once with `npx playwright install chromium`.
-
-### Test behavior
-
-- Component tests use a mock Firebase context so they do not require real Firebase credentials or a live backend.
-- Browser smoke tests run the app with `VITE_TEST_MODE=mock`, which boots a deterministic in-memory provider instead of the production Firebase provider.
-- In mock mode, user identity defaults to `VITE_TEST_USER_EMAIL` so local test data stays associated with your intended test account.
-- API tests use an isolated SQLite database created for each run.
-
-### Recommended commands
-
-- Run `npm run test` before merging app changes.
-- Run `npm run verify` when you want the full gate: tests, production build, and typecheck.
-- Use `npm run test:component` or `npm run test:smoke` during UI work when you want faster iteration on specific layers.
+First-time Playwright setup:
+```bash
+npx playwright install chromium
+```
 
 ## Deploying To Vercel
 
-Set these project environment variables in Vercel before deploying:
-
+Set these env vars in the Vercel project:
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
 - `VITE_FIREBASE_PROJECT_ID`
@@ -76,3 +128,9 @@ Set these project environment variables in Vercel before deploying:
 - `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_FIRESTORE_DATABASE_ID` (optional)
 - `VITE_FIREBASE_DATA_NAMESPACE` (`prod` in production)
+
+Recommended production checks:
+1. `npm run verify`
+2. Deploy to preview
+3. Validate Google auth + data namespace + Sheets/Drive connections
+4. Promote to production
