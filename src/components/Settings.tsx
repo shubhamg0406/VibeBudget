@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { getTodayStr } from "../utils/dateUtils";
 import {
   Download, 
   Upload, 
@@ -29,6 +28,8 @@ import { GoogleSheetImporter } from "./GoogleSheetImporter";
 import { CURRENCIES, getCurrencySymbol } from "../utils/currencyUtils";
 import { motion, AnimatePresence } from "motion/react";
 import { useFirebase } from "../contexts/FirebaseContext";
+import { formatDisplayDate, getTodayStr } from "../utils/dateUtils";
+import { getNextDueDate } from "../utils/recurring";
 
 interface SettingsProps {
   onRefresh: () => void;
@@ -56,6 +57,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     incomeCategories,
     transactions,
     income: incomeRecords,
+    recurringRules,
+    updateRecurringRule,
+    deleteRecurringRule,
     googleSheetsConfig,
     googleSheetsConnected,
     googleSheetsSyncing,
@@ -112,6 +116,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     id: "VibeBudget ID",
     updatedAt: "Updated At",
   });
+  const [selectedRecurringRuleId, setSelectedRecurringRuleId] = useState<string | null>(null);
 
   const domains: DataDomain[] = [
     {
@@ -160,6 +165,18 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     setExpenseMapping(googleSheetsConfig.expenseMapping);
     setIncomeMapping(googleSheetsConfig.incomeMapping);
   }, [googleSheetsConfig]);
+
+  useEffect(() => {
+    const handleOpenRecurringRule = (event: Event) => {
+      const customEvent = event as CustomEvent<{ ruleId?: string }>;
+      setActiveTab("data");
+      if (customEvent.detail?.ruleId) {
+        setSelectedRecurringRuleId(customEvent.detail.ruleId);
+      }
+    };
+    window.addEventListener("open-recurring-rule", handleOpenRecurringRule);
+    return () => window.removeEventListener("open-recurring-rule", handleOpenRecurringRule);
+  }, []);
 
   const ensureMappingOption = (headers: string[], fallback: string) => {
     return headers.includes(fallback) ? headers : [...headers, fallback];
@@ -793,6 +810,94 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
               <ChevronRight size={20} className="text-fintech-muted group-hover:translate-x-1 transition-transform" />
             </button>
           ))}
+        </div>
+
+        <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h4 className="font-semibold">Recurring Rules</h4>
+              <p className="text-xs text-fintech-muted">Pause, edit, or cancel monthly rules.</p>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">{recurringRules.length} rules</span>
+          </div>
+
+          {recurringRules.length === 0 ? (
+            <div className="text-xs text-fintech-muted">No recurring rules yet. Create one from the transaction form with Repeat monthly.</div>
+          ) : (
+            <div className="space-y-2">
+              {recurringRules
+                .slice()
+                .sort((a, b) => (getNextDueDate(a, getTodayStr()) || "9999-12-31").localeCompare(getNextDueDate(b, getTodayStr()) || "9999-12-31"))
+                .map((rule) => {
+                  const isSelected = selectedRecurringRuleId === rule.id;
+                  const nextDue = getNextDueDate(rule, getTodayStr());
+                  return (
+                    <div
+                      key={rule.id}
+                      className={`rounded-lg border p-3 ${isSelected ? "border-fintech-accent bg-fintech-accent/5" : ""}`}
+                      style={{ borderColor: isSelected ? undefined : "var(--app-border)" }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold">{rule.vendor || rule.source || "Recurring rule"}</div>
+                          <div className="text-[11px] text-fintech-muted">
+                            {rule.type === "income" ? "Income" : "Expense"} • Day {rule.day_of_month} • Next due {nextDue ? formatDisplayDate(nextDue) : "—"}
+                          </div>
+                          <div className="text-xs mt-1">
+                            {getCurrencySymbol(preferences?.baseCurrency)}{rule.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <div className={`text-[10px] font-bold uppercase tracking-widest ${rule.is_active ? "text-fintech-accent" : "text-fintech-muted"}`}>
+                          {rule.is_active ? "Active" : "Paused"}
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="rounded-md bg-[var(--app-ghost)] px-3 py-1.5 text-[11px] font-semibold"
+                          onClick={async () => {
+                            const nextAmountRaw = window.prompt("Update amount", String(rule.amount));
+                            if (nextAmountRaw === null) return;
+                            const nextAmount = Number(nextAmountRaw);
+                            if (!Number.isFinite(nextAmount)) return;
+                            await updateRecurringRule(rule.id, { amount: nextAmount });
+                          }}
+                        >
+                          Edit amount
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md bg-[var(--app-ghost)] px-3 py-1.5 text-[11px] font-semibold"
+                          onClick={async () => {
+                            const nextEndDate = window.prompt("Set end date (YYYY-MM-DD). Leave empty to clear.", rule.end_date || "") ?? "";
+                            await updateRecurringRule(rule.id, { end_date: nextEndDate || undefined });
+                          }}
+                        >
+                          End date
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md bg-[var(--app-ghost)] px-3 py-1.5 text-[11px] font-semibold"
+                          onClick={() => updateRecurringRule(rule.id, { is_active: !rule.is_active })}
+                        >
+                          {rule.is_active ? "Pause" : "Resume"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md bg-fintech-danger/10 px-3 py-1.5 text-[11px] font-semibold text-fintech-danger"
+                          onClick={async () => {
+                            if (!window.confirm("Cancel this recurring rule? Existing transactions will remain.")) return;
+                            await deleteRecurringRule(rule.id);
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
         </div>
       </section>
       )}

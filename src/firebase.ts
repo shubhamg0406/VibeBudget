@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { enableIndexedDbPersistence, getFirestore } from "firebase/firestore";
 
 const requiredFirebaseEnvKeys = [
   "VITE_FIREBASE_API_KEY",
@@ -54,6 +54,18 @@ export const auth = getAuth(app);
 export const db = firestoreDatabaseId
   ? getFirestore(app, firestoreDatabaseId)
   : getFirestore(app);
+
+if (typeof window !== "undefined") {
+  void enableIndexedDbPersistence(db).catch((err: { code?: string }) => {
+    if (err?.code === "failed-precondition") {
+      console.warn("Persistence failed: multiple tabs open");
+    } else if (err?.code === "unimplemented") {
+      console.warn("Persistence not supported in this browser");
+    } else {
+      console.warn("Failed to enable Firestore persistence", err);
+    }
+  });
+}
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });

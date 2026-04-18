@@ -4,6 +4,26 @@ VibeBudget is a personal budgeting product that helps users understand spending,
 
 This app is built for people who want one clear financial command center: fast daily logging, clean trends, and practical visibility into where money is going.
 
+## Live Production
+
+- Stable production URL: https://vibebudget-chi.vercel.app
+- Latest production deployment (April 17, 2026): https://vibebudget-h9duh290c-thanoskakas-projects.vercel.app
+
+## Quick Start (For Users)
+
+Use VibeBudget in under 5 minutes:
+
+1. Open https://vibebudget-chi.vercel.app and sign in with Google.
+2. Add your first transaction from the `+` button (expense or income).
+3. Set category targets in Settings to track your monthly plan.
+4. Use Dashboard and Stats to compare spending patterns over time.
+5. Optional: connect Google Drive/Sheets in Settings for backup and sync workflows.
+
+Tips:
+- Add entries daily for better trend accuracy.
+- Use date ranges (`This month`, `3 months`, `YTD`, `Custom`) before reviewing charts.
+- Keep base currency and exchange rates updated if you track multiple currencies.
+
 ## Product Snapshot
 
 ### What users can do
@@ -78,7 +98,7 @@ This app is built for people who want one clear financial command center: fast d
    ```bash
    cp .env.example .env.local
    ```
-3. Fill Firebase values in `.env.local`.
+3. Fill Firebase values in `.env.local` and set `GEMINI_API_KEY` (server-side only).
 4. Start app:
    ```bash
    npm run dev
@@ -128,6 +148,22 @@ Set these env vars in the Vercel project:
 - `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_FIRESTORE_DATABASE_ID` (optional)
 - `VITE_FIREBASE_DATA_NAMESPACE` (`prod` in production)
+- `FIREBASE_DATA_NAMESPACE` (`prod` in production, used by server-side Firestore reads)
+- `FIREBASE_ADMIN_CREDENTIALS_JSON` (service account JSON for Firebase Admin SDK token verification)
+- `FIREBASE_ADMIN_CREDENTIALS_PATH` (optional path to service account JSON file; preferred locally over inline JSON)
+- `ALLOW_FIREBASE_REST_FALLBACK` (`false` recommended; only enable for emergency fallback)
+- `AI_CHAT_CACHE_TTL_MS` (optional; defaults to `300000` to reduce repeated Firestore reads during chat)
+- `GEMINI_API_KEY` (server-side only, used by `/api/chat`)
+- `GEMINI_MODEL` (optional; defaults to `gemini-2.5-flash`)
+
+AI chat deployment note:
+- Add `GEMINI_API_KEY` in your hosting dashboard environment settings (Vercel, Railway, etc.) with the same key name used locally.
+- Keep `.env.local` uncommitted (`.env*` is gitignored in this repo).
+
+Deploy command:
+```bash
+npx vercel --prod --yes
+```
 
 Recommended production checks:
 1. `npm run verify`

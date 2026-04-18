@@ -19,6 +19,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { Theme, View } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
+import { BottomNav } from "./nav/BottomNav";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -51,9 +52,9 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
 
   return (
     <div className="min-h-screen bg-[var(--app-shell)] text-[var(--app-text)]">
-      <div className="flex min-h-screen w-full overflow-hidden">
+      <div className="flex min-h-screen w-full">
         <aside
-          className="hidden h-screen w-60 shrink-0 flex-col border-r bg-[var(--app-sidebar)] shadow-[var(--app-shadow)] backdrop-blur-xl md:flex"
+          className="hidden h-screen w-60 shrink-0 flex-col border-r bg-[var(--app-sidebar)] shadow-[var(--app-shadow)] backdrop-blur-xl lg:flex"
           style={{ borderColor: "var(--app-border)" }}
         >
           <div className="flex h-full flex-col py-8">
@@ -113,7 +114,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header
-            className="sticky top-0 z-40 flex h-[72px] items-center justify-between border-b bg-[color:var(--app-shell)]/70 px-6 backdrop-blur-md"
+            className="sticky top-0 z-40 flex h-[72px] items-center justify-between border-b bg-[color:var(--app-shell)]/70 px-4 backdrop-blur-md sm:px-6"
             style={{ borderColor: "var(--app-border)" }}
           >
             <h2 className="text-lg font-semibold tracking-tight text-[var(--app-text)]">{pageMeta.title}</h2>
@@ -161,7 +162,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
                 </button>
                 <button
                   onClick={() => setView("transactions")}
-                  className="inline-flex items-center gap-2 rounded-lg bg-[linear-gradient(135deg,_#69f6b8_0%,_#06b77f_100%)] px-4 py-2 text-[13px] font-semibold text-[#002919]"
+                  className="hidden items-center gap-2 rounded-lg bg-[linear-gradient(135deg,_#69f6b8_0%,_#06b77f_100%)] px-4 py-2 text-[13px] font-semibold text-[#002919] lg:inline-flex"
                 >
                   <Plus size={14} />
                   <span>Add Transaction</span>
@@ -170,41 +171,20 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto no-scrollbar">
+          <main className="flex-1 mobile-main-offset">
             <motion.div
               key={currentView}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.24 }}
-              className="mx-auto w-full max-w-7xl p-6"
+              className="mx-auto w-full max-w-7xl p-4 sm:p-6"
             >
               {children}
             </motion.div>
           </main>
-
-          <nav
-            className="sticky bottom-0 z-50 flex items-center justify-between border-t bg-[color:var(--app-sidebar)]/95 px-4 py-3 backdrop-blur-xl md:hidden"
-            style={{ borderColor: "var(--app-border)" }}
-          >
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = currentView === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setView(item.id as View)}
-                  className={`flex flex-col items-center gap-1 rounded-xl px-2 py-1 transition-colors ${
-                    isActive ? "text-fintech-accent" : "text-fintech-muted"
-                  }`}
-                >
-                  <Icon size={20} strokeWidth={isActive ? 2.3 : 2} />
-                  <span className="text-[9px] font-medium">{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
         </div>
       </div>
+      <BottomNav currentView={currentView} setView={setView} />
 
       <AnimatePresence>
         {showProfileMenu && (

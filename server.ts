@@ -3,9 +3,34 @@ import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
+import fs from "fs";
+import dotenv from "dotenv";
+import { AiChatDependencies, registerAiChatRoute } from "./src/server/aiChat.js";
+import { computeUpcoming, materializeRule } from "./src/utils/recurring.js";
+import { getTodayStr } from "./src/utils/dateUtils.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const moduleUrl = typeof import.meta !== "undefined" ? import.meta.url : undefined;
+const __dirname = moduleUrl ? path.dirname(fileURLToPath(moduleUrl)) : process.cwd();
 const defaultDbPath = path.join(__dirname, "vibebudget.db");
+
+const loadEnvFiles = () => {
+  const nodeEnv = process.env.NODE_ENV || "development";
+  const candidates = [
+    `.env.${nodeEnv}.local`,
+    ".env.local",
+    `.env.${nodeEnv}`,
+    ".env",
+  ];
+
+  candidates.forEach((envFile) => {
+    const fullPath = path.join(__dirname, envFile);
+    if (fs.existsSync(fullPath)) {
+      dotenv.config({ path: fullPath, override: false });
+    }
+  });
+};
+
+loadEnvFiles();
 
 const INITIAL_CATEGORIES = [
   "Alcohol + Weed", "Canada Investments", "Car fuel", "Car maintenance",
@@ -21,6 +46,7 @@ export interface ServerOptions {
   db?: Database.Database;
   includeVite?: boolean;
   rootDir?: string;
+  aiChatDeps?: Partial<AiChatDependencies>;
 }
 
 export const initializeDatabase = (db: Database.Database) => {
@@ -38,6 +64,8 @@ export const initializeDatabase = (db: Database.Database) => {
       amount REAL NOT NULL,
       category_id INTEGER,
       notes TEXT,
+      recurring_rule_id TEXT,
+      is_recurring_instance INTEGER DEFAULT 0,
       FOREIGN KEY (category_id) REFERENCES categories (id)
     );
 
@@ -47,9 +75,51 @@ export const initializeDatabase = (db: Database.Database) => {
       source TEXT NOT NULL,
       amount REAL NOT NULL,
       category TEXT NOT NULL,
-      notes TEXT
+      notes TEXT,
+      recurring_rule_id TEXT,
+      is_recurring_instance INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS recurring_rules (
+      id TEXT PRIMARY KEY,
+      uid TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('expense', 'income')),
+      amount REAL NOT NULL,
+      vendor TEXT,
+      source TEXT,
+      category_id TEXT,
+      category_name TEXT,
+      category TEXT,
+      notes TEXT,
+      original_currency TEXT,
+      original_amount REAL,
+      day_of_month INTEGER NOT NULL,
+      frequency TEXT NOT NULL DEFAULT 'monthly',
+      start_date TEXT NOT NULL,
+      end_date TEXT,
+      last_generated_month TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
   `);
+
+  const hasColumn = (table: string, column: string) => {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    return columns.some((item) => item.name === column);
+  };
+  if (!hasColumn("transactions", "recurring_rule_id")) {
+    db.exec("ALTER TABLE transactions ADD COLUMN recurring_rule_id TEXT");
+  }
+  if (!hasColumn("transactions", "is_recurring_instance")) {
+    db.exec("ALTER TABLE transactions ADD COLUMN is_recurring_instance INTEGER DEFAULT 0");
+  }
+  if (!hasColumn("income", "recurring_rule_id")) {
+    db.exec("ALTER TABLE income ADD COLUMN recurring_rule_id TEXT");
+  }
+  if (!hasColumn("income", "is_recurring_instance")) {
+    db.exec("ALTER TABLE income ADD COLUMN is_recurring_instance INTEGER DEFAULT 0");
+  }
 
   const categoryCount = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
   if (categoryCount.count > 0) return;
@@ -68,11 +138,99 @@ export const createApp = async ({
   db = createDatabase(),
   includeVite = process.env.NODE_ENV !== "production",
   rootDir = __dirname,
+  aiChatDeps = {},
 }: ServerOptions = {}) => {
   const app = express();
+  const getAuthenticatedUid = (req: express.Request) => {
+    const headerUid = req.header("x-user-id");
+    if (headerUid?.trim()) return headerUid.trim();
+    const authHeader = req.header("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice("Bearer ".length).trim();
+      if (token) return token;
+    }
+    return null;
+  };
+  const requireUid = (req: express.Request, res: express.Response) => {
+    const uid = getAuthenticatedUid(req);
+    if (!uid) {
+      res.status(401).json({ error: "Unauthorized" });
+      return null;
+    }
+    return uid;
+  };
+  const runRecurringGeneration = (uid: string) => {
+    const today = getTodayStr();
+
+    const rules = db.prepare("SELECT * FROM recurring_rules WHERE uid = ? AND is_active = 1").all(uid) as any[];
+    let generated = 0;
+    let skipped = 0;
+
+    const insertExpense = db.prepare(
+      "INSERT INTO transactions (date, vendor, amount, category_id, notes, recurring_rule_id, is_recurring_instance) VALUES (?, ?, ?, ?, ?, ?, 1)"
+    );
+    const insertIncome = db.prepare(
+      "INSERT INTO income (date, source, amount, category, notes, recurring_rule_id, is_recurring_instance) VALUES (?, ?, ?, ?, ?, ?, 1)"
+    );
+    const hasExpenseInstance = db.prepare("SELECT id FROM transactions WHERE recurring_rule_id = ? AND date = ? LIMIT 1");
+    const hasIncomeInstance = db.prepare("SELECT id FROM income WHERE recurring_rule_id = ? AND date = ? LIMIT 1");
+    const updateRuleProgress = db.prepare("UPDATE recurring_rules SET last_generated_month = ?, updated_at = ? WHERE id = ? AND uid = ?");
+
+    const run = db.transaction(() => {
+      for (const rule of rules) {
+        const occurrences = materializeRule(rule, today);
+        for (const occurrence of occurrences) {
+          if (rule.type === "expense") {
+            const exists = hasExpenseInstance.get(rule.id, occurrence.dueDate);
+            if (exists) {
+              skipped += 1;
+              continue;
+            }
+            insertExpense.run(
+              occurrence.dueDate,
+              rule.vendor || "Recurring expense",
+              rule.amount,
+              rule.category_id ? Number(rule.category_id) : null,
+              rule.notes || "",
+              rule.id
+            );
+            generated += 1;
+            continue;
+          }
+
+          const exists = hasIncomeInstance.get(rule.id, occurrence.dueDate);
+          if (exists) {
+            skipped += 1;
+            continue;
+          }
+          insertIncome.run(
+            occurrence.dueDate,
+            rule.source || "Recurring income",
+            rule.amount,
+            rule.category || "Recurring",
+            rule.notes || "",
+            rule.id
+          );
+          generated += 1;
+        }
+
+        const nextGeneratedMonth = occurrences.length > 0
+          ? occurrences[occurrences.length - 1].month
+          : rule.last_generated_month;
+        updateRuleProgress.run(nextGeneratedMonth, new Date().toISOString(), rule.id, uid);
+      }
+    });
+
+    run();
+    return { generated, skipped };
+  };
 
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+  registerAiChatRoute(app, aiChatDeps);
 
   app.get("/api/categories", (_req, res) => {
     const categories = db.prepare("SELECT * FROM categories ORDER BY name ASC").all();
@@ -106,15 +264,17 @@ export const createApp = async ({
   });
 
   app.post("/api/transactions", (req, res) => {
-    const { date, vendor, amount, category_id, notes } = req.body;
-    const result = db.prepare("INSERT INTO transactions (date, vendor, amount, category_id, notes) VALUES (?, ?, ?, ?, ?)").run(date, vendor, amount, category_id, notes);
+    const { date, vendor, amount, category_id, notes, recurring_rule_id, is_recurring_instance } = req.body;
+    const result = db
+      .prepare("INSERT INTO transactions (date, vendor, amount, category_id, notes, recurring_rule_id, is_recurring_instance) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(date, vendor, amount, category_id, notes, recurring_rule_id || null, is_recurring_instance ? 1 : 0);
     res.json({ id: result.lastInsertRowid });
   });
 
   app.put("/api/transactions/:id", (req, res) => {
-    const { date, vendor, amount, category_id, notes } = req.body;
-    db.prepare("UPDATE transactions SET date = ?, vendor = ?, amount = ?, category_id = ?, notes = ? WHERE id = ?")
-      .run(date, vendor, amount, category_id, notes, req.params.id);
+    const { date, vendor, amount, category_id, notes, recurring_rule_id, is_recurring_instance } = req.body;
+    db.prepare("UPDATE transactions SET date = ?, vendor = ?, amount = ?, category_id = ?, notes = ?, recurring_rule_id = ?, is_recurring_instance = ? WHERE id = ?")
+      .run(date, vendor, amount, category_id, notes, recurring_rule_id || null, is_recurring_instance ? 1 : 0, req.params.id);
     res.json({ success: true });
   });
 
@@ -129,16 +289,132 @@ export const createApp = async ({
   });
 
   app.post("/api/income", (req, res) => {
-    const { date, source, amount, category, notes } = req.body;
-    const result = db.prepare("INSERT INTO income (date, source, amount, category, notes) VALUES (?, ?, ?, ?, ?)").run(date, source, amount, category, notes);
+    const { date, source, amount, category, notes, recurring_rule_id, is_recurring_instance } = req.body;
+    const result = db
+      .prepare("INSERT INTO income (date, source, amount, category, notes, recurring_rule_id, is_recurring_instance) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(date, source, amount, category, notes, recurring_rule_id || null, is_recurring_instance ? 1 : 0);
     res.json({ id: result.lastInsertRowid });
   });
 
   app.put("/api/income/:id", (req, res) => {
-    const { date, source, amount, category, notes } = req.body;
-    db.prepare("UPDATE income SET date = ?, source = ?, amount = ?, category = ?, notes = ? WHERE id = ?")
-      .run(date, source, amount, category, notes, req.params.id);
+    const { date, source, amount, category, notes, recurring_rule_id, is_recurring_instance } = req.body;
+    db.prepare("UPDATE income SET date = ?, source = ?, amount = ?, category = ?, notes = ?, recurring_rule_id = ?, is_recurring_instance = ? WHERE id = ?")
+      .run(date, source, amount, category, notes, recurring_rule_id || null, is_recurring_instance ? 1 : 0, req.params.id);
     res.json({ success: true });
+  });
+
+  app.post("/api/recurring/rules", (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+
+    const now = new Date().toISOString();
+    const {
+      type,
+      amount,
+      vendor,
+      source,
+      category_id,
+      category_name,
+      category,
+      notes,
+      original_currency,
+      original_amount,
+      day_of_month,
+      start_date,
+      end_date,
+      last_generated_month,
+      is_active,
+      id,
+    } = req.body || {};
+    const ruleId = id || crypto.randomUUID();
+
+    db.prepare(`
+      INSERT INTO recurring_rules (
+        id, uid, type, amount, vendor, source, category_id, category_name, category, notes,
+        original_currency, original_amount, day_of_month, frequency, start_date, end_date,
+        last_generated_month, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'monthly', ?, ?, ?, ?, ?, ?)
+    `).run(
+      ruleId,
+      uid,
+      type,
+      amount,
+      vendor || null,
+      source || null,
+      category_id || null,
+      category_name || null,
+      category || null,
+      notes || null,
+      original_currency || null,
+      original_amount ?? null,
+      Math.min(28, Math.max(1, Number(day_of_month || 1))),
+      start_date,
+      end_date || null,
+      last_generated_month || start_date?.slice(0, 7),
+      is_active === false ? 0 : 1,
+      now,
+      now
+    );
+    res.json({ id: ruleId });
+  });
+
+  app.post("/api/recurring/generate", (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    res.json(runRecurringGeneration(uid));
+  });
+
+  app.get("/api/recurring/upcoming", (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+
+    const today = getTodayStr();
+    const daysRaw = Number(req.query.days);
+    const days = Number.isFinite(daysRaw) ? daysRaw : 30;
+    const cappedDays = Math.max(1, Math.min(90, Math.trunc(days)));
+    const rules = db.prepare("SELECT * FROM recurring_rules WHERE uid = ? AND is_active = 1").all(uid) as any[];
+    const upcoming = computeUpcoming(rules, today, cappedDays);
+    res.json({ upcoming });
+  });
+
+  app.patch("/api/recurring/:ruleId", (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const { ruleId } = req.params;
+    const updates = req.body || {};
+    const existing = db.prepare("SELECT * FROM recurring_rules WHERE id = ? AND uid = ?").get(ruleId, uid) as any;
+    if (!existing) {
+      res.status(404).json({ error: "Rule not found" });
+      return;
+    }
+
+    const next = {
+      ...existing,
+      is_active: typeof updates.is_active === "boolean" ? (updates.is_active ? 1 : 0) : existing.is_active,
+      end_date: updates.end_date === null ? null : (updates.end_date || existing.end_date),
+      amount: typeof updates.amount === "number" ? updates.amount : existing.amount,
+      notes: typeof updates.notes === "string" ? updates.notes : existing.notes,
+      updated_at: new Date().toISOString(),
+    };
+
+    db.prepare("UPDATE recurring_rules SET is_active = ?, end_date = ?, amount = ?, notes = ?, updated_at = ? WHERE id = ? AND uid = ?")
+      .run(next.is_active, next.end_date, next.amount, next.notes, next.updated_at, ruleId, uid);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/recurring/:ruleId", (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    const { ruleId } = req.params;
+    db.prepare("UPDATE recurring_rules SET is_active = 0, end_date = ?, updated_at = ? WHERE id = ? AND uid = ?")
+      .run(getTodayStr(), new Date().toISOString(), ruleId, uid);
+    res.json({ success: true });
+  });
+
+  app.post("/api/cron/recurring", (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    res.json(runRecurringGeneration(uid));
   });
 
   app.delete("/api/income/:id", (req, res) => {
@@ -251,8 +527,20 @@ export const createApp = async ({
   });
 
   if (includeVite) {
+    const react = (await import("@vitejs/plugin-react")).default;
+    const tailwindcss = (await import("@tailwindcss/vite")).default;
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      configFile: false,
+      plugins: [react(), tailwindcss()],
+      resolve: {
+        alias: {
+          "@": path.resolve(rootDir, "."),
+        },
+      },
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR !== "true",
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -276,7 +564,9 @@ export const startServer = async (options: ServerOptions = {}) => {
   return { app, db, server };
 };
 
-const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+const isMainModule = moduleUrl
+  ? process.argv[1] === fileURLToPath(moduleUrl)
+  : true;
 
 if (isMainModule) {
   startServer();

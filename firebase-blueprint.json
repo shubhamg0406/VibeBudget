@@ -22,6 +22,8 @@
         "category_id": { "type": "string", "description": "ID of the category document" },
         "category_name": { "type": "string" },
         "notes": { "type": "string" },
+        "recurring_rule_id": { "type": "string" },
+        "is_recurring_instance": { "type": "boolean" },
         "uid": { "type": "string", "description": "User ID of the owner" }
       },
       "required": ["date", "vendor", "amount", "category_id", "category_name", "uid"]
@@ -36,9 +38,40 @@
         "amount": { "type": "number" },
         "category": { "type": "string" },
         "notes": { "type": "string" },
+        "recurring_rule_id": { "type": "string" },
+        "is_recurring_instance": { "type": "boolean" },
+        "category_id": { "type": "string" },
+        "original_currency": { "type": "string" },
         "uid": { "type": "string", "description": "User ID of the owner" }
       },
       "required": ["date", "source", "amount", "category", "uid"]
+    },
+    "RecurringRule": {
+      "title": "RecurringRule",
+      "description": "A recurring monthly transaction or income generation rule",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "User ID of the owner" },
+        "type": { "type": "string", "enum": ["expense", "income"] },
+        "amount": { "type": "number" },
+        "vendor": { "type": "string" },
+        "source": { "type": "string" },
+        "category_id": { "type": "string" },
+        "category_name": { "type": "string" },
+        "category": { "type": "string" },
+        "notes": { "type": "string" },
+        "original_currency": { "type": "string" },
+        "original_amount": { "type": "number" },
+        "day_of_month": { "type": "number" },
+        "frequency": { "type": "string", "enum": ["monthly"] },
+        "start_date": { "type": "string", "format": "date" },
+        "end_date": { "type": "string", "format": "date" },
+        "last_generated_month": { "type": "string" },
+        "is_active": { "type": "boolean" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["uid", "type", "amount", "day_of_month", "frequency", "start_date", "last_generated_month", "is_active", "created_at", "updated_at"]
     }
   },
   "firestore": {
@@ -53,6 +86,10 @@
     "/users/{userId}/income/{incomeId}": {
       "schema": "Income",
       "description": "User's income records"
+    },
+    "/users/{userId}/recurring_rules/{ruleId}": {
+      "schema": "RecurringRule",
+      "description": "User recurring generation rules"
     }
   }
 }

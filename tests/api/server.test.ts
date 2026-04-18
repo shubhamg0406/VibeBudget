@@ -89,4 +89,63 @@ describe("server api", () => {
     const incomeResponse = await request(app).get("/api/income");
     expect(incomeResponse.body).toEqual([]);
   });
+
+  it("requires auth for recurring upcoming and returns projected shape", async () => {
+    const unauthorized = await request(app).get("/api/recurring/upcoming?days=30");
+    expect(unauthorized.status).toBe(401);
+
+    const createRule = await request(app)
+      .post("/api/recurring/rules")
+      .set("x-user-id", "user-1")
+      .send({
+        type: "expense",
+        amount: 17,
+        vendor: "Netflix",
+        day_of_month: 15,
+        start_date: "2026-01-15",
+        last_generated_month: "2026-04",
+        is_active: true,
+      });
+    expect(createRule.status).toBe(200);
+
+    const upcoming = await request(app)
+      .get("/api/recurring/upcoming?days=90")
+      .set("x-user-id", "user-1");
+    expect(upcoming.status).toBe(200);
+    expect(upcoming.body).toEqual(expect.objectContaining({
+      upcoming: expect.any(Array),
+    }));
+  });
+
+  it("generates recurring instances and updates rule progress", async () => {
+    const createRule = await request(app)
+      .post("/api/recurring/rules")
+      .set("x-user-id", "user-1")
+      .send({
+        type: "income",
+        amount: 5000,
+        source: "Employer",
+        category: "Salary",
+        day_of_month: 1,
+        start_date: "2026-01-01",
+        last_generated_month: "2026-01",
+        is_active: true,
+      });
+    expect(createRule.status).toBe(200);
+
+    const firstGenerate = await request(app)
+      .post("/api/recurring/generate")
+      .set("x-user-id", "user-1");
+    expect(firstGenerate.status).toBe(200);
+    expect(firstGenerate.body).toEqual(expect.objectContaining({
+      generated: expect.any(Number),
+      skipped: expect.any(Number),
+    }));
+
+    const secondGenerate = await request(app)
+      .post("/api/recurring/generate")
+      .set("x-user-id", "user-1");
+    expect(secondGenerate.status).toBe(200);
+    expect(secondGenerate.body.generated).toBe(0);
+  });
 });

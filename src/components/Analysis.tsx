@@ -284,25 +284,12 @@ export const Analysis: React.FC<AnalysisProps> = ({
         .filter(t => transactionMatchesCategory(t, cat))
         .reduce((acc, t) => acc + convertToBaseCurrency(t.amount, t.currency, preferences), 0);
       
-      // Prorate current if it's exactly the current month and we are comparing against a full month
-      let proratedCurrent = current;
-      const isCurrentMonthOnly = currentStart.startsWith(today.slice(0, 7));
-      
-      if (isCurrentMonthOnly && (comparisonPeriod === "latest-month-vs-prev-month" || comparisonPeriod === "latest-month-vs-last-year")) {
-        const now = new Date();
-        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-        const currentDay = now.getDate();
-        if (currentDay > 0) {
-          proratedCurrent = (current / currentDay) * daysInMonth;
-        }
-      }
-
-      const diff = proratedCurrent - previous;
+      const diff = current - previous;
       const percentChange = previous > 0 ? (diff / previous) * 100 : 0;
       
       return {
         name: cat.name,
-        current: proratedCurrent,
+        current,
         previous,
         diff,
         percentChange

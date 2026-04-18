@@ -52,7 +52,19 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
   initialData,
   onClose
 }) => {
-  const { transactions, income, addTransaction, updateTransaction, deleteTransaction, addIncome, updateIncome, deleteIncome, preferences } = useFirebase();
+  const {
+    transactions,
+    income,
+    addTransaction,
+    updateTransaction,
+    deleteTransaction,
+    addIncome,
+    updateIncome,
+    deleteIncome,
+    createRecurringRule,
+    deleteRecurringRule,
+    preferences,
+  } = useFirebase();
   const [type, setType] = useState<"expense" | "income">(initialData?.type || "expense");
   const [date, setDate] = useState(initialData?.date || getTodayStr());
   const [vendor, setVendor] = useState(initialData?.vendor || initialData?.source || "");
@@ -66,6 +78,21 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
   const [incomeCategory, setIncomeCategory] = useState(initialData?.category || incomeCategories[0]?.name || "Job");
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [repeatMonthly, setRepeatMonthly] = useState(false);
+  const [repeatDayOfMonth, setRepeatDayOfMonth] = useState(Math.min(28, Math.max(1, Number((initialData?.date || getTodayStr()).slice(8, 10)))));
+  const [repeatEndDate, setRepeatEndDate] = useState("");
+  const canConvertExistingToRecurring = Boolean(initialData && !initialData.recurring_rule_id && !initialData.is_recurring_instance);
+
+  const getPreviousMonthKey = (ymd: string) => {
+    const [yearStr, monthStr] = ymd.slice(0, 7).split("-");
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) {
+      return ymd.slice(0, 7);
+    }
+    const previous = new Date(year, month - 2, 1);
+    return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
+  };
 
   const [isFocused, setIsFocused] = useState(false);
   const [isVendorFocused, setIsVendorFocused] = useState(false);
@@ -134,6 +161,27 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
         } else {
           await updateIncome(initialData.id, body);
         }
+
+        if (repeatMonthly && canConvertExistingToRecurring) {
+          const today = getTodayStr();
+          await createRecurringRule({
+            type,
+            amount: finalAmount,
+            vendor: type === "expense" ? vendor : undefined,
+            source: type === "income" ? vendor : undefined,
+            category_id: type === "expense" ? categoryId : incomeCategoryId || undefined,
+            category_name: type === "expense" ? search : undefined,
+            category: type === "income" ? incomeCategory : undefined,
+            notes,
+            original_currency: currency,
+            original_amount: finalAmount,
+            day_of_month: repeatDayOfMonth,
+            start_date: today,
+            end_date: repeatEndDate || undefined,
+            last_generated_month: getPreviousMonthKey(today),
+            is_active: true,
+          });
+        }
       } else {
         if (type === "expense") {
           const body: Omit<Transaction, "id"> = {
@@ -146,6 +194,23 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
             notes,
           };
           await addTransaction(body);
+          if (repeatMonthly) {
+            await createRecurringRule({
+              type: "expense",
+              amount: finalAmount,
+              vendor,
+              category_id: categoryId,
+              category_name: search,
+              notes,
+              original_currency: currency,
+              original_amount: finalAmount,
+              day_of_month: repeatDayOfMonth,
+              start_date: date,
+              end_date: repeatEndDate || undefined,
+              last_generated_month: getTodayStr().slice(0, 7),
+              is_active: true,
+            });
+          }
         } else {
           const body: Omit<Income, "id"> = {
             date,
@@ -157,6 +222,23 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
             notes,
           };
           await addIncome(body);
+          if (repeatMonthly) {
+            await createRecurringRule({
+              type: "income",
+              amount: finalAmount,
+              source: vendor,
+              category_id: incomeCategoryId || undefined,
+              category: incomeCategory,
+              notes,
+              original_currency: currency,
+              original_amount: finalAmount,
+              day_of_month: repeatDayOfMonth,
+              start_date: date,
+              end_date: repeatEndDate || undefined,
+              last_generated_month: getTodayStr().slice(0, 7),
+              is_active: true,
+            });
+          }
         }
       }
       
@@ -170,6 +252,8 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
         setIncomeCategoryId("");
         setIncomeCategory(incomeCategoryOptions[0]?.name || "Job");
         setNotes("");
+        setRepeatMonthly(false);
+        setRepeatEndDate("");
       }
       
       onRefresh();
@@ -182,10 +266,27 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
   };
 
   const handleDelete = async () => {
-    if (!initialData || !window.confirm("Are you sure you want to delete this transaction?")) return;
+    if (!initialData) return;
     
     setDeleting(true);
     try {
+      const isRecurringInstance = Boolean(initialData.is_recurring_instance && initialData.recurring_rule_id);
+      let shouldDeleteOnly = true;
+      if (isRecurringInstance) {
+        const cancelRule = window.confirm("This is a recurring entry.\n\nPress OK to cancel the recurring rule and delete this instance.\nPress Cancel to delete this entry only.");
+        if (cancelRule && initialData.recurring_rule_id) {
+          await deleteRecurringRule(initialData.recurring_rule_id);
+        }
+        shouldDeleteOnly = true;
+      } else if (!window.confirm("Are you sure you want to delete this transaction?")) {
+        setDeleting(false);
+        return;
+      }
+
+      if (!shouldDeleteOnly) {
+        setDeleting(false);
+        return;
+      }
       if (type === "expense") {
         await deleteTransaction(initialData.id);
       } else {
@@ -246,11 +347,61 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
             <input
               type="date"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => {
+                setDate(e.target.value);
+                const nextDay = Number((e.target.value || "").slice(8, 10));
+                if (Number.isFinite(nextDay) && nextDay > 0) {
+                  setRepeatDayOfMonth(Math.max(1, Math.min(28, nextDay)));
+                }
+              }}
               className="w-full"
               required
             />
           </div>
+
+          {(!initialData || canConvertExistingToRecurring) && (
+            <div className="space-y-3 rounded-xl border p-3" style={{ borderColor: "var(--app-border)" }}>
+              <label className="flex items-center justify-between text-[11px] font-bold uppercase tracking-widest text-fintech-muted">
+                <span>{initialData ? "Convert to recurring monthly" : "Repeat monthly"}</span>
+                <input
+                  type="checkbox"
+                  checked={repeatMonthly}
+                  onChange={(e) => setRepeatMonthly(e.target.checked)}
+                  className="h-4 w-4"
+                />
+              </label>
+
+              {repeatMonthly && (
+                <div className="space-y-3">
+                  {initialData && (
+                    <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-[11px] text-fintech-muted">
+                      Recurrence starts from the next future occurrence. No past months will be auto-created.
+                    </div>
+                  )}
+                  <label className="block text-xs text-fintech-muted">
+                    Repeats on day
+                    <input
+                      type="number"
+                      min={1}
+                      max={28}
+                      value={repeatDayOfMonth}
+                      onChange={(e) => setRepeatDayOfMonth(Math.max(1, Math.min(28, Number(e.target.value || 1))))}
+                      className="mt-1 w-full"
+                    />
+                  </label>
+                  <label className="block text-xs text-fintech-muted">
+                    End date (optional)
+                    <input
+                      type="date"
+                      value={repeatEndDate}
+                      onChange={(e) => setRepeatEndDate(e.target.value)}
+                      className="mt-1 w-full"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Vendor / Source */}
           <div className="space-y-2">

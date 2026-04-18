@@ -21,6 +21,8 @@ export interface Transaction {
   category_id: string;
   category_name: string;
   notes: string;
+  recurring_rule_id?: string;
+  is_recurring_instance?: boolean;
   updated_at?: string;
 }
 
@@ -33,7 +35,43 @@ export interface Income {
   category_id?: string;
   category: string;
   notes?: string;
+  recurring_rule_id?: string;
+  is_recurring_instance?: boolean;
   updated_at?: string;
+}
+
+export interface RecurringRule {
+  id: string;
+  uid: string;
+  type: "expense" | "income";
+  amount: number;
+  vendor?: string;
+  source?: string;
+  category_id?: string;
+  category_name?: string;
+  category?: string;
+  notes?: string;
+  original_currency?: string;
+  original_amount?: number;
+  day_of_month: number;
+  frequency: "monthly";
+  start_date: string;
+  end_date?: string;
+  last_generated_month: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpcomingRecurringInstance {
+  rule_id: string;
+  projected_date: string;
+  type: "expense" | "income";
+  amount: number;
+  vendor?: string;
+  source?: string;
+  category_name?: string;
+  notes?: string;
 }
 
 export interface ExchangeRate {

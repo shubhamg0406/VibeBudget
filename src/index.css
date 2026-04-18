@@ -11,6 +11,7 @@
 }
 
 :root {
+  --mobile-nav-offset: calc(88px + env(safe-area-inset-bottom));
   --app-shell: #060e20;
   --app-sidebar: #0f1930;
   --app-panel: #151f38;
@@ -121,6 +122,7 @@ body {
     color: var(--app-text);
     border-radius: 0.5rem;
     padding: 0.5rem 0.75rem;
+    min-height: 44px;
   }
 
   input::placeholder,
@@ -137,6 +139,7 @@ body {
   button {
     cursor: pointer;
     transition: all 0.2s;
+    min-height: 44px;
   }
 
   button:active {
@@ -151,6 +154,16 @@ body {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+.mobile-main-offset {
+  padding-bottom: var(--mobile-nav-offset);
+}
+
+@media (min-width: 1024px) {
+  .mobile-main-offset {
+    padding-bottom: 0;
+  }
 }
 
 [data-theme="light"] .text-white {

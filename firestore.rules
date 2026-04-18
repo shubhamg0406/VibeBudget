@@ -27,6 +27,10 @@ service cloud.firestore {
       match /income/{incomeId} {
         allow read, write: if isOwner(userId);
       }
+
+      match /recurring_rules/{ruleId} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
     match /environments/{environmentId}/users/{userId} {
@@ -45,6 +49,10 @@ service cloud.firestore {
       }
 
       match /income/{incomeId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /recurring_rules/{ruleId} {
         allow read, write: if isOwner(userId);
       }
     }

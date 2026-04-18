@@ -3,8 +3,6 @@ import {
   GoogleAuthProvider,
   getRedirectResult,
   onAuthStateChanged,
-  signInWithPopup,
-  signInWithRedirect,
   signOut,
   User,
 } from "firebase/auth";
@@ -14,8 +12,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
-  getDocs,
   onSnapshot,
   setDoc,
   Unsubscribe,
@@ -32,7 +28,9 @@ import {
   Income,
   IncomeCategory,
   Preferences,
+  RecurringRule,
   Transaction,
+  UpcomingRecurringInstance,
 } from "../types";
 import {
   clearSheetRowForItem,
@@ -50,9 +48,13 @@ import {
   readBudgetFileContent,
   updateBudgetFileContent,
 } from "../utils/googleDrive";
+import { signInWithGoogle } from "../lib/auth";
+import { computeUpcoming, materializeRule } from "../utils/recurring";
+import { getTodayStr } from "../utils/dateUtils";
 
 const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
 const LOCAL_STATE_KEY = "vibebudgetLocalState";
+const TRANSACTIONS_CACHE_KEY_PREFIX = "vb_transactions_cache";
 const DEFAULT_SYNC_INTERVAL_SECONDS = 30;
 const DEFAULT_BUDGET_FILE_NAME = "budget.json";
 const FIRESTORE_BATCH_WRITE_LIMIT = 450;
@@ -229,6 +231,7 @@ interface LocalStatePayload {
   incomeCategories: IncomeCategory[];
   transactions: Transaction[];
   income: Income[];
+  recurringRules?: RecurringRule[];
   googleSheetsConfig: GoogleSheetsSyncConfig | null;
   driveConnection: DriveConnection | null;
   lastSyncedAt: string | null;
@@ -241,6 +244,7 @@ const createEmptyLocalState = (): LocalStatePayload => ({
   incomeCategories: [],
   transactions: [],
   income: [],
+  recurringRules: [],
   googleSheetsConfig: null,
   driveConnection: null,
   lastSyncedAt: null,
@@ -267,6 +271,7 @@ const loadLocalState = (): LocalStatePayload => {
     return {
       transactions: parsedTransactions,
       income: parsedIncome,
+      recurringRules: Array.isArray(parsed.recurringRules) ? parsed.recurringRules : [],
       expenseCategories: parsedExpenseCategories,
       incomeCategories: resolveIncomeCategories(parsed.incomeCategories, parsedIncome),
       googleSheetsConfig: parsed.googleSheetsConfig || null,
@@ -281,6 +286,30 @@ const loadLocalState = (): LocalStatePayload => {
 
 const clearLocalState = () => {
   localStorage.removeItem(LOCAL_STATE_KEY);
+};
+
+const getTransactionsCacheKey = (uid: string) => `${TRANSACTIONS_CACHE_KEY_PREFIX}:${uid}`;
+
+const loadTransactionsCache = (uid: string): Transaction[] => {
+  const raw = localStorage.getItem(getTransactionsCacheKey(uid));
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? migrateTransactions(parsed as Transaction[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveTransactionsCache = (uid: string, items: Transaction[]) => {
+  localStorage.setItem(getTransactionsCacheKey(uid), JSON.stringify(items));
+};
+
+const clearTransactionsCache = (uid: string) => {
+  localStorage.removeItem(getTransactionsCacheKey(uid));
 };
 
 interface UserProfileDocument {
@@ -307,6 +336,7 @@ export interface FirebaseContextType {
   categories: Category[];
   transactions: Transaction[];
   income: Income[];
+  recurringRules: RecurringRule[];
   preferences: Preferences;
   updatePreferences: (prefs: Partial<Preferences>) => Promise<void>;
   signIn: () => Promise<void>;
@@ -317,6 +347,11 @@ export interface FirebaseContextType {
   addIncome: (data: Omit<Income, "id">) => Promise<void>;
   updateIncome: (id: string, data: Partial<Income>) => Promise<void>;
   deleteIncome: (id: string) => Promise<void>;
+  createRecurringRule: (data: Omit<RecurringRule, "id" | "uid" | "created_at" | "updated_at" | "frequency">) => Promise<string>;
+  updateRecurringRule: (id: string, data: Partial<Pick<RecurringRule, "is_active" | "end_date" | "amount" | "notes">>) => Promise<void>;
+  deleteRecurringRule: (id: string) => Promise<void>;
+  generateRecurringTransactions: () => Promise<{ generated: number; skipped: number }>;
+  getUpcomingRecurring: (days?: number) => UpcomingRecurringInstance[];
   updateExpenseCategoryTarget: (id: string, target: number) => Promise<void>;
   updateIncomeCategoryTarget: (id: string, target: number) => Promise<void>;
   updateCategoryTarget: (id: string, target: number) => Promise<void>;
@@ -355,6 +390,7 @@ const isSameAsDefaultPreferences = (preferences: Preferences) => (
 const hasMeaningfulLocalData = (payload: LocalStatePayload) => (
   payload.transactions.length > 0 ||
   payload.income.length > 0 ||
+  (payload.recurringRules?.length || 0) > 0 ||
   payload.incomeCategories.length > 0 ||
   payload.googleSheetsConfig !== null ||
   payload.driveConnection !== null ||
@@ -373,6 +409,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [incomeCategories, setIncomeCategories] = useState<IncomeCategory[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [income, setIncome] = useState<Income[]>([]);
+  const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
   const [googleSheetsConfig, setGoogleSheetsConfig] = useState<GoogleSheetsSyncConfig | null>(null);
   const [driveConnection, setDriveConnection] = useState<DriveConnection | null>(null);
@@ -388,18 +425,20 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const incomeCategoriesRef = useRef(incomeCategories);
   const transactionsRef = useRef(transactions);
   const incomeRef = useRef(income);
+  const recurringRulesRef = useRef(recurringRules);
   const preferencesRef = useRef(preferences);
   const sheetsConfigRef = useRef(googleSheetsConfig);
   const driveConnectionRef = useRef(driveConnection);
   const autoSaveTimerRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
   const loadingDriveRef = useRef(false);
-  const bootstrappedUsersRef = useRef<Set<string>>(new Set());
+  const seededUsersRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { expenseCategoriesRef.current = expenseCategories; }, [expenseCategories]);
   useEffect(() => { incomeCategoriesRef.current = incomeCategories; }, [incomeCategories]);
   useEffect(() => { transactionsRef.current = transactions; }, [transactions]);
   useEffect(() => { incomeRef.current = income; }, [income]);
+  useEffect(() => { recurringRulesRef.current = recurringRules; }, [recurringRules]);
   useEffect(() => { preferencesRef.current = preferences; }, [preferences]);
   useEffect(() => { sheetsConfigRef.current = googleSheetsConfig; }, [googleSheetsConfig]);
   useEffect(() => { driveConnectionRef.current = driveConnection; }, [driveConnection]);
@@ -411,6 +450,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setIncomeCategories(defaults.incomeCategories);
     setTransactions(defaults.transactions);
     setIncome(defaults.income);
+    setRecurringRules(defaults.recurringRules || []);
     setPreferences(DEFAULT_PREFERENCES);
     setGoogleSheetsConfig(null);
     setDriveConnection(null);
@@ -455,6 +495,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (uid: string) => collection(db, "environments", firebaseDataNamespace, "users", uid, "income"),
     []
   );
+  const getRecurringRulesCollection = useCallback(
+    (uid: string) => collection(db, "environments", firebaseDataNamespace, "users", uid, "recurring_rules"),
+    []
+  );
 
   const storeAccessToken = (token: string | null) => {
     setGoogleSheetsAccessToken(token);
@@ -484,31 +528,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   }, [getUserDocRef]);
 
-  const bootstrapUserData = useCallback(async (nextUser: User) => {
-    if (bootstrappedUsersRef.current.has(nextUser.uid)) {
+  const seedUserFromLocalState = useCallback(async (nextUser: User) => {
+    if (seededUsersRef.current.has(nextUser.uid)) {
       return;
     }
-    bootstrappedUsersRef.current.add(nextUser.uid);
-
-    const [profileSnap, categoriesSnap, incomeCategoriesSnap, transactionsSnap, incomeSnap] = await Promise.all([
-      getDoc(getUserDocRef(nextUser.uid)),
-      getDocs(getExpenseCategoriesCollection(nextUser.uid)),
-      getDocs(getIncomeCategoriesCollection(nextUser.uid)),
-      getDocs(getTransactionsCollection(nextUser.uid)),
-      getDocs(getIncomeCollection(nextUser.uid)),
-    ]);
-
-    const hasRemoteData =
-      profileSnap.exists() ||
-      !categoriesSnap.empty ||
-      !incomeCategoriesSnap.empty ||
-      !transactionsSnap.empty ||
-      !incomeSnap.empty;
-
-    if (hasRemoteData) {
-      clearLocalState();
-      return;
-    }
+    seededUsersRef.current.add(nextUser.uid);
 
     const localState = initialLocalState;
     const batch = writeBatch(db);
@@ -541,6 +565,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localState.income.forEach((item) => {
       batch.set(doc(getIncomeCollection(nextUser.uid), item.id), item);
     });
+    (localState.recurringRules || []).forEach((rule) => {
+      batch.set(doc(getRecurringRulesCollection(nextUser.uid), rule.id), rule);
+    });
 
     await batch.commit();
     clearLocalState();
@@ -548,6 +575,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     getExpenseCategoriesCollection,
     getIncomeCategoriesCollection,
     getIncomeCollection,
+    getRecurringRulesCollection,
     getTransactionsCollection,
     getUserDocRef,
     initialLocalState,
@@ -556,13 +584,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const replaceCollection = useCallback(async <T extends { id: string }>(
     collectionRef: CollectionReference<DocumentData>,
     items: T[],
+    existingIds: string[],
   ) => {
-    const snapshot = await getDocs(collectionRef);
-
     const operations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
-    snapshot.docs.forEach((snapshotDoc) => {
+    existingIds.forEach((existingId) => {
       operations.push((batch) => {
-        batch.delete(snapshotDoc.ref);
+        batch.delete(doc(collectionRef, existingId));
       });
     });
     items.forEach((item) => {
@@ -596,10 +623,26 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const uid = auth.currentUser.uid;
     await Promise.all([
-      replaceCollection(getExpenseCategoriesCollection(uid), payload.nextExpenseCategories),
-      replaceCollection(getIncomeCategoriesCollection(uid), payload.nextIncomeCategories),
-      replaceCollection(getTransactionsCollection(uid), payload.nextTransactions),
-      replaceCollection(getIncomeCollection(uid), payload.nextIncome),
+      replaceCollection(
+        getExpenseCategoriesCollection(uid),
+        payload.nextExpenseCategories,
+        expenseCategoriesRef.current.map((item) => item.id),
+      ),
+      replaceCollection(
+        getIncomeCategoriesCollection(uid),
+        payload.nextIncomeCategories,
+        incomeCategoriesRef.current.map((item) => item.id),
+      ),
+      replaceCollection(
+        getTransactionsCollection(uid),
+        payload.nextTransactions,
+        transactionsRef.current.map((item) => item.id),
+      ),
+      replaceCollection(
+        getIncomeCollection(uid),
+        payload.nextIncome,
+        incomeRef.current.map((item) => item.id),
+      ),
       saveUserProfilePatch({
         preferences: normalizePreferences(payload.nextPreferences),
         googleSheetsConfig: payload.nextSheetsConfig,
@@ -619,28 +662,22 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const beginGoogleAuth = async (withDriveScopes = false) => {
     const provider = withDriveScopes ? googleDriveProvider : googleProvider;
 
+    if (!withDriveScopes) {
+      await signInWithGoogle(auth, provider);
+      return;
+    }
+
     try {
-      const result = await signInWithPopup(auth, provider);
+      const result = await signInWithGoogle(auth, provider);
+      if (!result) return;
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (withDriveScopes) {
         storeAccessToken(credential?.accessToken || null);
       }
       return;
     } catch (error) {
-      const code = typeof error === "object" && error && "code" in error ? String((error as { code?: string }).code) : "";
-      const shouldFallbackToRedirect = [
-        "auth/popup-blocked",
-        "auth/popup-closed-by-user",
-        "auth/cancelled-popup-request",
-        "auth/operation-not-supported-in-this-environment",
-      ].includes(code);
-
-      if (!shouldFallbackToRedirect) {
-        throw error;
-      }
+      throw error;
     }
-
-    await signInWithRedirect(auth, provider);
   };
 
   useEffect(() => {
@@ -672,34 +709,55 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       setBudgetId(nextUser.uid);
       setAuthError(null);
+      const cachedTransactions = loadTransactionsCache(nextUser.uid);
+      if (cachedTransactions.length > 0) {
+        setTransactions(cachedTransactions);
+      }
       setLoading(true);
-      void bootstrapUserData(nextUser).catch((error) => {
-        console.error("Failed to bootstrap user data", error);
-        setAuthError(formatAuthBootstrapError(error));
-        setLoading(false);
-      });
     });
 
     return unsubscribe;
-  }, [bootstrapUserData, resetBudgetState]);
+  }, [resetBudgetState]);
 
   useEffect(() => {
     if (!user) {
       return;
     }
 
+    const uid = user.uid;
     const loadedState = {
       profile: false,
       categories: false,
       incomeCategories: false,
       transactions: false,
       income: false,
+      recurringRules: false,
     };
+    const remotePresence = {
+      profile: false,
+      categories: false,
+      incomeCategories: false,
+      transactions: false,
+      income: false,
+      recurringRules: false,
+    };
+    let seedingStarted = false;
 
     const markLoaded = () => {
       if (Object.values(loadedState).every(Boolean)) {
         setAuthError(null);
         setLoading(false);
+
+        const hasRemoteData = Object.values(remotePresence).some(Boolean);
+        if (!hasRemoteData && !seedingStarted) {
+          seedingStarted = true;
+          void seedUserFromLocalState(user).catch((error) => {
+            console.error("Failed to seed local state into Firestore", error);
+            setAuthError(formatAuthBootstrapError(error));
+          });
+        } else if (hasRemoteData) {
+          clearLocalState();
+        }
       }
     };
 
@@ -712,9 +770,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const unsubscribers: Unsubscribe[] = [];
 
     unsubscribers.push(onSnapshot(
-      getUserDocRef(user.uid),
+      getUserDocRef(uid),
       (snapshot) => {
         const data = snapshot.data() as UserProfileDocument | undefined;
+        remotePresence.profile = snapshot.exists();
         setPreferences(normalizePreferences(data?.preferences));
         setGoogleSheetsConfig(data?.googleSheetsConfig || null);
         setDriveConnection(data?.driveConnection || null);
@@ -726,9 +785,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ));
 
     unsubscribers.push(onSnapshot(
-      getExpenseCategoriesCollection(user.uid),
+      getExpenseCategoriesCollection(uid),
       (snapshot) => {
         const nextCategories = snapshot.docs.map((item) => item.data() as ExpenseCategory);
+        remotePresence.categories = nextCategories.length > 0;
         setExpenseCategories(nextCategories.length > 0 ? migrateExpenseCategories(nextCategories) : createDefaultExpenseCategories());
         loadedState.categories = true;
         markLoaded();
@@ -737,9 +797,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ));
 
     unsubscribers.push(onSnapshot(
-      getIncomeCategoriesCollection(user.uid),
+      getIncomeCategoriesCollection(uid),
       (snapshot) => {
         const nextIncomeCategories = snapshot.docs.map((item) => item.data() as IncomeCategory);
+        remotePresence.incomeCategories = nextIncomeCategories.length > 0;
         setIncomeCategories(migrateIncomeCategories(nextIncomeCategories));
         loadedState.incomeCategories = true;
         markLoaded();
@@ -748,9 +809,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ));
 
     unsubscribers.push(onSnapshot(
-      getTransactionsCollection(user.uid),
+      getTransactionsCollection(uid),
       (snapshot) => {
-        setTransactions(migrateTransactions(snapshot.docs.map((item) => item.data() as Transaction)));
+        const nextTransactions = migrateTransactions(snapshot.docs.map((item) => item.data() as Transaction));
+        remotePresence.transactions = nextTransactions.length > 0;
+        setTransactions(nextTransactions);
+        saveTransactionsCache(uid, nextTransactions);
         loadedState.transactions = true;
         markLoaded();
       },
@@ -758,13 +822,27 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ));
 
     unsubscribers.push(onSnapshot(
-      getIncomeCollection(user.uid),
+      getIncomeCollection(uid),
       (snapshot) => {
-        setIncome(migrateIncomeRecords(snapshot.docs.map((item) => item.data() as Income)));
+        const nextIncome = migrateIncomeRecords(snapshot.docs.map((item) => item.data() as Income));
+        remotePresence.income = nextIncome.length > 0;
+        setIncome(nextIncome);
         loadedState.income = true;
         markLoaded();
       },
       (error) => handleSnapshotError("income", error)
+    ));
+
+    unsubscribers.push(onSnapshot(
+      getRecurringRulesCollection(uid),
+      (snapshot) => {
+        const nextRecurringRules = snapshot.docs.map((item) => item.data() as RecurringRule);
+        remotePresence.recurringRules = nextRecurringRules.length > 0;
+        setRecurringRules(nextRecurringRules);
+        loadedState.recurringRules = true;
+        markLoaded();
+      },
+      (error) => handleSnapshotError("recurring rules", error)
     ));
 
     return () => {
@@ -774,8 +852,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     getExpenseCategoriesCollection,
     getIncomeCategoriesCollection,
     getIncomeCollection,
+    getRecurringRulesCollection,
     getTransactionsCollection,
     getUserDocRef,
+    seedUserFromLocalState,
     user,
   ]);
 
@@ -1125,7 +1205,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const logout = async () => {
+    const uid = auth.currentUser?.uid;
     clearLocalState();
+    if (uid) {
+      clearTransactionsCache(uid);
+    }
     storeAccessToken(null);
     await signOut(auth);
   };
@@ -1225,6 +1309,152 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       await clearSheetRowForItem(googleSheetsAccessToken, sheetsConfigRef.current, "income", id).catch(() => undefined);
     }
   };
+
+  const createRecurringRule = async (
+    data: Omit<RecurringRule, "id" | "uid" | "created_at" | "updated_at" | "frequency">
+  ) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    const id = crypto.randomUUID();
+    const now = getIsoNow();
+    const payload: RecurringRule = {
+      ...data,
+      id,
+      uid: auth.currentUser.uid,
+      frequency: "monthly",
+      day_of_month: Math.max(1, Math.min(28, Math.trunc(data.day_of_month || 1))),
+      created_at: now,
+      updated_at: now,
+    };
+    await setDoc(doc(getRecurringRulesCollection(auth.currentUser.uid), id), payload);
+    return id;
+  };
+
+  const updateRecurringRule = async (
+    id: string,
+    data: Partial<Pick<RecurringRule, "is_active" | "end_date" | "amount" | "notes">>
+  ) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    const existing = recurringRulesRef.current.find((item) => item.id === id);
+    if (!existing) return;
+    await setDoc(doc(getRecurringRulesCollection(auth.currentUser.uid), id), {
+      ...existing,
+      ...data,
+      id,
+      uid: auth.currentUser.uid,
+      updated_at: getIsoNow(),
+    });
+  };
+
+  const deleteRecurringRule = async (id: string) => {
+    await updateRecurringRule(id, {
+      is_active: false,
+      end_date: getTodayStr(),
+    });
+  };
+
+  const generateRecurringTransactions = useCallback(async () => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const today = getTodayStr();
+    const rules = recurringRulesRef.current.filter((rule) => rule.is_active);
+    if (rules.length === 0) {
+      return { generated: 0, skipped: 0 };
+    }
+
+    const expenseKeys = new Set(
+      transactionsRef.current
+        .filter((item) => item.recurring_rule_id)
+        .map((item) => `${item.recurring_rule_id}::${item.date}`)
+    );
+    const incomeKeys = new Set(
+      incomeRef.current
+        .filter((item) => item.recurring_rule_id)
+        .map((item) => `${item.recurring_rule_id}::${item.date}`)
+    );
+
+    let generated = 0;
+    let skipped = 0;
+    const batch = writeBatch(db);
+
+    for (const rule of rules) {
+      const dueOccurrences = materializeRule(rule, today);
+      for (const occurrence of dueOccurrences) {
+        const key = `${rule.id}::${occurrence.dueDate}`;
+        if (rule.type === "expense") {
+          if (expenseKeys.has(key)) {
+            skipped += 1;
+            continue;
+          }
+          const nextId = crypto.randomUUID();
+          batch.set(doc(getTransactionsCollection(auth.currentUser.uid), nextId), {
+            id: nextId,
+            date: occurrence.dueDate,
+            vendor: rule.vendor || "Recurring expense",
+            amount: rule.amount,
+            currency: rule.original_currency,
+            category_id: rule.category_id || "",
+            category_name: rule.category_name || "Misc.",
+            notes: rule.notes || "",
+            recurring_rule_id: rule.id,
+            is_recurring_instance: true,
+            updated_at: getIsoNow(),
+          } satisfies Transaction);
+          expenseKeys.add(key);
+          generated += 1;
+          continue;
+        }
+
+        if (incomeKeys.has(key)) {
+          skipped += 1;
+          continue;
+        }
+        const nextId = crypto.randomUUID();
+        batch.set(doc(getIncomeCollection(auth.currentUser.uid), nextId), {
+          id: nextId,
+          date: occurrence.dueDate,
+          source: rule.source || "Recurring income",
+          amount: rule.amount,
+          currency: rule.original_currency,
+          category_id: rule.category_id,
+          category: rule.category || "Recurring",
+          notes: rule.notes || "",
+          recurring_rule_id: rule.id,
+          is_recurring_instance: true,
+          updated_at: getIsoNow(),
+        } satisfies Income);
+        incomeKeys.add(key);
+        generated += 1;
+      }
+
+      const nextGeneratedMonth = dueOccurrences.length > 0
+        ? dueOccurrences[dueOccurrences.length - 1].month
+        : rule.last_generated_month;
+      batch.set(doc(getRecurringRulesCollection(auth.currentUser.uid), rule.id), {
+        ...rule,
+        last_generated_month: nextGeneratedMonth,
+        updated_at: getIsoNow(),
+      });
+    }
+
+    await batch.commit();
+    return { generated, skipped };
+  }, [getIncomeCollection, getRecurringRulesCollection, getTransactionsCollection]);
+
+  const getUpcomingRecurring = (days = 30) => computeUpcoming(recurringRulesRef.current.filter((rule) => rule.is_active), getTodayStr(), days);
+
+  useEffect(() => {
+    if (!user) return;
+    const sessionKey = `vibebudget-recurring-generated-${user.uid}`;
+    if (sessionStorage.getItem(sessionKey)) return;
+    sessionStorage.setItem(sessionKey, "1");
+    void generateRecurringTransactions().catch(() => undefined);
+  }, [generateRecurringTransactions, user]);
 
   const updateExpenseCategoryTarget = async (id: string, target: number) => {
     if (!auth.currentUser) {
@@ -1354,19 +1584,35 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     if (type === "expenses") {
-      await replaceCollection(getTransactionsCollection(auth.currentUser.uid), []);
+      await replaceCollection(
+        getTransactionsCollection(auth.currentUser.uid),
+        [],
+        transactionsRef.current.map((item) => item.id),
+      );
       return;
     }
     if (type === "income") {
-      await replaceCollection(getIncomeCollection(auth.currentUser.uid), []);
+      await replaceCollection(
+        getIncomeCollection(auth.currentUser.uid),
+        [],
+        incomeRef.current.map((item) => item.id),
+      );
       return;
     }
     if (type === "categories" || type === "targets" || type === "expenseCategories") {
-      await replaceCollection(getExpenseCategoriesCollection(auth.currentUser.uid), createDefaultExpenseCategories());
+      await replaceCollection(
+        getExpenseCategoriesCollection(auth.currentUser.uid),
+        createDefaultExpenseCategories(),
+        expenseCategoriesRef.current.map((item) => item.id),
+      );
       return;
     }
     if (type === "incomeCategories") {
-      await replaceCollection(getIncomeCategoriesCollection(auth.currentUser.uid), createIncomeCategoriesFromRecords(incomeRef.current));
+      await replaceCollection(
+        getIncomeCategoriesCollection(auth.currentUser.uid),
+        createIncomeCategoriesFromRecords(incomeRef.current),
+        incomeCategoriesRef.current.map((item) => item.id),
+      );
     }
   };
 
@@ -1407,6 +1653,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         categories: expenseCategories,
         transactions,
         income,
+        recurringRules,
         preferences,
         updatePreferences,
         signIn,
@@ -1417,6 +1664,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addIncome,
         updateIncome,
         deleteIncome,
+        createRecurringRule,
+        updateRecurringRule,
+        deleteRecurringRule,
+        generateRecurringTransactions,
+        getUpcomingRecurring,
         updateExpenseCategoryTarget,
         updateIncomeCategoryTarget,
         updateCategoryTarget,

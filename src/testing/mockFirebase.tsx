@@ -8,6 +8,7 @@ import type {
   Income,
   IncomeCategory,
   Preferences,
+  RecurringRule,
   Transaction,
 } from "../types";
 
@@ -17,6 +18,7 @@ export interface MockFirebaseSeed {
   incomeCategories?: IncomeCategory[];
   transactions?: Transaction[];
   income?: Income[];
+  recurringRules?: RecurringRule[];
   preferences?: Preferences;
   googleSheetsConfig?: GoogleSheetsSyncConfig | null;
 }
@@ -106,6 +108,7 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
   const transactions = seed?.transactions || defaultTransactions;
   const income = seed?.income || defaultIncome;
   const preferences = seed?.preferences || defaultPreferences;
+  const recurringRules = seed?.recurringRules || [];
   const googleSheetsConfig = seed?.googleSheetsConfig || null;
   const user = (seed?.user === undefined ? defaultUser : seed.user) as User | null;
   const noop = async () => {};
@@ -123,6 +126,7 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     categories: expenseCategories,
     transactions,
     income,
+    recurringRules,
     preferences,
     updatePreferences: noop,
     signIn: noop,
@@ -133,6 +137,11 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     addIncome: noop,
     updateIncome: noop,
     deleteIncome: noop,
+    createRecurringRule: async () => "mock-rule",
+    updateRecurringRule: noop,
+    deleteRecurringRule: noop,
+    generateRecurringTransactions: async () => ({ generated: 0, skipped: 0 }),
+    getUpcomingRecurring: () => [],
     updateExpenseCategoryTarget: noop,
     updateIncomeCategoryTarget: noop,
     updateCategoryTarget: noop,
@@ -169,6 +178,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [transactions, setTransactions] = useState(seed?.transactions || defaultTransactions);
   const [incomeCategories] = useState(seed?.incomeCategories || defaultIncomeCategories);
   const [income, setIncome] = useState(seed?.income || defaultIncome);
+  const [recurringRules, setRecurringRules] = useState(seed?.recurringRules || []);
   const [preferences, setPreferences] = useState(seed?.preferences || defaultPreferences);
   const [googleSheetsConfig, setGoogleSheetsConfig] = useState<GoogleSheetsSyncConfig | null>(seed?.googleSheetsConfig || null);
   const user = (seed?.user === undefined ? defaultUser : seed.user) as User | null;
@@ -180,6 +190,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       incomeCategories,
       transactions,
       income,
+      recurringRules,
       preferences,
       googleSheetsConfig,
     }),
@@ -204,6 +215,26 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     deleteIncome: async (id) => {
       setIncome((current) => current.filter((item) => item.id !== id));
     },
+    createRecurringRule: async (data) => {
+      const nextId = `rule-${recurringRules.length + 1}`;
+      setRecurringRules((current) => current.concat({
+        ...data,
+        id: nextId,
+        uid: user?.uid || "mock-user",
+        frequency: "monthly",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+      return nextId;
+    },
+    updateRecurringRule: async (id, data) => {
+      setRecurringRules((current) => current.map((item) => (item.id === id ? { ...item, ...data } : item)));
+    },
+    deleteRecurringRule: async (id) => {
+      setRecurringRules((current) => current.map((item) => (item.id === id ? { ...item, is_active: false } : item)));
+    },
+    generateRecurringTransactions: async () => ({ generated: 0, skipped: 0 }),
+    getUpcomingRecurring: () => [],
     updateExpenseCategoryTarget: async (id, target) => {
       setExpenseCategories((current) => current.map((item) => (item.id === id ? { ...item, target_amount: target } : item)));
     },
@@ -225,7 +256,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         connectedBy: user?.email || defaultUser.email || "shubhamg266@gmail.com",
       });
     },
-  }), [expenseCategories, googleSheetsConfig, income, incomeCategories, preferences, transactions, user]);
+  }), [expenseCategories, googleSheetsConfig, income, incomeCategories, preferences, recurringRules, transactions, user]);
 
   return <FirebaseContext.Provider value={value}>{children}</FirebaseContext.Provider>;
 };

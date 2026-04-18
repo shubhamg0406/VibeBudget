@@ -9,6 +9,7 @@ import {
   ChevronUp,
   ArrowUpDown,
   Receipt,
+  Repeat,
   RotateCcw,
   SearchX
 } from "lucide-react";
@@ -19,6 +20,9 @@ import { compareDateStrings, formatDisplayDate, getMonthYearLabel, isDateInRange
 import { useFirebase } from "../contexts/FirebaseContext";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 import { getCategoryDropdownNames } from "../utils/categoryOptions";
+import { BottomSheet } from "./common/BottomSheet";
+import { FAB } from "./common/FAB";
+import { useBreakpoint } from "../hooks/useBreakpoint";
 
 interface TransactionsViewProps {
   transactions: Transaction[];
@@ -38,6 +42,8 @@ interface UnifiedTransaction {
   type: "expense" | "income";
   currency?: string;
   original?: any;
+  recurring_rule_id?: string;
+  is_recurring_instance?: boolean;
 }
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({ 
@@ -47,13 +53,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   incomeCategories,
   onRefresh 
 }) => {
+  const { isDesktop } = useBreakpoint();
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<UnifiedTransaction | null>(null);
   const [filterType, setFilterType] = useState<"all" | "expense" | "income">("all");
   const [showFilters, setShowFilters] = useState(false);
-  const { preferences } = useFirebase();
+  const { preferences, getUpcomingRecurring, recurringRules, updateRecurringRule, deleteRecurringRule } = useFirebase();
+  const [showUpcoming, setShowUpcoming] = useState(false);
+  const [viewRuleId, setViewRuleId] = useState<string | null>(null);
   
   // Advanced filters
   const [minAmount, setMinAmount] = useState("");
@@ -73,6 +82,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       notes: t.notes,
       type: "expense",
       currency: t.currency,
+      recurring_rule_id: t.recurring_rule_id,
+      is_recurring_instance: t.is_recurring_instance,
       original: t
     }));
 
@@ -85,6 +96,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       notes: i.notes,
       type: "income",
       currency: i.currency,
+      recurring_rule_id: i.recurring_rule_id,
+      is_recurring_instance: i.is_recurring_instance,
       original: i
     }));
 
@@ -150,6 +163,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     .filter((item) => item.type === "expense")
     .reduce((sum, item) => sum + convertToBaseCurrency(item.amount, item.currency, preferences), 0);
   const netFlow = totalIncoming - totalOutgoing;
+  const upcoming = useMemo(() => (showUpcoming ? getUpcomingRecurring(30) : []), [getUpcomingRecurring, showUpcoming, recurringRules]);
+  const upcomingExpense = upcoming.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0);
+  const upcomingIncome = upcoming.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
 
   return (
     <div className="relative min-h-[80vh] space-y-6 pb-24">
@@ -158,6 +174,64 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           {unifiedData.length} total records
         </p>
       </header>
+
+      <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
+        <button
+          type="button"
+          onClick={() => setShowUpcoming((prev) => !prev)}
+          className="flex w-full items-center justify-between text-left"
+        >
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Upcoming (30 days)</div>
+            <div className="text-sm font-semibold">Projected recurring entries</div>
+          </div>
+          {showUpcoming ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+        </button>
+
+        {showUpcoming && (
+          <div className="mt-4 space-y-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="rounded-lg bg-[var(--app-ghost)] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-fintech-muted">Projected expenses</div>
+                <div className="text-lg font-bold text-fintech-danger">
+                  {getCurrencySymbol(preferences?.baseCurrency)}{upcomingExpense.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+              <div className="rounded-lg bg-[var(--app-ghost)] p-3">
+                <div className="text-[10px] uppercase tracking-widest text-fintech-muted">Projected income</div>
+                <div className="text-lg font-bold text-fintech-success">
+                  {getCurrencySymbol(preferences?.baseCurrency)}{upcomingIncome.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+            </div>
+
+            {upcoming.length === 0 ? (
+              <div className="text-xs text-fintech-muted">No recurring entries in the next 30 days.</div>
+            ) : (
+              <div className="max-h-72 space-y-2 overflow-auto pr-1">
+                {upcoming.map((item) => (
+                  <div key={`${item.rule_id}-${item.projected_date}`} className="flex items-center justify-between rounded-lg bg-[var(--app-ghost)] p-3 text-sm">
+                    <div>
+                      <div className="font-semibold">{item.vendor || item.source || "Recurring"}</div>
+                      <div className="text-[11px] text-fintech-muted">{formatDisplayDate(item.projected_date)} • {item.category_name || "Uncategorized"}</div>
+                      <button
+                        type="button"
+                        className="mt-1 text-[10px] uppercase tracking-widest text-fintech-accent"
+                        onClick={() => setViewRuleId(item.rule_id)}
+                      >
+                        View rule
+                      </button>
+                    </div>
+                    <div className={item.type === "income" ? "text-fintech-success font-bold" : "text-fintech-danger font-bold"}>
+                      {item.type === "income" ? "+" : "-"}{getCurrencySymbol(preferences?.baseCurrency)}{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       <div className="space-y-5">
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 lg:items-end">
@@ -212,7 +286,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             </div>
           </div>
 
-          <div className="space-y-2 lg:col-span-3">
+          <div className="hidden space-y-2 lg:col-span-3 lg:block">
             <label className="ml-1 text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Category</label>
             <select
               value={selectedCategory || ""}
@@ -231,7 +305,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         <div className="flex items-center justify-between">
           <button 
             onClick={() => setShowFilters(!showFilters)}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold uppercase tracking-wider transition-all ${
+            className={`inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold uppercase tracking-wider transition-all ${
               showFilters || minAmount || maxAmount || startDate || endDate
                 ? "border-fintech-accent bg-fintech-accent/10 text-fintech-accent" 
                 : "border bg-[var(--app-panel)] text-fintech-muted"
@@ -262,47 +336,155 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           )}
         </div>
 
-        <AnimatePresence>
-          {showFilters && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="space-y-4 rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Min Amount</label>
-                    <input 
-                      type="number" 
-                      value={minAmount}
-                      onChange={(e) => setMinAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
-                      style={{ borderColor: "var(--app-border)" }}
-                    />
+        {isDesktop ? (
+          <AnimatePresence>
+            {showFilters && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="space-y-4 rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Min Amount</label>
+                      <input 
+                        type="number" 
+                        inputMode="decimal"
+                        value={minAmount}
+                        onChange={(e) => setMinAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                        style={{ borderColor: "var(--app-border)" }}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Max Amount</label>
+                      <input 
+                        type="number" 
+                        inputMode="decimal"
+                        value={maxAmount}
+                        onChange={(e) => setMaxAmount(e.target.value)}
+                        placeholder="9999"
+                        className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                        style={{ borderColor: "var(--app-border)" }}
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Max Amount</label>
-                    <input 
-                      type="number" 
-                      value={maxAmount}
-                      onChange={(e) => setMaxAmount(e.target.value)}
-                      placeholder="9999"
-                      className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
-                      style={{ borderColor: "var(--app-border)" }}
-                    />
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Start Date</label>
+                      <input 
+                        type="date" 
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                        style={{ borderColor: "var(--app-border)" }}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">End Date</label>
+                      <input 
+                        type="date" 
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                        style={{ borderColor: "var(--app-border)" }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-3 pt-2 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                      <button 
+                        onClick={() => {
+                          setSortBy(sortBy === "date" ? "amount" : "date");
+                        }}
+                        className="flex min-h-11 items-center gap-1.5 rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-[var(--app-ghost-strong)]"
+                      >
+                        <ArrowUpDown size={12} /> Sort: {sortBy}
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+                        }}
+                        className="flex min-h-11 items-center gap-1.5 rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-[var(--app-ghost-strong)]"
+                      >
+                        {sortOrder === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {sortOrder}
+                      </button>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setMinAmount("");
+                        setMaxAmount("");
+                        setStartDate("");
+                        setEndDate("");
+                        setSortBy("date");
+                        setSortOrder("desc");
+                        setSelectedCategory(null);
+                        setFilterType("all");
+                      }}
+                      className="text-[10px] font-bold text-fintech-accent uppercase tracking-widest hover:underline"
+                    >
+                      Reset All
+                    </button>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+              </motion.div>
+            )}
+          </AnimatePresence>
+        ) : (
+          <BottomSheet isOpen={showFilters} onClose={() => setShowFilters(false)} title="Filters">
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Category</label>
+                <select
+                  value={selectedCategory || ""}
+                  onChange={(e) => setSelectedCategory(e.target.value || null)}
+                  className="min-h-11 w-full rounded-xl border bg-[var(--app-input-muted)] px-4 py-2.5 text-sm font-medium text-[var(--app-text)] outline-none"
+                  style={{ borderColor: "var(--app-border)" }}
+                >
+                  <option value="">All Categories</option>
+                  {categoryOptions.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Min Amount</label>
+                  <input 
+                    type="number" 
+                    inputMode="decimal"
+                    value={minAmount}
+                    onChange={(e) => setMinAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="min-h-11 w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                    style={{ borderColor: "var(--app-border)" }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Max Amount</label>
+                  <input 
+                    type="number" 
+                    inputMode="decimal"
+                    value={maxAmount}
+                    onChange={(e) => setMaxAmount(e.target.value)}
+                    placeholder="9999"
+                    className="min-h-11 w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                    style={{ borderColor: "var(--app-border)" }}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Start Date</label>
                     <input 
                       type="date" 
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      className="min-h-11 w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
                       style={{ borderColor: "var(--app-border)" }}
                     />
                   </div>
@@ -312,18 +494,18 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       type="date" 
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
+                      className="min-h-11 w-full rounded-xl border bg-[var(--app-input)] px-3 py-2 text-xs outline-none focus:border-fintech-accent/50"
                       style={{ borderColor: "var(--app-border)" }}
                     />
                   </div>
-                </div>
-                <div className="flex flex-col gap-3 pt-2 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex flex-wrap gap-2">
+              </div>
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
                     <button 
                       onClick={() => {
                         setSortBy(sortBy === "date" ? "amount" : "date");
                       }}
-                      className="flex items-center gap-1.5 rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-[var(--app-ghost-strong)]"
+                      className="flex min-h-11 items-center gap-1.5 rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-[var(--app-ghost-strong)]"
                     >
                       <ArrowUpDown size={12} /> Sort: {sortBy}
                     </button>
@@ -331,31 +513,39 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       onClick={() => {
                         setSortOrder(sortOrder === "asc" ? "desc" : "asc");
                       }}
-                      className="flex items-center gap-1.5 rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-[var(--app-ghost-strong)]"
+                      className="flex min-h-11 items-center gap-1.5 rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors hover:bg-[var(--app-ghost-strong)]"
                     >
                       {sortOrder === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />} {sortOrder}
                     </button>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setMinAmount("");
-                      setMaxAmount("");
-                      setStartDate("");
-                      setEndDate("");
-                      setSortBy("date");
-                      setSortOrder("desc");
-                      setSelectedCategory(null);
-                      setFilterType("all");
-                    }}
-                    className="text-[10px] font-bold text-fintech-accent uppercase tracking-widest hover:underline"
-                  >
-                    Reset All
-                  </button>
                 </div>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <div className="sticky bottom-0 grid grid-cols-2 gap-3 border-t bg-fintech-bg pt-3" style={{ borderColor: "var(--app-border)" }}>
+                <button
+                  onClick={() => {
+                    setMinAmount("");
+                    setMaxAmount("");
+                    setStartDate("");
+                    setEndDate("");
+                    setSortBy("date");
+                    setSortOrder("desc");
+                    setSelectedCategory(null);
+                    setFilterType("all");
+                  }}
+                  className="min-h-11 rounded-lg border bg-[var(--app-panel)] px-3 py-2 text-xs font-semibold"
+                  style={{ borderColor: "var(--app-border)" }}
+                >
+                  Reset
+                </button>
+                <button
+                  onClick={() => setShowFilters(false)}
+                  className="min-h-11 rounded-lg bg-fintech-accent px-3 py-2 text-xs font-semibold text-[#002919]"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </BottomSheet>
+        )}
       </div>
 
       <div className="space-y-8">
@@ -386,7 +576,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       type={t.type as any} 
                     />
                     <div className="min-w-0">
-                      <div className="font-bold group-hover:text-fintech-accent transition-colors truncate">{t.title}</div>
+                      <div className="font-bold group-hover:text-fintech-accent transition-colors truncate flex items-center gap-2">
+                        <span className="truncate">{t.title}</span>
+                        {t.is_recurring_instance && <Repeat size={12} className="text-fintech-accent shrink-0" aria-label="Recurring instance" />}
+                      </div>
                       <div className="flex items-center gap-2 text-[10px] text-fintech-muted uppercase tracking-wider font-medium">
                         <span className={t.type === "income" ? "text-fintech-success" : "text-fintech-danger"}>
                           {t.category}
@@ -485,72 +678,84 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       </section>
 
       {/* Floating Action Button - Fixed within app container boundaries */}
-      <div className="pointer-events-none fixed bottom-24 left-0 right-0 z-40 lg:bottom-8">
+      <div className="pointer-events-none fixed bottom-[72px] left-0 right-0 z-40 lg:bottom-8">
         <div className="mx-auto flex w-full max-w-[1240px] justify-end px-4 sm:px-6 lg:px-8">
-          <button
-            onClick={() => setShowAddModal(true)}
-            aria-label="Add transaction"
-            className="pointer-events-auto flex h-16 w-16 items-center justify-center rounded-full bg-[linear-gradient(135deg,_#63f0bf_0%,_#31c987_100%)] text-[#07121f] shadow-[0_18px_40px_rgba(73,240,181,0.26)] transition-all hover:scale-110 active:scale-95"
-          >
-            <Plus size={30} />
-          </button>
+          <FAB onClick={() => setShowAddModal(true)} className={`pointer-events-auto ${isDesktop ? "hidden" : ""}`} />
         </div>
       </div>
 
-      {/* Add/Edit Transaction Modal - Fixed within app container boundaries */}
-      <AnimatePresence>
-        {(showAddModal || editingTransaction) && (
-          <div className="fixed inset-0 z-[60] flex items-end justify-center px-4 pb-24 sm:items-center sm:pb-0">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => {
-                setShowAddModal(false);
-                setEditingTransaction(null);
-              }}
-              className="absolute inset-0 backdrop-blur-sm"
-              style={{ backgroundColor: "var(--app-overlay)" }}
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-t-[2rem] border bg-fintech-bg p-8 shadow-2xl sm:rounded-[2rem]"
-              style={{ borderColor: "var(--app-border-strong)" }}
-            >
-              <button 
-                onClick={() => {
-                  setShowAddModal(false);
-                  setEditingTransaction(null);
-                }}
-                className="absolute right-6 top-6 z-10 rounded-full p-2 text-fintech-muted transition-colors hover:bg-[var(--app-ghost)]"
-              >
-                <X size={24} />
-              </button>
-              
-              <div className="pt-6">
-                <TransactionEntry 
-                  expenseCategories={expenseCategories}
-                  incomeCategories={incomeCategories}
-                  hideHeader={true}
-                  initialData={editingTransaction}
-                  onRefresh={() => {
-                    onRefresh();
-                    setShowAddModal(false);
-                    setEditingTransaction(null);
-                  }} 
-                  onClose={() => {
-                    setShowAddModal(false);
-                    setEditingTransaction(null);
-                  }}
-                />
+      {/* Add/Edit Transaction Modal */}
+      <BottomSheet
+        isOpen={showAddModal || Boolean(editingTransaction)}
+        onClose={() => {
+          setShowAddModal(false);
+          setEditingTransaction(null);
+        }}
+        title={editingTransaction ? "Edit Transaction" : "Add Transaction"}
+        fullScreen={!isDesktop}
+      >
+        <TransactionEntry 
+          expenseCategories={expenseCategories}
+          incomeCategories={incomeCategories}
+          hideHeader={true}
+          initialData={editingTransaction}
+          onRefresh={() => {
+            onRefresh();
+            setShowAddModal(false);
+            setEditingTransaction(null);
+          }} 
+          onClose={() => {
+            setShowAddModal(false);
+            setEditingTransaction(null);
+          }}
+        />
+      </BottomSheet>
+
+      <BottomSheet
+        isOpen={Boolean(viewRuleId)}
+        onClose={() => setViewRuleId(null)}
+        title="Recurring Rule"
+        fullScreen={!isDesktop}
+      >
+        {(() => {
+          const rule = recurringRules.find((item) => item.id === viewRuleId);
+          if (!rule) {
+            return <div className="text-sm text-fintech-muted">Rule not found.</div>;
+          }
+          return (
+            <div className="space-y-4">
+              <div className="rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
+                <div className="text-sm font-semibold">{rule.vendor || rule.source || "Recurring rule"}</div>
+                <div className="text-xs text-fintech-muted mt-1">Repeats monthly on day {rule.day_of_month}</div>
+                <div className="text-xs text-fintech-muted">Status: {rule.is_active ? "Active" : "Paused"}</div>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="flex-1 rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-sm font-semibold"
+                  onClick={async () => {
+                    await updateRecurringRule(rule.id, { is_active: !rule.is_active });
+                    setViewRuleId(null);
+                  }}
+                >
+                  {rule.is_active ? "Pause" : "Resume"}
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 rounded-lg bg-fintech-danger/10 px-3 py-2 text-sm font-semibold text-fintech-danger"
+                  onClick={async () => {
+                    if (!window.confirm("Cancel this recurring rule?")) return;
+                    await deleteRecurringRule(rule.id);
+                    setViewRuleId(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      </BottomSheet>
     </div>
   );
 };

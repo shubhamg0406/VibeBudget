@@ -6,6 +6,7 @@ import { Settings } from "./components/Settings";
 import { DateRangeSelector } from "./components/DateRangeSelector";
 import { TransactionsView } from "./components/TransactionsView";
 import { LoggedOutHome } from "./components/LoggedOutHome";
+import { AiChat } from "./components/AiChat";
 import { formatDate, getMonthCountForDateRangeOption, getPresetDateRange, isDateInRange, parseDateString, resolveDateRange } from "./utils/dateUtils";
 import { View, DateRange, Theme } from "./types";
 import { useFirebase } from "./contexts/FirebaseContext";
@@ -214,13 +215,16 @@ export default function App() {
   }
 
   return (
-    <Layout
-      currentView={view}
-      setView={setView}
-      theme={theme}
-      onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-    >
-      {renderView()}
-    </Layout>
+    <>
+      <Layout
+        currentView={view}
+        setView={setView}
+        theme={theme}
+        onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+      >
+        {renderView()}
+      </Layout>
+      <AiChat />
+    </>
   );
 }
