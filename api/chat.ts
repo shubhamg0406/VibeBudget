@@ -1,12 +1,60 @@
 import fs from "fs";
-import {
-  buildBudgetSummary,
-  buildSystemPrompt,
-  type AiCategory,
-  type AiIncome,
-  type AiTransaction,
-  type BudgetData,
-} from "../src/server/aiChat";
+
+interface AiTransaction {
+  date: string;
+  vendor: string;
+  amount: number;
+  category_id: string;
+  category_name: string;
+  notes?: string;
+  uid?: string;
+}
+
+interface AiIncome {
+  date: string;
+  source: string;
+  amount: number;
+  category: string;
+  notes?: string;
+  uid?: string;
+}
+
+interface AiCategory {
+  name: string;
+  target_amount: number;
+  uid?: string;
+}
+
+interface BudgetData {
+  transactions: AiTransaction[];
+  income: AiIncome[];
+  categories: AiCategory[];
+}
+
+interface BudgetSummary {
+  totalIncome: number;
+  totalExpenses: number;
+  netBalance: number;
+  categoryPerformance: Array<{ name: string; spent: number; target: number; pct: number }>;
+  topVendors: Array<{ vendor: string; total: number }>;
+  monthlyTrend: Array<{ month: string; income: number; expenses: number }>;
+  transactions: Array<{
+    date: string;
+    vendor: string;
+    amount: number;
+    category_id: string;
+    category_name: string;
+    notes?: string;
+  }>;
+  income: Array<{
+    date: string;
+    source: string;
+    amount: number;
+    category: string;
+    notes?: string;
+  }>;
+  dateRange: { start: string; end: string };
+}
 
 type ApiMessageRole = "user" | "assistant";
 
@@ -99,6 +147,217 @@ const getProviderErrorMessage = async (response: Response) => {
 };
 
 const startOfSixMonthWindow = (now: Date) => new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+const toNumber = (value: unknown) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const asString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+
+const formatCurrency = (value: number) => {
+  const safeValue = Number.isFinite(value) ? value : 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(safeValue);
+};
+
+const monthKey = (date: Date) => date.toISOString().slice(0, 7);
+
+const getLastSixMonths = (now: Date) => {
+  const months: string[] = [];
+  for (let index = 5; index >= 0; index -= 1) {
+    const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
+    months.push(monthKey(date));
+  }
+  return months;
+};
+
+const sanitizeTransactions = (transactions: AiTransaction[]) => {
+  return transactions
+    .map((item) => ({
+      date: asString(item.date),
+      vendor: asString(item.vendor),
+      amount: toNumber(item.amount),
+      category_id: asString(item.category_id),
+      category_name: asString(item.category_name),
+      notes: asString(item.notes),
+    }))
+    .filter((item) => item.date && item.vendor && item.category_name)
+    .sort((a, b) => b.date.localeCompare(a.date));
+};
+
+const sanitizeIncome = (income: AiIncome[]) => {
+  return income
+    .map((item) => ({
+      date: asString(item.date),
+      source: asString(item.source),
+      amount: toNumber(item.amount),
+      category: asString(item.category),
+      notes: asString(item.notes),
+    }))
+    .filter((item) => item.date && item.source)
+    .sort((a, b) => b.date.localeCompare(a.date));
+};
+
+const sanitizeCategories = (categories: AiCategory[]) => {
+  return categories
+    .map((item) => ({
+      name: asString(item.name),
+      target_amount: toNumber(item.target_amount),
+    }))
+    .filter((item) => item.name);
+};
+
+const buildBudgetSummary = (rawData: BudgetData, now: Date): BudgetSummary => {
+  const transactions = sanitizeTransactions(rawData.transactions);
+  const income = sanitizeIncome(rawData.income);
+  const categories = sanitizeCategories(rawData.categories);
+
+  const totalIncome = income.reduce((sum, item) => sum + item.amount, 0);
+  const totalExpenses = transactions.reduce((sum, item) => sum + item.amount, 0);
+  const netBalance = totalIncome - totalExpenses;
+
+  const spendingByCategory = new Map<string, number>();
+  transactions.forEach((item) => {
+    spendingByCategory.set(item.category_name, (spendingByCategory.get(item.category_name) || 0) + item.amount);
+  });
+
+  const categoryNames = new Set<string>([
+    ...categories.map((item) => item.name),
+    ...spendingByCategory.keys(),
+  ]);
+
+  const targetByCategory = new Map(categories.map((category) => [category.name, category.target_amount]));
+  const categoryPerformance = Array.from(categoryNames)
+    .map((name) => {
+      const spent = spendingByCategory.get(name) || 0;
+      const target = targetByCategory.get(name) || 0;
+      const pct = target > 0 ? Number(((spent / target) * 100).toFixed(1)) : 0;
+      return { name, spent, target, pct };
+    })
+    .sort((a, b) => b.spent - a.spent || a.name.localeCompare(b.name));
+
+  const vendorTotals = new Map<string, number>();
+  transactions.forEach((item) => {
+    vendorTotals.set(item.vendor, (vendorTotals.get(item.vendor) || 0) + item.amount);
+  });
+
+  const topVendors = Array.from(vendorTotals.entries())
+    .map(([vendor, total]) => ({ vendor, total }))
+    .sort((a, b) => b.total - a.total || a.vendor.localeCompare(b.vendor))
+    .slice(0, 5);
+
+  const months = getLastSixMonths(now);
+  const monthIncomeMap = new Map(months.map((month) => [month, 0]));
+  const monthExpenseMap = new Map(months.map((month) => [month, 0]));
+
+  income.forEach((item) => {
+    const month = item.date.slice(0, 7);
+    if (monthIncomeMap.has(month)) {
+      monthIncomeMap.set(month, (monthIncomeMap.get(month) || 0) + item.amount);
+    }
+  });
+
+  transactions.forEach((item) => {
+    const month = item.date.slice(0, 7);
+    if (monthExpenseMap.has(month)) {
+      monthExpenseMap.set(month, (monthExpenseMap.get(month) || 0) + item.amount);
+    }
+  });
+
+  const monthlyTrend = months.map((month) => ({
+    month,
+    income: monthIncomeMap.get(month) || 0,
+    expenses: monthExpenseMap.get(month) || 0,
+  }));
+
+  const windowStart = startOfSixMonthWindow(now).toISOString().slice(0, 10);
+  const windowEnd = now.toISOString().slice(0, 10);
+
+  return {
+    totalIncome,
+    totalExpenses,
+    netBalance,
+    categoryPerformance,
+    topVendors,
+    monthlyTrend,
+    transactions,
+    income,
+    dateRange: { start: windowStart, end: windowEnd },
+  };
+};
+
+const buildSystemPrompt = (summary: BudgetSummary, now: Date) => {
+  const categories = summary.categoryPerformance.length > 0
+    ? summary.categoryPerformance
+      .map((category) => `- ${category.name}: spent ${formatCurrency(category.spent)} of ${formatCurrency(category.target)} target (${category.pct}%)`)
+      .join("\n")
+    : "- No category data available";
+
+  const vendors = summary.topVendors.length > 0
+    ? summary.topVendors
+      .map((vendor) => `- ${vendor.vendor}: ${formatCurrency(vendor.total)}`)
+      .join("\n")
+    : "- No vendor data available";
+
+  const monthlyTrend = summary.monthlyTrend.length > 0
+    ? summary.monthlyTrend
+      .map((month) => `- ${month.month}: Income ${formatCurrency(month.income)} | Expenses ${formatCurrency(month.expenses)}`)
+      .join("\n")
+    : "- No monthly data available";
+
+  const transactions = summary.transactions.length > 0
+    ? summary.transactions
+      .map((item) => `${item.date} | ${item.vendor} | ${formatCurrency(item.amount)} | ${item.category_name}${item.notes ? ` | ${item.notes}` : ""}`)
+      .join("\n")
+    : "No transactions found in this period.";
+
+  const income = summary.income.length > 0
+    ? summary.income
+      .map((item) => `${item.date} | ${item.source} | ${formatCurrency(item.amount)} | ${item.category}`)
+      .join("\n")
+    : "No income records found in this period.";
+
+  const today = now.toISOString().slice(0, 10);
+
+  return [
+    "You are a friendly, sharp personal finance assistant for VibeBudget.",
+    "You have access to the signed-in user's real budget data provided below.",
+    "Answer questions accurately and concisely based only on this data.",
+    "Do not make up transactions or amounts. If the data doesn't cover a question, say so.",
+    "Format numbers as currency (e.g. $1,234.56). Use bullet points for lists.",
+    "Keep answers short unless the user asks for detail.",
+    `Today's date is ${today}.`,
+    `User's Budget Summary (${summary.dateRange.start} to ${summary.dateRange.end})`,
+    "Overview",
+    `Total Income: ${formatCurrency(summary.totalIncome)}`,
+    `Total Expenses: ${formatCurrency(summary.totalExpenses)}`,
+    `Net Balance: ${formatCurrency(summary.netBalance)}`,
+    "",
+    "Category Performance",
+    categories,
+    "",
+    "Top Vendors by Spend",
+    vendors,
+    "",
+    "Monthly Trend (last 6 months)",
+    monthlyTrend,
+    "",
+    "All Transactions (last 6 months)",
+    transactions,
+    "",
+    "All Income Records (last 6 months)",
+    income,
+  ].join("\n");
+};
 
 const normalizePrivateKey = (key: string) => key.replace(/\\n/g, "\n").replace(/\r\n/g, "\n");
 
