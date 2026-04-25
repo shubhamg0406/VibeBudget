@@ -142,17 +142,19 @@ const formatCurrency = (value: number) => {
 
 const monthKey = (date: Date) => date.toISOString().slice(0, 7);
 
-const getLastSixMonths = (now: Date) => {
+const getMonthlyKeysInRange = (startMonth: string, endMonth: string) => {
+  const [startYear, startMonthNumber] = startMonth.split("-").map(Number);
+  const [endYear, endMonthNumber] = endMonth.split("-").map(Number);
+  const cursor = new Date(startYear, startMonthNumber - 1, 1);
+  const end = new Date(endYear, endMonthNumber - 1, 1);
   const months: string[] = [];
-  for (let index = 5; index >= 0; index -= 1) {
-    const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
-    months.push(monthKey(date));
-  }
-  return months;
-};
 
-const startOfSixMonthWindow = (now: Date) => {
-  return new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  while (cursor <= end) {
+    months.push(monthKey(cursor));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return months;
 };
 
 const sanitizeTransactions = (transactions: AiTransaction[]) => {
@@ -242,7 +244,16 @@ export const buildBudgetSummary = (rawData: BudgetData, now: Date): BudgetSummar
     .sort((a, b) => b.total - a.total || a.vendor.localeCompare(b.vendor))
     .slice(0, 5);
 
-  const months = getLastSixMonths(now);
+  const allMonths = [
+    ...transactions.map((item) => item.date.slice(0, 7)),
+    ...income.map((item) => item.date.slice(0, 7)),
+  ]
+    .filter((month) => /^\d{4}-\d{2}$/.test(month))
+    .sort();
+
+  const startMonth = allMonths[0] || monthKey(now);
+  const endMonth = allMonths[allMonths.length - 1] || monthKey(now);
+  const months = getMonthlyKeysInRange(startMonth, endMonth);
   const monthIncomeMap = new Map(months.map((month) => [month, 0]));
   const monthExpenseMap = new Map(months.map((month) => [month, 0]));
 
@@ -266,8 +277,13 @@ export const buildBudgetSummary = (rawData: BudgetData, now: Date): BudgetSummar
     expenses: monthExpenseMap.get(month) || 0,
   }));
 
-  const windowStart = startOfSixMonthWindow(now).toISOString().slice(0, 10);
-  const windowEnd = now.toISOString().slice(0, 10);
+  const transactionDates = transactions.map((item) => item.date);
+  const incomeDates = income.map((item) => item.date);
+  const allDates = [...transactionDates, ...incomeDates]
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort();
+  const windowStart = allDates[0] || now.toISOString().slice(0, 10);
+  const windowEnd = allDates[allDates.length - 1] || now.toISOString().slice(0, 10);
 
   return {
     totalIncome,
@@ -305,13 +321,13 @@ export const buildSystemPrompt = (summary: BudgetSummary, now: Date) => {
     ? summary.transactions
       .map((item) => `${item.date} | ${item.vendor} | ${formatCurrency(item.amount)} | ${item.category_name}${item.notes ? ` | ${item.notes}` : ""}`)
       .join("\n")
-    : "No transactions found in this period.";
+    : "No transactions found in available data.";
 
   const income = summary.income.length > 0
     ? summary.income
       .map((item) => `${item.date} | ${item.source} | ${formatCurrency(item.amount)} | ${item.category}`)
       .join("\n")
-    : "No income records found in this period.";
+    : "No income records found in available data.";
 
   const today = now.toISOString().slice(0, 10);
 
@@ -335,13 +351,13 @@ export const buildSystemPrompt = (summary: BudgetSummary, now: Date) => {
     "Top Vendors by Spend",
     vendors,
     "",
-    "Monthly Trend (last 6 months)",
+    "Monthly Trend (all available months)",
     monthlyTrend,
     "",
-    "All Transactions (last 6 months)",
+    "All Transactions (all available data)",
     transactions,
     "",
-    "All Income Records (last 6 months)",
+    "All Income Records (all available data)",
     income,
   ].join("\n");
 };
@@ -424,7 +440,20 @@ const callGroqApiChat = async (
   return reply;
 };
 
-const isRestFallbackEnabled = () => process.env.ALLOW_FIREBASE_REST_FALLBACK === "true";
+const isRestFallbackEnabled = () => {
+  const configured = process.env.ALLOW_FIREBASE_REST_FALLBACK;
+  if (typeof configured === "string" && configured.trim().length > 0) {
+    return configured === "true";
+  }
+  // Vercel production commonly has no Firebase Admin credentials.
+  return process.env.NODE_ENV === "production";
+};
+
+const resolveDataNamespace = () => {
+  const configured = (process.env.FIREBASE_DATA_NAMESPACE || process.env.VITE_FIREBASE_DATA_NAMESPACE || "").trim();
+  if (configured) return configured;
+  return process.env.NODE_ENV === "production" ? "prod" : "local-dev";
+};
 
 const normalizePrivateKey = (key: string) => key.replace(/\\n/g, "\n").replace(/\r\n/g, "\n");
 
@@ -509,14 +538,8 @@ const loadFirebaseAdmin = async () => {
 
 const fetchCollection = async (
   collectionRef: FirebaseFirestore.CollectionReference,
-  windowStartDate: string,
-  limitTo = 500,
 ) => {
-  const snapshot = await collectionRef
-    .where("date", ">=", windowStartDate)
-    .orderBy("date", "desc")
-    .limit(limitTo)
-    .get();
+  const snapshot = await collectionRef.get();
   return snapshot.docs.map((doc) => doc.data());
 };
 
@@ -527,21 +550,34 @@ const fetchCollectionViaRest = async (
   idToken: string,
 ): Promise<any[]> => {
   const encodedPath = collectionPath.split("/").map(encodeURIComponent).join("/");
-  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/${encodedPath}?pageSize=500`;
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${idToken}`,
-    },
-  });
+  const allDocuments: any[] = [];
+  let pageToken = "";
 
-  if (!response.ok) {
-    const payload = await response.text().catch(() => "");
-    throw new Error(`Firestore REST request failed (${response.status}): ${payload || response.statusText}`);
+  while (true) {
+    const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "";
+    const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/${encodedPath}?pageSize=500${tokenParam}`;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      const payload = await response.text().catch(() => "");
+      throw new Error(`Firestore REST request failed (${response.status}): ${payload || response.statusText}`);
+    }
+
+    const payload = await response.json() as { documents?: any[]; nextPageToken?: string };
+    const documents = Array.isArray(payload.documents) ? payload.documents : [];
+    allDocuments.push(...documents.map((doc) => decodeFirestoreDocument(doc)));
+    pageToken = typeof payload.nextPageToken === "string" ? payload.nextPageToken : "";
+
+    if (!pageToken) {
+      break;
+    }
   }
 
-  const payload = await response.json() as { documents?: any[] };
-  const documents = Array.isArray(payload.documents) ? payload.documents : [];
-  return documents.map((doc) => decodeFirestoreDocument(doc));
+  return allDocuments;
 };
 
 const loadUserBudgetDataFromFirestoreRest = async (uid: string, now: Date, idToken: string): Promise<BudgetData> => {
@@ -550,12 +586,11 @@ const loadUserBudgetDataFromFirestoreRest = async (uid: string, now: Date, idTok
     throw new HttpError(500, "Missing FIREBASE_PROJECT_ID/VITE_FIREBASE_PROJECT_ID for Firestore REST fallback.");
   }
   const databaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID || process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "(default)";
-  const namespace = (process.env.FIREBASE_DATA_NAMESPACE || process.env.VITE_FIREBASE_DATA_NAMESPACE || "").trim();
+  const namespace = resolveDataNamespace();
   const rootPaths = [
     ...(namespace ? [`environments/${namespace}/users/${uid}`] : []),
     `users/${uid}`,
   ];
-  const windowStartDate = startOfSixMonthWindow(now).toISOString().slice(0, 10);
 
   for (const rootPath of rootPaths) {
     try {
@@ -565,25 +600,23 @@ const loadUserBudgetDataFromFirestoreRest = async (uid: string, now: Date, idTok
         fetchCollectionViaRest(projectId, databaseId, `${rootPath}/categories`, idToken),
       ]);
 
-      const filteredTransactions = (transactions as AiTransaction[])
-        .filter((item) => typeof item.date === "string" && item.date >= windowStartDate)
-        .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
-        .slice(0, 500);
-      const filteredIncome = (income as AiIncome[])
-        .filter((item) => typeof item.date === "string" && item.date >= windowStartDate)
-        .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
-        .slice(0, 500);
+      const sortedTransactions = (transactions as AiTransaction[])
+        .filter((item) => typeof item.date === "string")
+        .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      const sortedIncome = (income as AiIncome[])
+        .filter((item) => typeof item.date === "string")
+        .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
       const parsedCategories = categories as AiCategory[];
 
       if (
-        filteredTransactions.length > 0 ||
-        filteredIncome.length > 0 ||
+        sortedTransactions.length > 0 ||
+        sortedIncome.length > 0 ||
         parsedCategories.length > 0 ||
         rootPath === rootPaths[rootPaths.length - 1]
       ) {
         return {
-          transactions: filteredTransactions,
-          income: filteredIncome,
+          transactions: sortedTransactions,
+          income: sortedIncome,
           categories: parsedCategories,
         };
       }
@@ -612,14 +645,12 @@ const loadUserBudgetDataFromFirestore = async (uid: string, now: Date, idToken?:
     console.warn("AI chat Firebase Admin init failed, trying REST fallback:", details);
     return loadUserBudgetDataFromFirestoreRest(uid, now, idToken);
   }
-  const namespace = (process.env.FIREBASE_DATA_NAMESPACE || process.env.VITE_FIREBASE_DATA_NAMESPACE || "").trim();
+  const namespace = resolveDataNamespace();
 
   const rootPaths = [
     ...(namespace ? [{ base: ["environments", namespace, "users", uid] }] : []),
     { base: ["users", uid] },
   ];
-
-  const windowStartDate = startOfSixMonthWindow(now).toISOString().slice(0, 10);
 
   for (const rootPath of rootPaths) {
     const [first, second, ...rest] = rootPath.base;
@@ -637,8 +668,8 @@ const loadUserBudgetDataFromFirestore = async (uid: string, now: Date, idToken?:
 
     try {
       const [transactions, income, categoriesSnapshot] = await Promise.all([
-        fetchCollection(transactionsRef, windowStartDate, 500),
-        fetchCollection(incomeRef, windowStartDate, 500),
+        fetchCollection(transactionsRef),
+        fetchCollection(incomeRef),
         categoriesRef.get(),
       ]);
 
