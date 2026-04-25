@@ -11,7 +11,8 @@ import {
   Receipt,
   Repeat,
   RotateCcw,
-  SearchX
+  SearchX,
+  RefreshCw
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { TransactionEntry } from "./TransactionEntry";
@@ -20,6 +21,10 @@ import { compareDateStrings, formatDisplayDate, getMonthYearLabel, isDateInRange
 import { useFirebase } from "../contexts/FirebaseContext";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 import { getCategoryDropdownNames } from "../utils/categoryOptions";
+import {
+  hasSavedTransactionSheetImportConfig,
+  refreshSavedTransactionSheetImports,
+} from "../utils/publicSheetImport";
 import { BottomSheet } from "./common/BottomSheet";
 import { FAB } from "./common/FAB";
 import { useBreakpoint } from "../hooks/useBreakpoint";
@@ -60,9 +65,29 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [editingTransaction, setEditingTransaction] = useState<UnifiedTransaction | null>(null);
   const [filterType, setFilterType] = useState<"all" | "expense" | "income">("all");
   const [showFilters, setShowFilters] = useState(false);
-  const { preferences, getUpcomingRecurring, recurringRules, updateRecurringRule, deleteRecurringRule } = useFirebase();
+  const {
+    preferences,
+    getUpcomingRecurring,
+    recurringRules,
+    updateRecurringRule,
+    deleteRecurringRule,
+    googleSheetsConfig,
+    googleSheetsConnected,
+    googleSheetsSyncing,
+    googleSheetsError,
+    googleSheetsAccessToken,
+    connectGoogleSheets,
+    importData,
+    syncGoogleSheets,
+  } = useFirebase();
   const [showUpcoming, setShowUpcoming] = useState(false);
   const [viewRuleId, setViewRuleId] = useState<string | null>(null);
+  const [sheetRefreshStatus, setSheetRefreshStatus] = useState<{
+    type: "success" | "info" | "error";
+    message: string;
+  } | null>(null);
+  const [sheetRefreshLoading, setSheetRefreshLoading] = useState(false);
+  const [hasSavedSheetImport, setHasSavedSheetImport] = useState(false);
   
   // Advanced filters
   const [minAmount, setMinAmount] = useState("");
@@ -156,6 +181,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     }
   }, [categoryOptions, selectedCategory]);
 
+  useEffect(() => {
+    setHasSavedSheetImport(hasSavedTransactionSheetImportConfig());
+  }, []);
+
   const totalIncoming = sortedAndFiltered
     .filter((item) => item.type === "income")
     .reduce((sum, item) => sum + convertToBaseCurrency(item.amount, item.currency, preferences), 0);
@@ -166,14 +195,92 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const upcoming = useMemo(() => (showUpcoming ? getUpcomingRecurring(30) : []), [getUpcomingRecurring, showUpcoming, recurringRules]);
   const upcomingExpense = upcoming.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0);
   const upcomingIncome = upcoming.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
+  const lastSheetRefresh = googleSheetsConfig?.lastPullAt || googleSheetsConfig?.lastSyncedAt || null;
+  const canRefreshFromSheets = Boolean(googleSheetsConfig || hasSavedSheetImport);
+  const isSheetRefreshing = googleSheetsSyncing || sheetRefreshLoading;
+
+  const handleSheetRefresh = async () => {
+    if (isSheetRefreshing) return;
+
+    setSheetRefreshStatus(null);
+    setSheetRefreshLoading(true);
+
+    try {
+      if (googleSheetsConfig && !googleSheetsConnected) {
+        await connectGoogleSheets();
+      }
+
+      if (googleSheetsConfig) {
+        await syncGoogleSheets("pull");
+      } else {
+        const result = await refreshSavedTransactionSheetImports(googleSheetsAccessToken, importData);
+        const totalImported = result.expenses + result.income;
+        if (totalImported === 0) {
+          setSheetRefreshStatus({
+            type: "info",
+            message: "Saved Google Sheet import refreshed, but no transaction rows were found.",
+          });
+          return;
+        }
+      }
+
+      setSheetRefreshStatus({
+        type: "success",
+        message: "Google Sheet changes fetched.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to refresh from Google Sheets.";
+      setSheetRefreshStatus({
+        type: message.includes("Redirecting to Google") ? "info" : "error",
+        message,
+      });
+    } finally {
+      setSheetRefreshLoading(false);
+    }
+  };
 
   return (
     <div className="relative min-h-[80vh] space-y-6 pb-24">
-      <header>
-        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-fintech-muted">
-          {unifiedData.length} total records
-        </p>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-fintech-muted">
+            {unifiedData.length} total records
+          </p>
+          {lastSheetRefresh && (
+            <p className="mt-1 text-[11px] text-fintech-muted">
+              Last sheet pull: {new Date(lastSheetRefresh).toLocaleString()}
+            </p>
+          )}
+        </div>
+
+        {canRefreshFromSheets && (
+          <button
+            type="button"
+            onClick={() => void handleSheetRefresh()}
+            disabled={isSheetRefreshing}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border bg-[var(--app-panel)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-fintech-accent transition-colors hover:bg-fintech-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ borderColor: "var(--app-border)" }}
+            aria-label="Refresh transactions from Google Sheets"
+          >
+            <RefreshCw size={15} className={isSheetRefreshing ? "animate-spin" : ""} />
+            <span>{isSheetRefreshing ? "Refreshing..." : "Refresh Sheet"}</span>
+          </button>
+        )}
       </header>
+
+      {canRefreshFromSheets && (sheetRefreshStatus || googleSheetsError) && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            sheetRefreshStatus?.type === "success"
+              ? "border-fintech-success/30 bg-fintech-success/10 text-fintech-success"
+              : sheetRefreshStatus?.type === "info"
+                ? "border-fintech-import/30 bg-fintech-import/10 text-fintech-import"
+                : "border-fintech-danger/30 bg-fintech-danger/10 text-fintech-danger"
+          }`}
+        >
+          {sheetRefreshStatus?.message || googleSheetsError}
+        </div>
+      )}
 
       <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
         <button
@@ -677,11 +784,9 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         </div>
       </section>
 
-      {/* Floating Action Button - Fixed within app container boundaries */}
-      <div className="pointer-events-none fixed bottom-[72px] left-0 right-0 z-40 lg:bottom-8">
-        <div className="mx-auto flex w-full max-w-[1240px] justify-end px-4 sm:px-6 lg:px-8">
-          <FAB onClick={() => setShowAddModal(true)} className={`pointer-events-auto ${isDesktop ? "hidden" : ""}`} />
-        </div>
+      {/* Floating Action Button */}
+      <div className="pointer-events-none fixed bottom-24 right-24 z-40 lg:bottom-8 lg:right-28">
+        <FAB onClick={() => setShowAddModal(true)} className="pointer-events-auto" />
       </div>
 
       {/* Add/Edit Transaction Modal */}

@@ -134,6 +134,31 @@ const buildRowRange = (sheetName: string, rowNumber: number, columnCount: number
   `${escapeSheetName(sheetName)}!A${rowNumber}:${getColumnLetter(Math.max(columnCount - 1, 0))}${rowNumber}`
 );
 
+export const trimValuesAtEmptyRun = (values: string[], emptyRunLimit = 5) => {
+  const trimmedValues: string[] = [];
+  let consecutiveEmptyRows = 0;
+
+  for (const value of values) {
+    const normalizedValue = value.trim();
+    if (normalizedValue === "") {
+      consecutiveEmptyRows += 1;
+      if (consecutiveEmptyRows >= emptyRunLimit) {
+        break;
+      }
+    } else {
+      consecutiveEmptyRows = 0;
+    }
+
+    trimmedValues.push(normalizedValue);
+  }
+
+  while (trimmedValues.length > 0 && trimmedValues[trimmedValues.length - 1] === "") {
+    trimmedValues.pop();
+  }
+
+  return trimmedValues;
+};
+
 const parseAmount = (value: string) => {
   const cleaned = value.replace(/[^-0-9.]/g, "");
   const parsed = Number.parseFloat(cleaned);
@@ -417,6 +442,45 @@ export const getFullSheetGridRows = async (
 
   const targetSheet = (response.sheets || [])[0];
   return buildGridRows(targetSheet?.data, rowCount, columnCount);
+};
+
+export const getSheetColumnValuesUntilEmptyRun = async (
+  token: string,
+  spreadsheetId: string,
+  sheetName: string,
+  columnIndex: number,
+  startRowNumber: number,
+  emptyRunLimit = 5,
+  batchSize = 250
+) => {
+  const columnLetter = getColumnLetter(columnIndex);
+  const values: string[] = [];
+  let nextStartRow = Math.max(startRowNumber, 1);
+  let consecutiveEmptyRows = 0;
+
+  while (consecutiveEmptyRows < emptyRunLimit) {
+    const endRow = nextStartRow + batchSize - 1;
+    const range = `${escapeSheetName(sheetName)}!${columnLetter}${nextStartRow}:${columnLetter}${endRow}`;
+    const responseValues = (await getSheetValues(token, spreadsheetId, range)).values || [];
+
+    for (let offset = 0; offset < batchSize; offset += 1) {
+      const normalizedValue = (responseValues[offset]?.[0] || "").trim();
+      values.push(normalizedValue);
+
+      if (normalizedValue === "") {
+        consecutiveEmptyRows += 1;
+        if (consecutiveEmptyRows >= emptyRunLimit) {
+          return trimValuesAtEmptyRun(values, emptyRunLimit);
+        }
+      } else {
+        consecutiveEmptyRows = 0;
+      }
+    }
+
+    nextStartRow += batchSize;
+  }
+
+  return trimValuesAtEmptyRun(values, emptyRunLimit);
 };
 
 export const getSheetTabPreviews = async (
@@ -818,26 +882,6 @@ export const syncAppDataToSheet = async (
       await appendSheetValues(token, config.spreadsheetId, `${escapeSheetName(config.incomeSheetName)}!A1`, [rowValues]);
     }
   }
-};
-
-export const clearSheetRowForItem = async (
-  token: string,
-  config: GoogleSheetsSyncConfig,
-  kind: SheetsKind,
-  itemId: string
-) => {
-  const sheetName = kind === "expenses" ? config.expensesSheetName : config.incomeSheetName;
-  const mapping = kind === "expenses" ? config.expenseMapping : config.incomeMapping;
-  const { headers, records } = await readSheetRecords(token, config.spreadsheetId, sheetName);
-  const record = records.find((row) => row.values[mapping.id] === itemId);
-
-  if (!record) return;
-
-  await clearSheetValues(
-    token,
-    config.spreadsheetId,
-    buildRowRange(sheetName, record.rowNumber, headers.length)
-  );
 };
 
 interface SyncSheetToAppArgs {

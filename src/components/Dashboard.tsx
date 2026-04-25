@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from "react";
 import { ExpenseCategory, Income, IncomeCategory, Transaction } from "../types";
 import {
+  AlertTriangle,
   ArrowDownRight,
   ArrowUpRight,
+  ChevronDown,
   Check,
   Edit2,
   PiggyBank,
@@ -14,6 +16,8 @@ import { motion } from "motion/react";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 import { getCategoryDropdownNames } from "../utils/categoryOptions";
+import { DashboardInsightTile, generateDashboardInsights, InsightTone } from "../utils/insights";
+import { formatDate, isDateInRange } from "../utils/dateUtils";
 
 interface DashboardProps {
   expenseCategories: ExpenseCategory[];
@@ -23,6 +27,7 @@ interface DashboardProps {
   previousTransactions?: Transaction[];
   previousIncome?: Income[];
   allTransactions?: Transaction[];
+  allIncome?: Income[];
   onViewHistory?: () => void;
   onUpdateTarget?: (id: string, target: number) => void;
   monthMultiplier?: number;
@@ -35,12 +40,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   income,
   previousTransactions = [],
   previousIncome = [],
+  allTransactions = [],
+  allIncome = [],
   onUpdateTarget,
   monthMultiplier = 1
 }) => {
-  const { preferences } = useFirebase();
+  const { preferences, getUpcomingRecurring } = useFirebase();
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [insightPeriod, setInsightPeriod] = useState<"ytd" | "month">("month");
+  const [showMoreInsights, setShowMoreInsights] = useState(false);
   const normalizeCategoryKey = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase();
 
   const baseSymbol = getCurrencySymbol(preferences?.baseCurrency);
@@ -170,6 +179,106 @@ export const Dashboard: React.FC<DashboardProps> = ({
     },
   ];
 
+  const insightGroups = useMemo(() => {
+    const today = new Date();
+    const monthStart = formatDate(new Date(today.getFullYear(), today.getMonth(), 1));
+    const monthEnd = formatDate(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+    const previousMonthStart = formatDate(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+    const previousMonthEnd = formatDate(new Date(today.getFullYear(), today.getMonth(), 0));
+    const ytdStart = formatDate(new Date(today.getFullYear(), 0, 1));
+    const ytdEnd = formatDate(today);
+    const previousYtdStart = formatDate(new Date(today.getFullYear() - 1, 0, 1));
+    const previousYtdEnd = formatDate(new Date(today.getFullYear() - 1, today.getMonth(), today.getDate()));
+    const insightTransactions = allTransactions.length > 0 ? allTransactions : transactions;
+    const insightIncome = allIncome.length > 0 ? allIncome : income;
+    const upcomingRecurring = getUpcomingRecurring(30);
+    const common = {
+      allTransactions: insightTransactions,
+      expenseCategories,
+      upcomingRecurring,
+      baseCurrency: preferences?.baseCurrency || "CAD",
+      exchangeRates: preferences?.exchangeRates || [],
+    };
+    const filterTransactions = (items: Transaction[], start: string, end: string) => (
+      items.filter((item) => isDateInRange(item.date, start, end))
+    );
+    const filterIncome = (items: Income[], start: string, end: string) => (
+      items.filter((item) => isDateInRange(item.date, start, end))
+    );
+
+    return [
+      {
+        id: "ytd" as const,
+        title: "YTD",
+        subtitle: `${ytdStart} to ${ytdEnd}`,
+        insights: generateDashboardInsights({
+          ...common,
+          transactions: filterTransactions(insightTransactions, ytdStart, ytdEnd),
+          income: filterIncome(insightIncome, ytdStart, ytdEnd),
+          previousTransactions: filterTransactions(insightTransactions, previousYtdStart, previousYtdEnd),
+          previousIncome: filterIncome(insightIncome, previousYtdStart, previousYtdEnd),
+          monthMultiplier: today.getMonth() + 1,
+        }),
+      },
+      {
+        id: "month" as const,
+        title: "This Month",
+        subtitle: `${monthStart} to ${monthEnd}`,
+        insights: generateDashboardInsights({
+          ...common,
+          transactions: filterTransactions(insightTransactions, monthStart, monthEnd),
+          income: filterIncome(insightIncome, monthStart, monthEnd),
+          previousTransactions: filterTransactions(insightTransactions, previousMonthStart, previousMonthEnd),
+          previousIncome: filterIncome(insightIncome, previousMonthStart, previousMonthEnd),
+          monthMultiplier: 1,
+        }),
+      },
+    ];
+  }, [
+    transactions,
+    allTransactions,
+    income,
+    allIncome,
+    expenseCategories,
+    getUpcomingRecurring,
+    preferences?.baseCurrency,
+    preferences?.exchangeRates,
+  ]);
+
+  const insightNumberClass: Record<InsightTone, string> = {
+    good: "text-fintech-accent",
+    warn: "text-amber-400",
+    bad: "text-fintech-danger",
+    info: "text-[#78d8ff]",
+  };
+
+  const insightPillClass: Record<InsightTone, string> = {
+    good: "border-fintech-accent/30 bg-[var(--app-success-soft)] text-fintech-accent",
+    warn: "border-amber-400/30 bg-amber-500/10 text-amber-300",
+    bad: "border-fintech-danger/30 bg-[var(--app-danger-soft)] text-fintech-danger",
+    info: "border-[var(--app-border)] bg-[var(--app-pill-muted)] text-[var(--app-text-soft)]",
+  };
+
+  const selectedInsightGroup = insightGroups.find((group) => group.id === insightPeriod) || insightGroups[0];
+  const getInsight = (pillar: string) => selectedInsightGroup.insights.find((insight) => insight.pillar === pillar);
+  const getTile = (pillar: string, label: string) => getInsight(pillar)?.tiles.find((tile) => tile.label === label);
+  const makeFallbackTile = (label: string): DashboardInsightTile => ({ value: "—", label, context: "Not tracked", tone: "info" });
+  const heroTiles = [
+    getTile("budget-health", "Budget used") || makeFallbackTile("Budget used"),
+    getTile("income-tracking", "Net take-home") || makeFallbackTile("Net take-home"),
+    getTile("budget-health", "Projected balance") || makeFallbackTile("Projected balance"),
+  ];
+  const visibleSupportTiles = [
+    getTile("spending-analysis", "Top category") || makeFallbackTile("Top category"),
+    getTile("goals-milestones", "Savings rate") || makeFallbackTile("Savings rate"),
+    getTile("trends-forecasting", "Spend trend") || makeFallbackTile("Spend trend"),
+  ];
+  const secondarySupportTiles = [
+    getTile("spending-analysis", "Fixed spend"),
+    getTile("goals-milestones", "Spend buffer"),
+  ].filter(Boolean) as DashboardInsightTile[];
+  const actionableAlerts = (getInsight("smart-alerts")?.alerts || []).filter((alert) => alert.label !== "No alerts");
+
   return (
     <div className={isEmptyState ? "space-y-3.5" : "space-y-4"}>
       <section className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -200,6 +309,117 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           );
         })}
+      </section>
+
+      <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-[1.1rem] font-bold">Insights</h3>
+            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-fintech-muted">{selectedInsightGroup.subtitle}</p>
+          </div>
+          <div className="inline-grid grid-cols-2 rounded-lg border bg-[var(--app-panel-muted)] p-1" style={{ borderColor: "var(--app-border)" }}>
+            {insightGroups.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => {
+                  setInsightPeriod(group.id);
+                  setShowMoreInsights(false);
+                }}
+                className={`min-h-0 rounded-md px-3 py-1.5 text-[11px] font-bold transition ${
+                  insightPeriod === group.id
+                    ? "bg-[var(--app-panel-strong)] text-[var(--app-text)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                    : "text-fintech-muted hover:text-[var(--app-text)]"
+                }`}
+              >
+                {group.title}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2.5 md:grid-cols-3">
+          {heroTiles.map((tile) => (
+            <div
+              key={`hero-${tile.label}`}
+              className="min-h-[7.75rem] rounded-lg border bg-[var(--app-panel-muted)] p-3.5"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              <div className={`truncate text-[2rem] font-black leading-none tracking-tight ${insightNumberClass[tile.tone]}`} title={tile.value}>
+                {tile.value}
+              </div>
+              <div className="mt-2 truncate text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--app-text-soft)]" title={tile.label}>
+                {tile.label}
+              </div>
+              {tile.context && <div className="mt-1 truncate text-[11px] font-semibold text-fintech-muted" title={tile.context}>{tile.context}</div>}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+          {visibleSupportTiles.map((tile) => (
+            <div
+              key={`support-${tile.label}`}
+              className="rounded-lg border bg-[var(--app-panel-muted)] px-3 py-2.5"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              <div className="flex items-baseline justify-between gap-3">
+                <div className="truncate text-[10px] font-bold uppercase tracking-[0.14em] text-fintech-muted" title={tile.label}>{tile.label}</div>
+                <div className={`max-w-[48%] truncate text-lg font-black leading-none ${insightNumberClass[tile.tone]}`} title={tile.value}>{tile.value}</div>
+              </div>
+              {tile.context && <div className="mt-1 truncate text-[11px] font-semibold text-[var(--app-text-soft)]" title={tile.context}>{tile.context}</div>}
+            </div>
+          ))}
+        </div>
+
+        {secondarySupportTiles.length > 0 && (
+          <div className="mt-2.5">
+            <button
+              type="button"
+              onClick={() => setShowMoreInsights((value) => !value)}
+              className="inline-flex min-h-0 items-center gap-1 rounded-md border bg-[var(--app-panel-muted)] px-2.5 py-1.5 text-[11px] font-bold text-fintech-muted hover:text-[var(--app-text)]"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              See more
+              <ChevronDown size={13} className={`transition ${showMoreInsights ? "rotate-180" : ""}`} />
+            </button>
+            {showMoreInsights && (
+              <div className="mt-2 grid gap-2.5 sm:grid-cols-2">
+                {secondarySupportTiles.map((tile) => (
+                  <div
+                    key={`secondary-${tile.label}`}
+                    className="rounded-lg border bg-[var(--app-panel-muted)] px-3 py-2.5"
+                    style={{ borderColor: "var(--app-border)" }}
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <div className="truncate text-[10px] font-bold uppercase tracking-[0.14em] text-fintech-muted" title={tile.label}>{tile.label}</div>
+                      <div className={`max-w-[48%] truncate text-lg font-black leading-none ${insightNumberClass[tile.tone]}`} title={tile.value}>{tile.value}</div>
+                    </div>
+                    {tile.context && <div className="mt-1 truncate text-[11px] font-semibold text-[var(--app-text-soft)]" title={tile.context}>{tile.context}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {actionableAlerts.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3" style={{ borderColor: "var(--app-divider)" }}>
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-amber-300">
+              <AlertTriangle size={12} />
+              Alerts
+            </span>
+            {actionableAlerts.map((alert) => (
+              <span
+                key={`alert-${alert.label}`}
+                className={`max-w-[12rem] truncate rounded-full border px-2 py-1 text-[10px] font-bold ${insightPillClass[alert.tone]}`}
+                title={alert.label}
+              >
+                {alert.label}
+              </span>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className={`grid gap-3 ${isEmptyState ? "xl:grid-cols-[1.24fr_0.56fr]" : "xl:grid-cols-[1.18fr_0.58fr]"}`}>

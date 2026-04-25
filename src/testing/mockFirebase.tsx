@@ -176,7 +176,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const seed = useMemo(() => window.__VIBEBUDGET_TEST_STATE__, []);
   const [expenseCategories, setExpenseCategories] = useState(seed?.expenseCategories || defaultExpenseCategories);
   const [transactions, setTransactions] = useState(seed?.transactions || defaultTransactions);
-  const [incomeCategories] = useState(seed?.incomeCategories || defaultIncomeCategories);
+  const [incomeCategories, setIncomeCategories] = useState(seed?.incomeCategories || defaultIncomeCategories);
   const [income, setIncome] = useState(seed?.income || defaultIncome);
   const [recurringRules, setRecurringRules] = useState(seed?.recurringRules || []);
   const [preferences, setPreferences] = useState(seed?.preferences || defaultPreferences);
@@ -244,7 +244,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     wipeData: async (type) => {
       if (type === "expenses") setTransactions([]);
       if (type === "income") setIncome([]);
-      if (type === "categories") setExpenseCategories([]);
+      if (type === "categories" || type === "expenseCategories") setExpenseCategories(defaultExpenseCategories);
+      if (type === "incomeCategories") setIncomeCategories([]);
       if (type === "targets") {
         setExpenseCategories((current) => current.map((item) => ({ ...item, target_amount: 0 })));
       }

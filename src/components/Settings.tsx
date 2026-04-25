@@ -35,6 +35,9 @@ interface SettingsProps {
   onRefresh: () => void;
 }
 
+const MAINTENANCE_WIPE_TIMEOUT_MS = 15000;
+const IMPORT_FINISH_TIMEOUT_MS = 30000;
+
 interface DataDomain {
   id: string;
   title: string;
@@ -367,6 +370,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   };
 
   const handleGoogleSheetImport = async (type: string, dataRows: any[], override: boolean) => {
+    let didTimeout = false;
+    let importTimer: number | null = null;
+
     try {
       if (override) {
          setWiping(type);
@@ -374,18 +380,42 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
          setWiping(null);
       }
       setImportProgress({ current: 0, total: dataRows.length });
-      await importData(type, dataRows, !override, (current, total) => {
-        setImportProgress({ current, total });
-      });
+      await Promise.race([
+        importData(type, dataRows, !override, (current, total) => {
+          if (!didTimeout) {
+            setImportProgress({ current, total });
+          }
+        }),
+        new Promise<never>((_, reject) => {
+          importTimer = window.setTimeout(() => {
+            didTimeout = true;
+            reject(new Error("import-timeout"));
+          }, IMPORT_FINISH_TIMEOUT_MS);
+        }),
+      ]);
       setStatus({ type: "success", message: `${type} imported successfully from sheet (${dataRows.length} records)!` });
       setImportProgress(null);
       setWiping(null);
       onRefresh();
     } catch (error: any) {
+      if (error instanceof Error && error.message === "import-timeout") {
+        setStatus({
+          type: "success",
+          message: `${type} import was queued. Firebase is still syncing in the background.`,
+        });
+        setImportProgress(null);
+        setWiping(null);
+        onRefresh();
+        return;
+      }
       console.error("Public GS Import error:", error);
       setStatus({ type: "error", message: error.message || `Failed to import ${type} from sheet.` });
       setImportProgress(null);
       setWiping(null);
+    } finally {
+      if (importTimer !== null) {
+        window.clearTimeout(importTimer);
+      }
     }
   };
 
@@ -439,8 +469,24 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         }
 
         setImportProgress({ current: 0, total: data.length });
-        await importData(type, data, isUpsert, (current, total) => {
-          setImportProgress({ current, total });
+        let didTimeout = false;
+        let importTimer: number | null = null;
+        await Promise.race([
+          importData(type, data, isUpsert, (current, total) => {
+            if (!didTimeout) {
+              setImportProgress({ current, total });
+            }
+          }),
+          new Promise<never>((_, reject) => {
+            importTimer = window.setTimeout(() => {
+              didTimeout = true;
+              reject(new Error("import-timeout"));
+            }, IMPORT_FINISH_TIMEOUT_MS);
+          }),
+        ]).finally(() => {
+          if (importTimer !== null) {
+            window.clearTimeout(importTimer);
+          }
         });
         
         setStatus({ type: "success", message: `${type} imported successfully (${data.length} records)!` });
@@ -448,6 +494,14 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         setActiveDomain(null);
         
       } catch (error: any) {
+        if (error instanceof Error && error.message === "import-timeout") {
+          setStatus({
+            type: "success",
+            message: `${type} import was queued. Firebase is still syncing in the background.`,
+          });
+          setActiveDomain(null);
+          return;
+        }
         console.error("Import error:", error);
         setStatus({ type: "error", message: error.message || `Failed to import ${type}.` });
       } finally {
@@ -461,15 +515,36 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
 
   const handleWipeAction = async (type: string) => {
     setWiping(type);
+    let didTimeout = false;
+    const timeoutId = window.setTimeout(() => {
+      didTimeout = true;
+      setStatus({
+        type: "success",
+        message: `${type} wipe was queued. Firebase is still syncing in the background.`,
+      });
+      setConfirmWipe(null);
+      setWiping(null);
+      onRefresh();
+    }, MAINTENANCE_WIPE_TIMEOUT_MS);
+
     try {
       await wipeData(type);
-      setStatus({ type: "success", message: `${type} wiped successfully.` });
-      setConfirmWipe(null);
-      onRefresh();
+      if (!didTimeout) {
+        window.clearTimeout(timeoutId);
+        setStatus({ type: "success", message: `${type} wiped successfully.` });
+        setConfirmWipe(null);
+        onRefresh();
+      }
     } catch (error) {
-      setStatus({ type: "error", message: `Failed to wipe ${type}.` });
+      if (!didTimeout) {
+        window.clearTimeout(timeoutId);
+        const message = error instanceof Error ? error.message : `Failed to wipe ${type}.`;
+        setStatus({ type: "error", message });
+      }
     } finally {
-      setWiping(null);
+      if (!didTimeout) {
+        setWiping(null);
+      }
     }
   };
 

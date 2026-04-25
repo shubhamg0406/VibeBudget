@@ -16,10 +16,12 @@ import {
   SheetTabPreview,
   buildCellRef,
   getFullSheetGridRows,
+  getSheetColumnValuesUntilEmptyRun,
   getSheetPreviewRows,
   getSheetTabPreviews,
   parseA1CellReference,
   parseSpreadsheetId,
+  trimValuesAtEmptyRun,
 } from "../utils/googleSheetsSync";
 import { normalizeDateString } from "../utils/dateUtils";
 import {
@@ -559,21 +561,34 @@ export const GoogleSheetImporter: React.FC<GoogleSheetImporterProps> = ({ initia
 
   const fetchRangeValues = async (selection: PublicSheetImportRangeSelection) => {
     const firstDataRowIndex = selection.start.rowIndex + 1;
-    const rows = await loadSheetRows();
-    const sourceRows = rows.slice(selection.start.rowIndex);
-    const columnValues = sourceRows.map((row) => (row[selection.start.columnIndex] || "").trim());
 
     if (selection.extendToSheetEnd) {
-      let lastNonEmptyIndex = -1;
-      columnValues.forEach((value, index) => {
-        if (value !== "") {
-          lastNonEmptyIndex = index;
+      if (googleSheetsAccessToken) {
+        const resolvedSpreadsheetId = parseSpreadsheetId(activeSourceUrl);
+        if (!resolvedSpreadsheetId) {
+          throw new Error("Enter a valid Google Sheet URL or spreadsheet ID.");
         }
-      });
 
-      return lastNonEmptyIndex >= 0 ? columnValues.slice(0, lastNonEmptyIndex + 1) : [];
+        try {
+          return await getSheetColumnValuesUntilEmptyRun(
+            googleSheetsAccessToken,
+            resolvedSpreadsheetId,
+            sheetTabName,
+            selection.start.columnIndex,
+            firstDataRowIndex
+          );
+        } catch (error) {
+          throw new Error(getGoogleSheetsAccessErrorMessage(error));
+        }
+      }
+
+      const rows = await loadSheetRows();
+      const sourceRows = rows.slice(selection.start.rowIndex);
+      const columnValues = sourceRows.map((row) => (row[selection.start.columnIndex] || "").trim());
+      return trimValuesAtEmptyRun(columnValues);
     }
 
+    const rows = await loadSheetRows();
     const endRowIndex = selection.end.rowIndex;
     if (firstDataRowIndex > endRowIndex) {
       return [];

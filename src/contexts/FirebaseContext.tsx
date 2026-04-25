@@ -33,7 +33,6 @@ import {
   UpcomingRecurringInstance,
 } from "../types";
 import {
-  clearSheetRowForItem,
   ensureSheetAndHeaders,
   getRequiredHeadersForConfig,
   inspectSpreadsheet,
@@ -51,6 +50,14 @@ import {
 import { signInWithGoogle } from "../lib/auth";
 import { computeUpcoming, materializeRule } from "../utils/recurring";
 import { getTodayStr } from "../utils/dateUtils";
+import {
+  dedupeExpensesByImportFingerprint,
+  dedupeIncomeByImportFingerprint,
+  getExpenseImportFingerprint,
+  getIncomeImportFingerprint,
+  getStableImportedExpenseId,
+  getStableImportedIncomeId,
+} from "../utils/importDedupe";
 
 const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
 const LOCAL_STATE_KEY = "vibebudgetLocalState";
@@ -433,6 +440,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const syncInFlightRef = useRef(false);
   const loadingDriveRef = useRef(false);
   const seededUsersRef = useRef<Set<string>>(new Set());
+  const pendingImportRef = useRef<{
+    expenseCategories: number;
+    incomeCategories: number;
+    transactions: number;
+    income: number;
+  } | null>(null);
 
   useEffect(() => { expenseCategoriesRef.current = expenseCategories; }, [expenseCategories]);
   useEffect(() => { incomeCategoriesRef.current = incomeCategories; }, [incomeCategories]);
@@ -788,6 +801,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       getExpenseCategoriesCollection(uid),
       (snapshot) => {
         const nextCategories = snapshot.docs.map((item) => item.data() as ExpenseCategory);
+        if (pendingImportRef.current && nextCategories.length < pendingImportRef.current.expenseCategories) {
+          loadedState.categories = true;
+          markLoaded();
+          return;
+        }
         remotePresence.categories = nextCategories.length > 0;
         setExpenseCategories(nextCategories.length > 0 ? migrateExpenseCategories(nextCategories) : createDefaultExpenseCategories());
         loadedState.categories = true;
@@ -800,6 +818,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       getIncomeCategoriesCollection(uid),
       (snapshot) => {
         const nextIncomeCategories = snapshot.docs.map((item) => item.data() as IncomeCategory);
+        if (pendingImportRef.current && nextIncomeCategories.length < pendingImportRef.current.incomeCategories) {
+          loadedState.incomeCategories = true;
+          markLoaded();
+          return;
+        }
         remotePresence.incomeCategories = nextIncomeCategories.length > 0;
         setIncomeCategories(migrateIncomeCategories(nextIncomeCategories));
         loadedState.incomeCategories = true;
@@ -812,6 +835,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       getTransactionsCollection(uid),
       (snapshot) => {
         const nextTransactions = migrateTransactions(snapshot.docs.map((item) => item.data() as Transaction));
+        if (pendingImportRef.current && nextTransactions.length < pendingImportRef.current.transactions) {
+          loadedState.transactions = true;
+          markLoaded();
+          return;
+        }
         remotePresence.transactions = nextTransactions.length > 0;
         setTransactions(nextTransactions);
         saveTransactionsCache(uid, nextTransactions);
@@ -825,6 +853,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       getIncomeCollection(uid),
       (snapshot) => {
         const nextIncome = migrateIncomeRecords(snapshot.docs.map((item) => item.data() as Income));
+        if (pendingImportRef.current && nextIncome.length < pendingImportRef.current.income) {
+          loadedState.income = true;
+          markLoaded();
+          return;
+        }
         remotePresence.income = nextIncome.length > 0;
         setIncome(nextIncome);
         loadedState.income = true;
@@ -1194,7 +1227,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const interval = Math.max(15, googleSheetsConfig.syncIntervalSeconds || DEFAULT_SYNC_INTERVAL_SECONDS) * 1000;
     const timer = window.setInterval(() => {
-      void syncGoogleSheets("both").catch(() => undefined);
+      void syncGoogleSheets("push").catch(() => undefined);
     }, interval);
 
     return () => window.clearInterval(timer);
@@ -1255,9 +1288,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     await deleteDoc(doc(getTransactionsCollection(auth.currentUser.uid), id));
-    if (googleSheetsAccessToken && sheetsConfigRef.current) {
-      await clearSheetRowForItem(googleSheetsAccessToken, sheetsConfigRef.current, "expenses", id).catch(() => undefined);
-    }
   };
 
   const addIncome = async (data: Omit<Income, "id">) => {
@@ -1305,9 +1335,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     await deleteDoc(doc(getIncomeCollection(auth.currentUser.uid), id));
-    if (googleSheetsAccessToken && sheetsConfigRef.current) {
-      await clearSheetRowForItem(googleSheetsAccessToken, sheetsConfigRef.current, "income", id).catch(() => undefined);
-    }
   };
 
   const createRecurringRule = async (
@@ -1487,6 +1514,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let nextIncomeCategories = migrateIncomeCategories([...incomeCategoriesRef.current]);
     let nextTransactions = [...transactionsRef.current];
     let nextIncome = [...incomeRef.current];
+    const importedExpenseFingerprints = new Set<string>();
+    const importedIncomeFingerprints = new Set<string>();
 
     const getOrCreateExpenseCategoryId = (name: string) => {
       const normalizedName = normalizeExpenseCategoryName(name);
@@ -1523,9 +1552,29 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const [date, vendor, amount, categoryName, notes] = row;
         const normalizedCategoryName = normalizeExpenseCategoryName(categoryName);
         const categoryId = getOrCreateExpenseCategoryId(normalizedCategoryName);
-        const existingIndex = isUpsert ? nextTransactions.findIndex((item) => item.date === date && item.vendor === vendor) : -1;
+        const fingerprint = getExpenseImportFingerprint({
+          date,
+          vendor,
+          amount,
+          category_name: normalizedCategoryName,
+          notes,
+        });
+        importedExpenseFingerprints.add(fingerprint);
+        const existingIndex = isUpsert
+          ? nextTransactions.findIndex((item) => getExpenseImportFingerprint(item) === fingerprint)
+          : -1;
         const payload: Transaction = {
-          id: existingIndex >= 0 ? nextTransactions[existingIndex].id : crypto.randomUUID(),
+          id: existingIndex >= 0
+            ? nextTransactions[existingIndex].id
+            : isUpsert
+              ? getStableImportedExpenseId({
+                  date,
+                  vendor,
+                  amount,
+                  category_name: normalizedCategoryName,
+                  notes,
+                })
+              : crypto.randomUUID(),
           date,
           vendor,
           amount,
@@ -1545,9 +1594,29 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const [date, source, amount, category, notes] = row;
         const normalizedCategoryName = normalizeCategoryName(category);
         const categoryId = getOrCreateIncomeCategoryId(normalizedCategoryName);
-        const existingIndex = isUpsert ? nextIncome.findIndex((item) => item.date === date && item.source === source) : -1;
+        const fingerprint = getIncomeImportFingerprint({
+          date,
+          source,
+          amount,
+          category: normalizedCategoryName,
+          notes,
+        });
+        importedIncomeFingerprints.add(fingerprint);
+        const existingIndex = isUpsert
+          ? nextIncome.findIndex((item) => getIncomeImportFingerprint(item) === fingerprint)
+          : -1;
         const payload: Income = {
-          id: existingIndex >= 0 ? nextIncome[existingIndex].id : crypto.randomUUID(),
+          id: existingIndex >= 0
+            ? nextIncome[existingIndex].id
+            : isUpsert
+              ? getStableImportedIncomeId({
+                  date,
+                  source,
+                  amount,
+                  category: normalizedCategoryName,
+                  notes,
+                })
+              : crypto.randomUUID(),
           date,
           source,
           amount,
@@ -1566,7 +1635,23 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       onProgress?.(index + 1, rows.length);
     });
 
-    await replaceBudgetDataInFirestore({
+    if (isUpsert) {
+      if (type === "expenses") {
+        nextTransactions = dedupeExpensesByImportFingerprint(nextTransactions, importedExpenseFingerprints);
+      }
+      if (type === "income") {
+        nextIncome = dedupeIncomeByImportFingerprint(nextIncome, importedIncomeFingerprints);
+      }
+    }
+
+    pendingImportRef.current = {
+      expenseCategories: nextExpenseCategories.length,
+      incomeCategories: nextIncomeCategories.length,
+      transactions: nextTransactions.length,
+      income: nextIncome.length,
+    };
+
+    const persistImport = replaceBudgetDataInFirestore({
       nextExpenseCategories,
       nextIncomeCategories,
       nextTransactions,
@@ -1575,6 +1660,24 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       nextSheetsConfig: sheetsConfigRef.current,
       nextDriveConnection: driveConnectionRef.current,
       nextLastSynced: lastSynced,
+    });
+    setExpenseCategories(nextExpenseCategories);
+    setIncomeCategories(nextIncomeCategories);
+    setTransactions(nextTransactions);
+    setIncome(nextIncome);
+    expenseCategoriesRef.current = nextExpenseCategories;
+    incomeCategoriesRef.current = nextIncomeCategories;
+    transactionsRef.current = nextTransactions;
+    incomeRef.current = nextIncome;
+    if (auth.currentUser) {
+      saveTransactionsCache(auth.currentUser.uid, nextTransactions);
+    }
+
+    void persistImport.catch((error) => {
+      console.error("Failed to persist imported data", error);
+      setAuthError(error instanceof Error ? error.message : "Failed to persist imported data.");
+    }).finally(() => {
+      pendingImportRef.current = null;
     });
   };
 

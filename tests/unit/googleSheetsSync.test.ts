@@ -6,6 +6,7 @@ import {
   getGoogleSheetsAccessErrorMessage,
   parseA1CellReference,
   parseSpreadsheetId,
+  trimValuesAtEmptyRun,
 } from "../../src/utils/googleSheetsSync";
 
 describe("googleSheetsSync helpers", () => {
@@ -48,5 +49,19 @@ describe("googleSheetsSync helpers", () => {
 
     expect(getGoogleSheetsAccessErrorMessage(authError)).toContain("session expired");
     expect(getGoogleSheetsAccessErrorMessage(permissionError)).toContain("does not have access");
+  });
+
+  it("stops open-ended imports after five consecutive empty rows", () => {
+    expect(trimValuesAtEmptyRun([
+      "Coffee",
+      "",
+      "Groceries",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "Ignored",
+    ])).toEqual(["Coffee", "", "Groceries"]);
   });
 });

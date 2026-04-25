@@ -20,8 +20,13 @@ describe("Dashboard", () => {
 
     expect(screen.getByText("Total Income")).toBeInTheDocument();
     expect(screen.getByText("$2,500.00")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "This Month" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "YTD" })).toBeInTheDocument();
+    expect(screen.getByText("Budget used")).toBeInTheDocument();
+    expect(screen.getByText("Net take-home")).toBeInTheDocument();
+    expect(screen.getByText("Projected balance")).toBeInTheDocument();
     expect(screen.getByText("Expense Targets")).toBeInTheDocument();
-    expect(screen.getByText("Groceries")).toBeInTheDocument();
+    expect(screen.getAllByText("Groceries").length).toBeGreaterThan(0);
   });
 
   it("shows the empty-state guidance when there is no activity", () => {

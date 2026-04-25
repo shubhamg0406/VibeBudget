@@ -56,4 +56,29 @@ describe("Settings", () => {
       expect(screen.getByText("Quarterly Budget")).toBeInTheDocument();
     });
   });
+
+  it("runs maintenance wipes without syncing or deleting Google Sheet data", async () => {
+    const wipeData = vi.fn(async () => {});
+    const syncGoogleSheets = vi.fn(async () => {});
+    const onRefresh = vi.fn();
+
+    renderWithProviders(<Settings onRefresh={onRefresh} />, {
+      firebase: {
+        wipeData,
+        syncGoogleSheets,
+      },
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Maintenance/i })[0]);
+    fireEvent.click(screen.getByRole("button", { name: /Clear All Expenses/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Yes, Delete Everything/i }));
+
+    await waitFor(() => {
+      expect(wipeData).toHaveBeenCalledWith("expenses");
+      expect(onRefresh).toHaveBeenCalled();
+    });
+    expect(syncGoogleSheets).not.toHaveBeenCalled();
+    expect(screen.getByText(/expenses wiped successfully/i)).toBeInTheDocument();
+  });
+
 });

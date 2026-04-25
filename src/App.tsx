@@ -131,6 +131,7 @@ export default function App() {
               previousTransactions={previousTransactions}
               previousIncome={previousIncome}
               allTransactions={transactions}
+              allIncome={income}
               onViewHistory={() => setView("transactions")}
               onUpdateTarget={updateExpenseCategoryTarget}
               monthMultiplier={monthMultiplier}
