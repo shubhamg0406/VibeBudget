@@ -134,7 +134,7 @@ const buildRowRange = (sheetName: string, rowNumber: number, columnCount: number
   `${escapeSheetName(sheetName)}!A${rowNumber}:${getColumnLetter(Math.max(columnCount - 1, 0))}${rowNumber}`
 );
 
-export const trimValuesAtEmptyRun = (values: string[], emptyRunLimit = 5) => {
+export const trimValuesAtEmptyRun = (values: string[], emptyRunLimit = 3) => {
   const trimmedValues: string[] = [];
   let consecutiveEmptyRows = 0;
 
@@ -450,7 +450,7 @@ export const getSheetColumnValuesUntilEmptyRun = async (
   sheetName: string,
   columnIndex: number,
   startRowNumber: number,
-  emptyRunLimit = 5,
+  emptyRunLimit = 3,
   batchSize = 250
 ) => {
   const columnLetter = getColumnLetter(columnIndex);

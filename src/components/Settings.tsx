@@ -23,6 +23,7 @@ import {
   ExpenseCategory,
   ExpenseSheetMapping,
   GoogleSheetsSyncConfig,
+  GoogleSheetsSyncDirection,
   Income,
   IncomeCategory,
   IncomeSheetMapping,
@@ -664,7 +665,6 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   };
 
   const handleGoogleSheetImport = async (type: string, dataRows: any[], override: boolean) => {
-    let didTimeout = false;
     let importTimer: number | null = null;
     try {
       if (override) {
@@ -673,29 +673,62 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         setWiping(null);
       }
       setImportProgress({ current: 0, total: dataRows.length });
-      const batch = previewImport("google_sheet", dataRows, { type: type as any, hasHeader: false });
-      await Promise.race([
-        commitImport(batch, { includeDuplicates: override }, (current, total) => {
-          if (!didTimeout) setImportProgress({ current, total });
-        }),
-        new Promise<never>((_, reject) => {
-          importTimer = window.setTimeout(() => {
-            didTimeout = true;
-            reject(new Error("import-timeout"));
-          }, IMPORT_FINISH_TIMEOUT_MS);
-        }),
-      ]);
-      appendImportHistory({
-        source: "google_sheet",
-        domain: type,
-        imported: dataRows.length,
-        invalid: batch.summary.invalid,
-        skipped: 0,
-        status: "success",
-        message: `${type} Google Sheet import complete (${dataRows.length}).`,
-      });
-      setSheetMappingMeta((current) => ({ ...current, [type]: new Date().toISOString() }));
-      setSectionStatus("data", "success", `${type} imported from Google Sheet: ${dataRows.length} rows.`);
+
+      if (type === "expenses" || type === "income") {
+        // Content-based delta detection: match by (date, vendor/source, amount, category, notes).
+        // Same row → "updated" (skip re-add). New row → "imported". Invalid row → "skipped".
+        // This is correct for append-only sheets and handles gaps/re-ordered rows safely.
+        const commitSummary = await Promise.race([
+          upsertGoogleSheetRows(type, dataRows),
+          new Promise<never>((_, reject) => {
+            importTimer = window.setTimeout(() => {
+              reject(new Error("import-timeout"));
+            }, IMPORT_FINISH_TIMEOUT_MS);
+          }),
+        ]);
+        setImportProgress({ current: dataRows.length, total: dataRows.length });
+        const statusLevel: StatusLevel = commitSummary.imported > 0 ? "success" : "info";
+        const statusMsg = commitSummary.imported > 0
+          ? `${type}: ${commitSummary.imported} new row(s) imported, ${commitSummary.updated} already in app.`
+          : `${type}: no new rows — ${commitSummary.updated} already in app, ${commitSummary.skipped} invalid.`;
+        appendImportHistory({
+          source: "google_sheet",
+          domain: type,
+          imported: commitSummary.imported,
+          skipped: commitSummary.updated,
+          invalid: commitSummary.skipped,
+          status: statusLevel,
+          message: statusMsg,
+        });
+        setSheetMappingMeta((current) => ({ ...current, [type]: new Date().toISOString() }));
+        setSectionStatus("data", statusLevel, statusMsg);
+      } else {
+        let didTimeout = false;
+        const batch = previewImport("google_sheet", dataRows, { type: type as any, hasHeader: false });
+        await Promise.race([
+          commitImport(batch, { includeDuplicates: override }, (current, total) => {
+            if (!didTimeout) setImportProgress({ current, total });
+          }),
+          new Promise<never>((_, reject) => {
+            importTimer = window.setTimeout(() => {
+              didTimeout = true;
+              reject(new Error("import-timeout"));
+            }, IMPORT_FINISH_TIMEOUT_MS);
+          }),
+        ]);
+        appendImportHistory({
+          source: "google_sheet",
+          domain: type,
+          imported: batch.summary.new,
+          invalid: batch.summary.invalid,
+          skipped: batch.summary.duplicate,
+          status: "success",
+          message: `${type} Google Sheet import: ${batch.summary.new} imported, ${batch.summary.duplicate} skipped.`,
+        });
+        setSheetMappingMeta((current) => ({ ...current, [type]: new Date().toISOString() }));
+        setSectionStatus("data", "success", `${type} imported from Google Sheet: ${batch.summary.new} new rows.`);
+      }
+
       setImportProgress(null);
       setWiping(null);
       onRefresh();
