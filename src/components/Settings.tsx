@@ -1817,7 +1817,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       </div>
 
       <div className="space-y-6">
-        {activeTab === "data" && <ImpExCenter onRefresh={onRefresh} />}
+        {activeTab === "data" && <ImpExCenter onRefresh={onRefresh} onNavigateToConnections={() => setActiveTab("google_workspace")} />}
 
         {activeTab === "currency" && (
           <section className="space-y-5">
