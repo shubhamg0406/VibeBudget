@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import { auth, db, firebaseDataNamespace, googleDriveProvider, googleProvider } from "../firebase";
 import {
+  AiProviderConfig,
   Category,
   DriveConnection,
   ExpenseCategory,
@@ -357,6 +358,7 @@ interface UserProfileDocument {
   tellerConnection?: TellerConnection | null;
   tellerCategoryMappings?: TellerCategoryMapping[];
   lastSyncedAt?: string | null;
+  aiConfig?: AiProviderConfig | null;
 }
 
 export interface FirebaseContextType {
@@ -464,6 +466,10 @@ export interface FirebaseContextType {
   fetchTellerAccounts: () => Promise<import("../types").TellerAccount[]>;
   setTellerCredentials: (creds: TellerCredentials | null) => void;
   setTellerCategoryMappings: (mappings: TellerCategoryMapping[]) => void;
+
+  // AI
+  aiConfig: AiProviderConfig | null;
+  saveAiConfig: (config: AiProviderConfig | null) => Promise<void>;
 }
 
 export const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -503,6 +509,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY) || sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY)
   );
   const [googleSheetsSyncing, setGoogleSheetsSyncing] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AiProviderConfig | null>(null);
   const [googleSheetsError, setGoogleSheetsError] = useState<string | null>(null);
   const [driveSyncError, setDriveSyncError] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
@@ -944,6 +951,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setTellerConnection(data?.tellerConnection || null);
         setTellerCategoryMappings(Array.isArray(data?.tellerCategoryMappings) ? data.tellerCategoryMappings : []);
         setLastSynced(data?.lastSyncedAt ? new Date(data.lastSyncedAt) : null);
+        setAiConfig(data?.aiConfig || null);
         loadedState.profile = true;
         markLoaded();
       },
@@ -1350,6 +1358,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await saveUserProfilePatch({ googleSheetsConfig: payload });
     setGoogleSheetsError(null);
   };
+
+  const saveAiConfigFn = useCallback(async (config: AiProviderConfig | null) => {
+    if (!user) throw new Error("Sign in with Google first.");
+    await saveUserProfilePatch({ aiConfig: config });
+    setAiConfig(config);
+  }, [user, saveUserProfilePatch]);
 
   const ensureExpenseCategoryId = async (name: string) => {
     const normalizedName = normalizeExpenseCategoryName(name);
@@ -2683,6 +2697,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         fetchTellerAccounts,
         setTellerCredentials,
         setTellerCategoryMappings,
+
+        // AI
+        aiConfig,
+        saveAiConfig: saveAiConfigFn,
       }}
     >
       {children}

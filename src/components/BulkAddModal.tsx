@@ -42,7 +42,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
   onClose,
   onRefresh,
 }) => {
-  const { user, previewImport, commitImport } = useFirebase();
+  const { user, previewImport, commitImport, aiConfig } = useFirebase();
   const [files, setFiles] = useState<File[]>([]);
   const [targetType, setTargetType] = useState<"expenses" | "income">("expenses");
   const [extracting, setExtracting] = useState(false);
@@ -138,7 +138,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     setBatch(null);
 
     try {
-      const result = await extractTransactionsFromFiles(files, targetType, user?.uid);
+      const result = await extractTransactionsFromFiles(files, targetType, user?.uid, aiConfig);
       setExtractResult(result);
 
       if (result.candidates.length === 0) {

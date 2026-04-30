@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Save,
   Shield,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -44,13 +45,14 @@ import { getSavedTransactionSheetRowsForType } from "../utils/publicSheetImport"
 import { GoogleSheetImporter } from "./GoogleSheetImporter";
 import { ImpExCenter } from "./ImpExCenter";
 import { usePlaidLink } from "react-plaid-link";
-import type { PlaidCategoryMapping, PlaidCredentials, PlaidEnv, TellerCategoryMapping, TellerCredentials, TellerEnv } from "../types";
+import type { AiProvider, AiProviderConfig, PlaidCategoryMapping, PlaidCredentials, PlaidEnv, TellerCategoryMapping, TellerCredentials, TellerEnv } from "../types";
+import { AI_PROVIDER_MODELS, AI_PROVIDER_LABELS, AI_PROVIDER_DEFAULT_MODEL } from "../types";
 
 interface SettingsProps {
   onRefresh: () => void;
 }
 
-type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance";
+type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai";
 type RangeDraft = { startCell: string; endCell: string; noEnd: boolean };
 type MappingTab = "expenses" | "income" | "expense_categories" | "income_categories" | "sync";
 type StatusLevel = "success" | "info" | "warning" | "error";
@@ -243,10 +245,19 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     fetchTellerAccounts,
     setTellerCredentials,
     setTellerCategoryMappings,
+
+    // AI
+    aiConfig,
+    saveAiConfig,
   } = useFirebase();
 
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("data");
+  const [aiProvider, setAiProvider] = useState<AiProvider>(aiConfig?.provider || "gemini");
+  const [aiModel, setAiModel] = useState(aiConfig?.model || AI_PROVIDER_DEFAULT_MODEL.gemini);
+  const [aiApiKey, setAiApiKey] = useState(aiConfig?.apiKey || "");
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiMessage, setAiMessage] = useState<string | null>(null);
   const [dataHubMode, setDataHubMode] = useState<DataHubMode>("one_time");
   const [status, setStatus] = useState<SettingsStatus | null>(null);
   const [wiping, setWiping] = useState<string | null>(null);
@@ -1813,6 +1824,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         <button onClick={() => setActiveTab("google_workspace")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "google_workspace" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>3. Google Workspace</button>
         <button onClick={() => setActiveTab("finance_feeds")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "finance_feeds" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>4. Finance Feeds</button>
         <button onClick={() => setActiveTab("maintenance")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>5. Maintenance</button>
+        <button onClick={() => setActiveTab("ai")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "ai" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>6. AI</button>
 
       </div>
 
@@ -2534,6 +2546,140 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                   </button>
                 ))}
               </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === "ai" && (
+          <section className="space-y-5">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Sparkles size={16} className="text-fintech-accent" /> AI Provider</div>
+            <p className="text-xs text-fintech-muted">Configure which AI provider powers the OCR import and budget assistant features.</p>
+
+            {aiMessage && (
+              <div className="rounded-lg bg-[var(--app-ghost)] px-4 py-3 text-xs text-fintech-muted">{aiMessage}</div>
+            )}
+
+            <div className="rounded-xl border bg-[var(--app-panel)] p-5 space-y-4" style={{ borderColor: "var(--app-border)" }}>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Provider</label>
+                <select
+                  value={aiProvider}
+                  onChange={(e) => {
+                    const p = e.target.value as AiProvider;
+                    setAiProvider(p);
+                    setAiModel(AI_PROVIDER_DEFAULT_MODEL[p]);
+                  }}
+                  className="mt-1 w-full rounded-lg border bg-[var(--app-ghost)] px-3 py-2.5 text-sm"
+                  style={{ borderColor: "var(--app-border)" }}
+                >
+                  {(Object.keys(AI_PROVIDER_MODELS) as AiProvider[]).map((p) => (
+                    <option key={p} value={p}>{AI_PROVIDER_LABELS[p]}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Model</label>
+                <select
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  className="mt-1 w-full rounded-lg border bg-[var(--app-ghost)] px-3 py-2.5 text-sm"
+                  style={{ borderColor: "var(--app-border)" }}
+                >
+                  {(AI_PROVIDER_MODELS[aiProvider] || []).map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-fintech-muted">
+                  {aiProvider === "deepseek"
+                    ? "DeepSeek models are text-only. OCR import will use an OpenAI-compatible vision API."
+                    : aiModel.includes("lite")
+                      ? "Flash Lite is text-only and cannot process images for OCR import."
+                      : "This model supports both chat and image OCR extraction."}
+                </p>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">API Key</label>
+                <input
+                  type="password"
+                  value={aiApiKey}
+                  onChange={(e) => setAiApiKey(e.target.value)}
+                  placeholder={aiConfig?.apiKey ? "•••••••• (key saved)" : "Enter your API key"}
+                  className="mt-1 w-full rounded-lg border bg-[var(--app-ghost)] px-3 py-2.5 text-sm font-mono"
+                  style={{ borderColor: "var(--app-border)" }}
+                />
+                <p className="mt-1 text-[10px] text-fintech-muted">
+                  {aiProvider === "gemini"
+                    ? "Get a Gemini API key from aistudio.google.com"
+                    : "Get a DeepSeek API key from platform.deepseek.com"}
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={async () => {
+                    if (!aiApiKey.trim()) {
+                      setAiMessage("Enter an API key first.");
+                      return;
+                    }
+                    setAiSaving(true);
+                    setAiMessage(null);
+                    try {
+                      const config: AiProviderConfig = {
+                        provider: aiProvider,
+                        model: aiModel,
+                        apiKey: aiApiKey.trim(),
+                      };
+                      await saveAiConfig(config);
+                      setAiMessage(`AI configuration saved. Using ${AI_PROVIDER_LABELS[aiProvider]} (${aiModel}).`);
+                    } catch (error) {
+                      setAiMessage(error instanceof Error ? error.message : "Failed to save AI configuration.");
+                    } finally {
+                      setAiSaving(false);
+                    }
+                  }}
+                  disabled={aiSaving}
+                  className="rounded-lg bg-fintech-accent px-5 py-2.5 text-sm font-bold text-[#002919] disabled:opacity-50"
+                >
+                  {aiSaving ? "Saving..." : "Save Configuration"}
+                </button>
+
+                {aiConfig && (
+                  <button
+                    onClick={async () => {
+                      setAiSaving(true);
+                      setAiMessage(null);
+                      try {
+                        await saveAiConfig(null);
+                        setAiProvider("gemini");
+                        setAiModel(AI_PROVIDER_DEFAULT_MODEL.gemini);
+                        setAiApiKey("");
+                        setAiMessage("AI configuration cleared. Falling back to server env GEMINI_API_KEY.");
+                      } catch (error) {
+                        setAiMessage(error instanceof Error ? error.message : "Failed to clear AI configuration.");
+                      } finally {
+                        setAiSaving(false);
+                      }
+                    }}
+                    disabled={aiSaving}
+                    className="rounded-lg border bg-[var(--app-ghost)] px-5 py-2.5 text-sm font-bold text-fintech-muted disabled:opacity-50"
+                    style={{ borderColor: "var(--app-border)" }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border bg-[var(--app-panel)] p-5 space-y-2" style={{ borderColor: "var(--app-border)" }}>
+              <div className="text-xs font-bold">How it works</div>
+              <ul className="space-y-1 text-[11px] text-fintech-muted list-disc list-inside">
+                <li>The API key is stored securely in your Firebase profile and sent to the server with each request.</li>
+                <li>If no user-level AI config is saved, the server falls back to the <code className="bg-[var(--app-ghost)] px-1 rounded">GEMINI_API_KEY</code> environment variable.</li>
+                <li>Screenshot import uses the selected provider for OCR. Chat/Budget Assistant uses it for all replies.</li>
+                <li>DeepSeek vision support depends on the model. For reliable OCR, Gemini is recommended.</li>
+              </ul>
             </div>
           </section>
         )}

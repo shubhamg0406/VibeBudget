@@ -8,6 +8,7 @@ import dotenv from "dotenv";
 import { AiChatDependencies, registerAiChatRoute } from "./src/server/aiChat.js";
 import { registerPlaidRoutes } from "./src/server/plaid.js";
 import { registerTellerRoutes } from "./src/server/teller.js";
+import { callAiOcr, AiClientError } from "./src/server/aiClient.js";
 import { computeUpcoming, materializeRule } from "./src/utils/recurring.js";
 import { getTodayStr } from "./src/utils/dateUtils.js";
 
@@ -513,12 +514,29 @@ export const createApp = async ({
     if (!uid) return;
     void uid;
 
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-    if (!geminiApiKey) {
-      return res.status(500).json({ error: "Missing GEMINI_API_KEY server configuration." });
+    const { files, targetType, aiConfig: rawAiConfig } = req.body || {};
+
+    const aiConfig = rawAiConfig && rawAiConfig.provider && rawAiConfig.apiKey
+      ? rawAiConfig as { provider: "gemini" | "deepseek"; model: string; apiKey: string }
+      : null;
+
+    if (!aiConfig && !process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: "Missing AI configuration. Configure an AI provider in Settings or set GEMINI_API_KEY server env." });
     }
 
-    const { files, targetType } = req.body || {};
+    const resolveAiConfig = () => {
+      if (aiConfig) return aiConfig;
+      return {
+        provider: "gemini" as const,
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+        apiKey: process.env.GEMINI_API_KEY!,
+      };
+    };
+
+    let parsedAiConfig: ReturnType<typeof resolveAiConfig>;
+    try {
+      parsedAiConfig = resolveAiConfig();
+    } catch { return; }
     if (!Array.isArray(files) || files.length === 0) {
       return res.status(400).json({ error: "`files` must be a non-empty array." });
     }
@@ -547,6 +565,8 @@ export const createApp = async ({
     const receiptModeHint = targetType === "income"
       ? "Each file typically represents one income document (pay stub, invoice). Aggregate line items into one row."
       : "For receipt/invoice images: aggregate line items into one transaction row with total amount; include key line-item details in notes.";
+
+    const providerLabel = parsedAiConfig.provider === "gemini" ? "Gemini" : "DeepSeek";
 
     for (const file of files) {
       try {
@@ -579,55 +599,12 @@ export const createApp = async ({
           `Date format: YYYY-MM-DD. Amount: positive number. If amount is absolute value (ignore +/- signs).`,
         ].join("\n");
 
-        const parts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [
-          { text: prompt },
-        ];
-
-        if (isPdf) {
-          parts.push({ inline_data: { mime_type: "application/pdf", data: file.content } });
-        } else {
-          parts.push({ inline_data: { mime_type: mimeType, data: file.content } });
-        }
-
-        const geminiResponse = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiApiKey)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts }],
-              generationConfig: {
-                temperature: 0.05,
-                maxOutputTokens: 8192,
-              },
-            }),
-          }
+        const responseText = await callAiOcr(
+          parsedAiConfig,
+          file.content,
+          isPdf ? "application/pdf" : mimeType,
+          prompt,
         );
-
-        if (!geminiResponse.ok) {
-          const errorText = await geminiResponse.text().catch(() => "");
-          errors.push({ file: file.name, error: `Gemini API error (${geminiResponse.status}): ${errorText.slice(0, 500)}` });
-          continue;
-        }
-
-        const geminiData = await geminiResponse.json() as {
-          candidates?: Array<{
-            content?: { parts?: Array<{ text?: string }> };
-            finishReason?: string;
-          }>;
-          promptFeedback?: { blockReason?: string };
-        };
-
-        if (geminiData.promptFeedback?.blockReason) {
-          errors.push({ file: file.name, error: `Content blocked: ${geminiData.promptFeedback.blockReason}` });
-          continue;
-        }
-
-        const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (!responseText) {
-          errors.push({ file: file.name, error: "Gemini returned empty response." });
-          continue;
-        }
 
         let parsed: Array<Record<string, unknown>>;
         try {
@@ -637,7 +614,7 @@ export const createApp = async ({
             throw new Error("Response is not an array");
           }
         } catch {
-          errors.push({ file: file.name, error: "Failed to parse Gemini response as JSON array." });
+          errors.push({ file: file.name, error: `Failed to parse ${providerLabel} response as JSON array.` });
           continue;
         }
 
@@ -659,7 +636,9 @@ export const createApp = async ({
           });
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown error";
+        const message = error instanceof AiClientError
+          ? error.message
+          : error instanceof Error ? error.message : "Unknown error";
         errors.push({ file: file.name, error: message });
       }
     }
