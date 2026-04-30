@@ -1,5 +1,18 @@
 import React, { useMemo, useState } from "react";
-import { Archive, CheckCircle2, Download, FileJson, FileSpreadsheet, FileText, History, RefreshCw, Upload, AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle,
+  Archive,
+  ArrowRight,
+  CheckCircle,
+  Download,
+  FileJson,
+  FileSpreadsheet,
+  FileText,
+  History,
+  Sparkles,
+  Table,
+  Upload,
+} from "lucide-react";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { useFirebase } from "../contexts/FirebaseContext";
@@ -124,7 +137,12 @@ const parseBackupPayload = (raw: string): { preview: BackupPreview; payload: Ful
   };
 };
 
-export const ImpExCenter: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) => {
+interface ImpExCenterProps {
+  onRefresh: () => void;
+  onNavigateToConnections?: () => void;
+}
+
+export const ImpExCenter: React.FC<ImpExCenterProps> = ({ onRefresh, onNavigateToConnections }) => {
   const {
     expenseCategories,
     incomeCategories,
@@ -157,8 +175,7 @@ export const ImpExCenter: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) 
     income: true,
   });
   const [includeMetadataSheet, setIncludeMetadataSheet] = useState(true);
-  const [mode, setMode] = useState<"import" | "export">("import");
-  const [importMethod, setImportMethod] = useState<"csv" | "excel" | "json_backup">("csv");
+  const [activeImportMethod, setActiveImportMethod] = useState<"csv" | "excel" | "json_backup" | null>(null);
   const [exportMethod, setExportMethod] = useState<"csv_zip" | "excel" | "json_backup">("csv_zip");
 
   const appendHistory = (entry: Omit<ImpExHistoryEntry, "id" | "at">) => {
@@ -418,243 +435,388 @@ export const ImpExCenter: React.FC<{ onRefresh: () => void }> = ({ onRefresh }) 
     }
   };
 
-  return (
-    <section className="space-y-5">
-      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted">
-        <Archive size={16} className="text-fintech-accent" />
-        ImpEx Center
-      </div>
-      <p className="text-xs text-fintech-muted">Imports: select source, preview, resolve, commit. Exports: choose scope, generate, download.</p>
+  const howItWorksSteps = [
+    {
+      num: "1",
+      color: "bg-fintech-import/20 text-fintech-import",
+      title: "Connect Your Data",
+      desc: "Link a Google Sheet, upload a CSV, or import from Excel",
+    },
+    {
+      num: "2",
+      color: "bg-purple-500/20 text-purple-400",
+      title: "Map Your Columns",
+      desc: "Match your spreadsheet columns to budget fields with live preview",
+    },
+    {
+      num: "3",
+      color: "bg-fintech-accent/20 text-fintech-accent",
+      title: "Stay in Sync",
+      desc: "Your data updates automatically, or import once and you're done",
+    },
+  ];
 
+  return (
+    <section className="space-y-6">
+      {/* How it works */}
+      <div className="space-y-3">
+        <div className="text-center text-xs font-bold uppercase tracking-widest text-fintech-muted">How it works</div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {howItWorksSteps.map((step) => (
+            <div
+              key={step.num}
+              className="rounded-2xl border bg-[var(--app-panel)] p-5"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              <span className={`mb-3 flex h-8 w-8 items-center justify-center rounded-xl text-sm font-bold ${step.color}`}>
+                {step.num}
+              </span>
+              <div className="text-sm font-bold text-[var(--app-text)]">{step.title}</div>
+              <div className="mt-1 text-xs text-fintech-muted">{step.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Status message */}
       {message && (
         <div className="rounded-xl border border-fintech-accent/30 bg-fintech-accent/10 px-4 py-3 text-sm text-fintech-accent">
           {message}
         </div>
       )}
 
-      <div className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
-        <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-fintech-muted">I want to...</div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => setMode("import")}
-            className={`rounded-xl border px-4 py-3 text-left ${mode === "import" ? "border-fintech-accent bg-fintech-accent/10" : "bg-[var(--app-ghost)]"}`}
-            style={mode === "import" ? undefined : { borderColor: "var(--app-border)" }}
+      {/* Import methods */}
+      <div className="space-y-3">
+        <div className="text-sm font-bold text-[var(--app-text)]">Choose your import method</div>
+
+        {/* Google Sheets — featured */}
+        <div className="rounded-2xl border border-fintech-accent/40 bg-fintech-accent/5 p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-fintech-accent/15">
+                <Table size={24} className="text-fintech-accent" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-[var(--app-text)]">Google Sheets</span>
+                  <span className="rounded-full bg-fintech-accent/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-fintech-accent">
+                    Recommended
+                  </span>
+                  {googleSheetsConfig && (
+                    <span className="rounded-full bg-fintech-accent/10 px-2 py-0.5 text-[10px] font-bold text-fintech-accent">
+                      Connected
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-fintech-muted">The most powerful option — connect a live spreadsheet that syncs automatically</p>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  {["Auto-sync every 15 minutes", "Bi-directional updates", "Live preview before import"].map((feature) => (
+                    <span key={feature} className="flex items-center gap-1.5 text-xs text-fintech-accent">
+                      <CheckCircle size={12} />
+                      {feature}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onNavigateToConnections}
+              className="flex shrink-0 items-center gap-2 rounded-xl bg-fintech-accent px-5 py-2.5 text-sm font-bold text-[#002919] transition-colors hover:bg-fintech-accent/90"
+            >
+              {googleSheetsConfig ? "Manage" : "Get Started"}
+              <ArrowRight size={16} />
+            </button>
+          </div>
+        </div>
+
+        {/* Secondary methods grid */}
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {/* CSV */}
+          <div
+            className={`cursor-pointer rounded-2xl border p-4 transition-all ${activeImportMethod === "csv" ? "border-fintech-accent/50 bg-fintech-accent/8" : "bg-[var(--app-panel)] hover:border-[var(--app-border-strong)]"}`}
+            style={activeImportMethod === "csv" ? undefined : { borderColor: "var(--app-border)" }}
           >
-            <div className="text-sm font-bold">Import Data</div>
-            <div className="mt-1 text-xs text-fintech-muted">Bring data into VibeBudget using one method.</div>
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("export")}
-            className={`rounded-xl border px-4 py-3 text-left ${mode === "export" ? "border-fintech-accent bg-fintech-accent/10" : "bg-[var(--app-ghost)]"}`}
-            style={mode === "export" ? undefined : { borderColor: "var(--app-border)" }}
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-fintech-import/15">
+              <FileText size={20} className="text-fintech-import" />
+            </div>
+            <div className="text-sm font-bold text-[var(--app-text)]">CSV File</div>
+            <p className="mt-1 text-xs text-fintech-muted">Quick one-time import from a CSV file</p>
+            <button
+              type="button"
+              onClick={() => setActiveImportMethod(activeImportMethod === "csv" ? null : "csv")}
+              className="mt-3 w-full rounded-lg border bg-[var(--app-ghost)] py-2 text-xs font-bold transition-colors hover:bg-[var(--app-ghost-strong)]"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              {activeImportMethod === "csv" ? "Close" : "Upload CSV"}
+            </button>
+          </div>
+
+          {/* Excel */}
+          <div
+            className={`cursor-pointer rounded-2xl border p-4 transition-all ${activeImportMethod === "excel" ? "border-fintech-accent/50 bg-fintech-accent/8" : "bg-[var(--app-panel)] hover:border-[var(--app-border-strong)]"}`}
+            style={activeImportMethod === "excel" ? undefined : { borderColor: "var(--app-border)" }}
           >
-            <div className="text-sm font-bold">Export Data</div>
-            <div className="mt-1 text-xs text-fintech-muted">Download a one-time data package in your preferred format.</div>
-          </button>
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-fintech-accent/15">
+              <FileSpreadsheet size={20} className="text-fintech-accent" />
+            </div>
+            <div className="text-sm font-bold text-[var(--app-text)]">Excel File</div>
+            <p className="mt-1 text-xs text-fintech-muted">Import from .xlsx or .xls spreadsheets</p>
+            <button
+              type="button"
+              onClick={() => setActiveImportMethod(activeImportMethod === "excel" ? null : "excel")}
+              className="mt-3 w-full rounded-lg border bg-[var(--app-ghost)] py-2 text-xs font-bold transition-colors hover:bg-[var(--app-ghost-strong)]"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              {activeImportMethod === "excel" ? "Close" : "Upload Excel"}
+            </button>
+          </div>
+
+          {/* JSON Backup */}
+          <div
+            className={`cursor-pointer rounded-2xl border p-4 transition-all ${activeImportMethod === "json_backup" ? "border-purple-500/50 bg-purple-500/5" : "bg-[var(--app-panel)] hover:border-[var(--app-border-strong)]"}`}
+            style={activeImportMethod === "json_backup" ? undefined : { borderColor: "var(--app-border)" }}
+          >
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/15">
+              <FileJson size={20} className="text-purple-400" />
+            </div>
+            <div className="text-sm font-bold text-[var(--app-text)]">JSON Backup</div>
+            <p className="mt-1 text-xs text-fintech-muted">Restore from a complete backup file</p>
+            <button
+              type="button"
+              onClick={() => setActiveImportMethod(activeImportMethod === "json_backup" ? null : "json_backup")}
+              className="mt-3 w-full rounded-lg border bg-[var(--app-ghost)] py-2 text-xs font-bold transition-colors hover:bg-[var(--app-ghost-strong)]"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              {activeImportMethod === "json_backup" ? "Close" : "Upload JSON"}
+            </button>
+          </div>
         </div>
       </div>
 
-      {mode === "import" && (
-        <>
-          <div className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Choose import method</div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <button type="button" onClick={() => setImportMethod("csv")} className={`rounded-lg px-3 py-2 text-sm font-bold ${importMethod === "csv" ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>CSV</button>
-              <button type="button" onClick={() => setImportMethod("excel")} className={`rounded-lg px-3 py-2 text-sm font-bold ${importMethod === "excel" ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>Excel</button>
-              <button type="button" onClick={() => setImportMethod("json_backup")} className={`rounded-lg px-3 py-2 text-sm font-bold ${importMethod === "json_backup" ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>JSON Backup</button>
+      {/* Smart Column Mapping info (when nothing active) */}
+      {!activeImportMethod && (
+        <div className="rounded-2xl border border-fintech-import/30 bg-fintech-import/5 p-5">
+          <div className="flex items-start gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-fintech-import/15">
+              <Sparkles size={20} className="text-fintech-import" />
+            </div>
+            <div className="flex-1">
+              <div className="font-bold text-fintech-import">Smart Column Mapping</div>
+              <p className="mt-1 text-xs text-fintech-muted">
+                Our intelligent mapper automatically detects your columns and shows you exactly how your data will look before importing. You'll see a live preview of every transaction.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5">
+                {["Auto-detect column mappings", "Real-time data preview", "Save mapping templates", "Validate before importing"].map((f) => (
+                  <span key={f} className="flex items-center gap-1.5 text-xs text-fintech-import">
+                    <CheckCircle size={12} />
+                    {f}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
+        </div>
+      )}
 
-          {importMethod === "csv" && (
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-bold">Import via CSV</h3>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Preview</span>
-              </div>
-              <ImportCenter
-                onImported={() => {
-                  appendHistory({
-                    actionType: "import_csv",
-                    label: "CSV Import",
-                    status: "Completed",
-                    scope: "records",
-                    message: "CSV import committed via Import Center.",
-                  });
-                  onRefresh();
-                }}
-                allowedSources={["csv"]}
-              />
-            </div>
-          )}
+      {/* Active import panel */}
+      {activeImportMethod === "csv" && (
+        <div className="rounded-2xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-bold">Import via CSV</h3>
+            <span className="rounded-full bg-fintech-import/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-fintech-import">Preview</span>
+          </div>
+          <ImportCenter
+            onImported={() => {
+              appendHistory({
+                actionType: "import_csv",
+                label: "CSV Import",
+                status: "Completed",
+                scope: "records",
+                message: "CSV import committed via Import Center.",
+              });
+              onRefresh();
+            }}
+            allowedSources={["csv"]}
+          />
+        </div>
+      )}
 
-          {importMethod === "excel" && (
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="font-bold">Import via Excel</h3>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Map + Preview</span>
-              </div>
-              <p className="text-xs text-fintech-muted">Upload .xlsx/.xls, map sheets to target domains, preview, then commit using the same import engine.</p>
-              <button
-                type="button"
-                onClick={() => setShowExcelImporter(true)}
-                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-fintech-accent/10 px-3 py-2 text-sm font-bold text-fintech-accent"
-              >
-                <FileSpreadsheet size={16} /> Open Excel Importer
-              </button>
-            </div>
-          )}
+      {activeImportMethod === "excel" && (
+        <div className="rounded-2xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-bold">Import via Excel</h3>
+            <span className="rounded-full bg-fintech-accent/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-fintech-accent">Map + Preview</span>
+          </div>
+          <p className="text-xs text-fintech-muted">Upload .xlsx/.xls, map sheets to target domains, preview, then commit using the same import engine.</p>
+          <button
+            type="button"
+            onClick={() => setShowExcelImporter(true)}
+            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-fintech-accent/10 px-4 py-2 text-sm font-bold text-fintech-accent"
+          >
+            <FileSpreadsheet size={16} /> Open Excel Importer
+          </button>
+        </div>
+      )}
 
-          {importMethod === "json_backup" && (
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="font-bold">Import via JSON Backup</h3>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Preview + Commit</span>
-              </div>
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border bg-[var(--app-ghost)] px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--app-border)" }}>
-                <Upload size={16} /> Upload backup JSON
-                <input
-                  type="file"
-                  accept=".json,application/json"
-                  className="hidden"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = (ev) => {
-                      setRestoreRawJson(String(ev.target?.result || ""));
-                      setRestorePreview(null);
-                    };
-                    reader.readAsText(file);
-                    event.target.value = "";
-                  }}
-                />
-              </label>
-              <textarea
-                value={restoreRawJson}
-                onChange={(event) => {
-                  setRestoreRawJson(event.target.value);
+      {activeImportMethod === "json_backup" && (
+        <div className="rounded-2xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-bold">Import via JSON Backup</h3>
+            <span className="rounded-full bg-purple-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-purple-400">Preview + Commit</span>
+          </div>
+          <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border bg-[var(--app-ghost)] px-3 py-2.5 text-sm font-semibold" style={{ borderColor: "var(--app-border)" }}>
+            <Upload size={16} /> Upload backup JSON
+            <input
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  setRestoreRawJson(String(ev.target?.result || ""));
                   setRestorePreview(null);
-                }}
-                placeholder="Paste full backup JSON..."
-                className="mt-3 min-h-28 w-full rounded-lg border bg-[var(--app-ghost)] px-3 py-2 text-xs"
-                style={{ borderColor: "var(--app-border)" }}
-              />
-              <button
-                type="button"
-                onClick={handlePreviewBackup}
-                disabled={!restoreRawJson.trim() || busyAction === "import_json_backup"}
-                className="mt-3 rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-sm font-bold disabled:opacity-50"
-              >
-                Preview Restore
-              </button>
+                };
+                reader.readAsText(file);
+                event.target.value = "";
+              }}
+            />
+          </label>
+          <textarea
+            value={restoreRawJson}
+            onChange={(event) => {
+              setRestoreRawJson(event.target.value);
+              setRestorePreview(null);
+            }}
+            placeholder="Paste full backup JSON..."
+            className="mt-3 min-h-28 w-full rounded-xl border bg-[var(--app-ghost)] px-3 py-2 text-xs"
+            style={{ borderColor: "var(--app-border)" }}
+          />
+          <button
+            type="button"
+            onClick={handlePreviewBackup}
+            disabled={!restoreRawJson.trim() || busyAction === "import_json_backup"}
+            className="mt-3 rounded-xl bg-[var(--app-ghost)] px-4 py-2 text-sm font-bold disabled:opacity-50"
+          >
+            Preview Restore
+          </button>
 
-              {restorePreview && (
-                <div className="mt-3 space-y-3 rounded-lg bg-[var(--app-ghost)] p-3 text-xs">
-                  <div className="font-semibold">Preview: {restoreSummary}</div>
-                  <div className="text-fintech-muted">
-                    {restorePreview.hasPreferences ? "Includes preferences" : "No preferences"} • {restorePreview.hasGoogleSheetsConfig ? "Includes Google Sheets config" : "No Google Sheets config"}
-                  </div>
-
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <label className="flex items-center gap-2 rounded-lg border px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
-                      <input type="radio" checked={restoreMode === "safe_merge"} onChange={() => setRestoreMode("safe_merge")} />
-                      Safe merge
-                    </label>
-                    <label className="flex items-center gap-2 rounded-lg border px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
-                      <input type="radio" checked={restoreMode === "replace_all"} onChange={() => setRestoreMode("replace_all")} />
-                      Replace all app data
-                    </label>
-                  </div>
-
-                  {restoreMode === "replace_all" && (
-                    <div className="space-y-2">
-                      <div className="inline-flex items-center gap-2 text-fintech-danger"><AlertTriangle size={14} /> Destructive mode</div>
-                      <input
-                        value={replaceConfirm}
-                        onChange={(event) => setReplaceConfirm(event.target.value)}
-                        placeholder="Type REPLACE to confirm"
-                        className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-xs"
-                        style={{ borderColor: "var(--app-border)" }}
-                      />
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => void handleRestoreBackup()}
-                    disabled={busyAction === "import_json_backup"}
-                    className="rounded-lg bg-fintech-import/20 px-3 py-2 text-sm font-bold text-fintech-import disabled:opacity-50"
-                  >
-                    {busyAction === "import_json_backup" ? "Restoring..." : "Commit Restore"}
-                  </button>
+          {restorePreview && (
+            <div className="mt-4 space-y-3 rounded-xl bg-[var(--app-ghost)] p-4 text-xs">
+              <div className="font-semibold">{restoreSummary}</div>
+              <div className="text-fintech-muted">
+                {restorePreview.hasPreferences ? "Includes preferences" : "No preferences"} •{" "}
+                {restorePreview.hasGoogleSheetsConfig ? "Includes Google Sheets config" : "No Google Sheets config"}
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="flex items-center gap-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
+                  <input type="radio" checked={restoreMode === "safe_merge"} onChange={() => setRestoreMode("safe_merge")} />
+                  Safe merge
+                </label>
+                <label className="flex items-center gap-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
+                  <input type="radio" checked={restoreMode === "replace_all"} onChange={() => setRestoreMode("replace_all")} />
+                  Replace all app data
+                </label>
+              </div>
+              {restoreMode === "replace_all" && (
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 text-fintech-danger"><AlertTriangle size={14} /> Destructive mode</div>
+                  <input
+                    value={replaceConfirm}
+                    onChange={(event) => setReplaceConfirm(event.target.value)}
+                    placeholder="Type REPLACE to confirm"
+                    className="w-full rounded-xl border bg-[var(--app-panel)] px-3 py-2 text-xs"
+                    style={{ borderColor: "var(--app-border)" }}
+                  />
                 </div>
               )}
+              <button
+                type="button"
+                onClick={() => void handleRestoreBackup()}
+                disabled={busyAction === "import_json_backup"}
+                className="rounded-xl bg-fintech-import/20 px-4 py-2 text-sm font-bold text-fintech-import disabled:opacity-50"
+              >
+                {busyAction === "import_json_backup" ? "Restoring..." : "Commit Restore"}
+              </button>
             </div>
           )}
-        </>
+        </div>
       )}
 
-      {mode === "export" && (
-        <>
-          <div className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Choose export method</div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <button type="button" onClick={() => setExportMethod("csv_zip")} className={`rounded-lg px-3 py-2 text-sm font-bold ${exportMethod === "csv_zip" ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>CSV Bundle (.zip)</button>
-              <button type="button" onClick={() => setExportMethod("excel")} className={`rounded-lg px-3 py-2 text-sm font-bold ${exportMethod === "excel" ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>Excel Workbook</button>
-              <button type="button" onClick={() => setExportMethod("json_backup")} className={`rounded-lg px-3 py-2 text-sm font-bold ${exportMethod === "json_backup" ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>Full JSON Backup</button>
-            </div>
+      {/* Export section */}
+      <div className="rounded-2xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
+        <div className="mb-4 flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--app-ghost)]">
+            <Download size={16} className="text-fintech-muted" />
           </div>
+          <h3 className="font-bold">Export Data</h3>
+          <span className="ml-auto text-[10px] font-bold uppercase tracking-widest text-fintech-muted">One-time download</span>
+        </div>
 
-          {exportMethod === "csv_zip" && (
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <h3 className="font-bold">Export CSV Bundle (.zip)</h3>
-              <div className="mt-3 space-y-2 text-xs">
-                <label className="flex items-center gap-2"><input type="checkbox" checked={csvExportScope.expenseCategories} onChange={(e) => setCsvExportScope((c) => ({ ...c, expenseCategories: e.target.checked }))} /> Expense Categories</label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={csvExportScope.incomeCategories} onChange={(e) => setCsvExportScope((c) => ({ ...c, incomeCategories: e.target.checked }))} /> Income Categories</label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={csvExportScope.transactions} onChange={(e) => setCsvExportScope((c) => ({ ...c, transactions: e.target.checked }))} /> Expenses</label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={csvExportScope.income} onChange={(e) => setCsvExportScope((c) => ({ ...c, income: e.target.checked }))} /> Income</label>
-              </div>
-              <button onClick={() => void handleExportCsvZip()} disabled={busyAction === "export_csv_zip"} className="mt-3 rounded-lg bg-fintech-accent/10 px-3 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50">
-                {busyAction === "export_csv_zip" ? "Generating..." : "Download CSV Zip"}
-              </button>
+        <div className="mb-4 flex flex-wrap gap-2 rounded-xl bg-[var(--app-ghost)] p-1">
+          <button type="button" onClick={() => setExportMethod("csv_zip")} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${exportMethod === "csv_zip" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>CSV Bundle</button>
+          <button type="button" onClick={() => setExportMethod("excel")} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${exportMethod === "excel" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>Excel Workbook</button>
+          <button type="button" onClick={() => setExportMethod("json_backup")} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${exportMethod === "json_backup" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>Full JSON Backup</button>
+        </div>
+
+        {exportMethod === "csv_zip" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+              {[
+                { key: "expenseCategories", label: "Expense Categories" },
+                { key: "incomeCategories", label: "Income Categories" },
+                { key: "transactions", label: "Expenses" },
+                { key: "income", label: "Income" },
+              ].map(({ key, label }) => (
+                <label key={key} className="flex items-center gap-2 rounded-xl border bg-[var(--app-ghost)] px-3 py-2" style={{ borderColor: "var(--app-border)" }}>
+                  <input
+                    type="checkbox"
+                    checked={csvExportScope[key as keyof typeof csvExportScope]}
+                    onChange={(e) => setCsvExportScope((c) => ({ ...c, [key]: e.target.checked }))}
+                  />
+                  {label}
+                </label>
+              ))}
             </div>
-          )}
+            <button onClick={() => void handleExportCsvZip()} disabled={busyAction === "export_csv_zip"} className="rounded-xl bg-fintech-accent/10 px-4 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50">
+              {busyAction === "export_csv_zip" ? "Generating..." : "Download CSV Zip"}
+            </button>
+          </div>
+        )}
 
-          {exportMethod === "excel" && (
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <h3 className="font-bold">Export Excel Workbook (.xlsx)</h3>
-              <label className="mt-3 flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={includeMetadataSheet} onChange={(event) => setIncludeMetadataSheet(event.target.checked)} />
-                Include metadata sheet
-              </label>
-              <button onClick={handleExportExcel} disabled={busyAction === "export_excel"} className="mt-3 rounded-lg bg-fintech-accent/10 px-3 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50">
-                {busyAction === "export_excel" ? "Generating..." : "Download Excel"}
-              </button>
-            </div>
-          )}
+        {exportMethod === "excel" && (
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={includeMetadataSheet} onChange={(event) => setIncludeMetadataSheet(event.target.checked)} />
+              Include metadata sheet
+            </label>
+            <button onClick={handleExportExcel} disabled={busyAction === "export_excel"} className="rounded-xl bg-fintech-accent/10 px-4 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50">
+              {busyAction === "export_excel" ? "Generating..." : "Download Excel"}
+            </button>
+          </div>
+        )}
 
-          {exportMethod === "json_backup" && (
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <h3 className="font-bold">Export Full Budget JSON</h3>
-              <p className="mt-2 text-xs text-fintech-muted">Canonical full backup for restore and portability.</p>
-              <button onClick={handleExportFullJson} disabled={busyAction === "export_json_backup"} className="mt-3 rounded-lg bg-fintech-accent/10 px-3 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50">
-                {busyAction === "export_json_backup" ? "Generating..." : "Download JSON Backup"}
-              </button>
-            </div>
-          )}
-        </>
-      )}
+        {exportMethod === "json_backup" && (
+          <div className="space-y-3">
+            <p className="text-xs text-fintech-muted">Canonical full backup for restore and portability. Includes all data and configuration.</p>
+            <button onClick={handleExportFullJson} disabled={busyAction === "export_json_backup"} className="rounded-xl bg-fintech-accent/10 px-4 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50">
+              {busyAction === "export_json_backup" ? "Generating..." : "Download JSON Backup"}
+            </button>
+          </div>
+        )}
+      </div>
 
-      <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-        <h3 className="mb-3 flex items-center gap-2 font-bold"><History size={16} /> ImpEx Activity Timeline</h3>
+      {/* History */}
+      <div className="rounded-2xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
+        <h3 className="mb-4 flex items-center gap-2 font-bold"><History size={16} /> ImpEx Activity</h3>
         {history.length === 0 ? (
           <p className="text-xs text-fintech-muted">No ImpEx activity yet.</p>
         ) : (
           <div className="space-y-2">
             {history.map((entry) => (
-              <div key={entry.id} className="rounded-lg bg-[var(--app-ghost)] p-3 text-xs">
+              <div key={entry.id} className="rounded-xl bg-[var(--app-ghost)] p-3 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold">{entry.label}</span>
                   <span className="text-fintech-muted">{new Date(entry.at).toLocaleString()}</span>
