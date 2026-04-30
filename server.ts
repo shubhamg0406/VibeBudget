@@ -558,6 +558,7 @@ export const createApp = async ({
           continue;
         }
 
+        const canonicalCategories = INITIAL_CATEGORIES.map((c) => `"${c}"`).join(", ");
         const prompt = [
           "You are a financial document OCR assistant. Extract all transactions from the provided document.",
           "Return ONLY valid JSON with NO markdown formatting, NO code fences, NO explanation.",
@@ -565,7 +566,7 @@ export const createApp = async ({
           "- date (string, YYYY-MM-DD format, use today if not visible)",
           "- merchant (string, vendor/payee name)",
           "- amount (number, positive value)",
-          "- category (string, best guess category like Groceries, Dining, Rent, Utilities, etc.)",
+          `- category (string, MUST be one of: ${canonicalCategories}. Pick the closest match.)`,
           "- notes (string, additional context or line-item details)",
           "- confidence (number, 0.0 to 1.0 how confident you are in the extraction)",
           "- warnings (array of strings, any issues like blurry text, missing fields, uncertain values)",

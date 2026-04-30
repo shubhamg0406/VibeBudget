@@ -12,6 +12,8 @@ import type {
 } from "../types";
 import { normalizeDateString } from "./dateUtils";
 import { parseAndroidNotificationHistory } from "./androidNotificationImport";
+import { buildMerchantCategoryMap, mapMerchantToCategory } from "./merchantCategoryMap";
+import type { MerchantCategoryMap } from "./merchantCategoryMap";
 
 interface PreviewImportArgs {
   source: ImportSource;
@@ -274,7 +276,8 @@ const makeFallbackKey = (
 const classifyCandidate = (
   candidate: ParsedRecordCandidate,
   source: ImportSource,
-  existing: PreviewImportArgs["existing"]
+  existing: PreviewImportArgs["existing"],
+  merchantCategoryMap?: MerchantCategoryMap,
 ): ImportRecord => {
   const warnings: string[] = [];
   const { sourceKeys, fallbackKeys } = makeExistingKeys(existing);
@@ -287,10 +290,17 @@ const classifyCandidate = (
   if (candidate.kind === "expense") {
     const knownExpenseCategories = new Set(existing.expenseCategories.map((item) => normalizeKeyText(item.name)));
     if (!category || !knownExpenseCategories.has(normalizeKeyText(category))) {
-      if (category && normalizeKeyText(category) !== normalizeKeyText(DEFAULT_EXPENSE_CATEGORY)) {
-        warnings.push(`Unknown expense category "${category}" mapped to ${DEFAULT_EXPENSE_CATEGORY}.`);
+      const mapped = merchant && merchantCategoryMap
+        ? mapMerchantToCategory(merchant, merchantCategoryMap)
+        : null;
+      if (mapped && knownExpenseCategories.has(normalizeKeyText(mapped))) {
+        category = mapped;
+      } else {
+        if (category && normalizeKeyText(category) !== normalizeKeyText(DEFAULT_EXPENSE_CATEGORY)) {
+          warnings.push(`Unknown expense category "${category}" mapped to ${DEFAULT_EXPENSE_CATEGORY}.`);
+        }
+        category = DEFAULT_EXPENSE_CATEGORY;
       }
-      category = DEFAULT_EXPENSE_CATEGORY;
     }
   }
 
@@ -367,7 +377,8 @@ export const previewImportBatch = ({
     warnings.push(error instanceof Error ? error.message : "Failed to parse import payload.");
   }
 
-  const records = candidates.map((candidate) => classifyCandidate(candidate, source, existing));
+  const merchantCatMap = buildMerchantCategoryMap(existing.transactions, existing.income);
+  const records = candidates.map((candidate) => classifyCandidate(candidate, source, existing, merchantCatMap));
 
   return {
     id: makeBatchId(source, payload),
