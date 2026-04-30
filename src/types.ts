@@ -210,7 +210,7 @@ export interface Preferences {
   coreExcludedCategories?: string[]; // Categories excluded from "Core" logic
 }
 
-export type View = "dashboard" | "transactions" | "analysis" | "settings";
+export type View = "dashboard" | "transactions" | "analysis" | "monthly-analysis" | "settings";
 export type Theme = "dark" | "light";
 
 export type DateRangeOption = "this-month" | "last-month" | "last-3-months" | "last-6-months" | "ytd" | "last-12-months" | "custom";

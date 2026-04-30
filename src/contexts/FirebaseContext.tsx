@@ -833,8 +833,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const result = await signInWithGoogle(auth, provider);
       if (!result) return;
       const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (withDriveScopes) {
-        storeAccessToken(credential?.accessToken || null);
+      if (withDriveScopes && credential?.accessToken) {
+        storeAccessToken(credential.accessToken);
       }
       return;
     } catch (error) {
@@ -1333,7 +1333,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const saveGoogleSheetsConfig = async (config: Omit<GoogleSheetsSyncConfig, "connectedAt" | "connectedBy">) => {
-    if (!user || !googleSheetsAccessToken) {
+    if (!user) {
       throw new Error("Sign in with Google first.");
     }
 

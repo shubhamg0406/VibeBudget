@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./components/Dashboard";
 import { Analysis } from "./components/Analysis";
+import { MonthlyAnalysis } from "./components/MonthlyAnalysis";
 import { Settings } from "./components/Settings";
 import { DateRangeSelector } from "./components/DateRangeSelector";
 import { TransactionsView } from "./components/TransactionsView";
@@ -159,6 +160,17 @@ export default function App() {
               allTransactions={transactions}
               allIncome={income}
               currentRange={effectiveDateRange}
+            />
+          </div>
+        );
+      case "monthly-analysis":
+        return (
+          <div className="space-y-4">
+            <MonthlyAnalysis
+              expenseCategories={expenseCategories}
+              incomeCategories={incomeCategories}
+              allTransactions={transactions}
+              allIncome={income}
             />
           </div>
         );
