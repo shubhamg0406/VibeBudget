@@ -897,6 +897,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         const preview = await previewGoogleSheetColumn(sheetUrl, sheetName, startCell, startCell, false);
         return preview.headerValue || "";
       };
+      const safeReadHeader = async (sheetName: string, startCell: string) => {
+        try {
+          return await readHeader(sheetName, startCell);
+        } catch {
+          return "";
+        }
+      };
 
       const expenseDateHeader = await readHeader(expensesSheetName, expenseRangeDrafts.date.startCell);
       const expenseVendorHeader = await readHeader(expensesSheetName, expenseRangeDrafts.vendor.startCell);
@@ -911,16 +918,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       const incomeNotesHeader = await readHeader(incomeSheetName, incomeRangeDrafts.notes.startCell);
 
       const expenseCategoryNameHeader = expenseCategoriesSheetName
-        ? await readHeader(expenseCategoriesSheetName, expenseCategoryRangeDrafts.name.startCell)
+        ? await safeReadHeader(expenseCategoriesSheetName, expenseCategoryRangeDrafts.name.startCell)
         : "";
       const expenseCategoryTargetHeader = expenseCategoriesSheetName
-        ? await readHeader(expenseCategoriesSheetName, expenseCategoryRangeDrafts.target.startCell)
+        ? await safeReadHeader(expenseCategoriesSheetName, expenseCategoryRangeDrafts.target.startCell)
         : "";
       const incomeCategoryNameHeader = incomeCategoriesSheetName
-        ? await readHeader(incomeCategoriesSheetName, incomeCategoryRangeDrafts.name.startCell)
+        ? await safeReadHeader(incomeCategoriesSheetName, incomeCategoryRangeDrafts.name.startCell)
         : "";
       const incomeCategoryTargetHeader = incomeCategoriesSheetName
-        ? await readHeader(incomeCategoriesSheetName, incomeCategoryRangeDrafts.target.startCell)
+        ? await safeReadHeader(incomeCategoriesSheetName, incomeCategoryRangeDrafts.target.startCell)
         : "";
 
       const payload: Omit<GoogleSheetsSyncConfig, "connectedAt" | "connectedBy"> = {
@@ -1498,6 +1505,50 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       setColumnPreviewByKey((current) => ({ ...current, [key]: "Preview unavailable" }));
     }
   };
+
+  useEffect(() => {
+    if (!sheetUrl || !googleSheetsAccessToken) return;
+
+    const tabFields: Record<string, Array<[string, string, RangeDraft]>> = {
+      expenses: [
+        ["expense-date", expensesSheetName, expenseRangeDrafts.date],
+        ["expense-vendor", expensesSheetName, expenseRangeDrafts.vendor],
+        ["expense-amount", expensesSheetName, expenseRangeDrafts.amount],
+        ["expense-category", expensesSheetName, expenseRangeDrafts.category],
+        ["expense-notes", expensesSheetName, expenseRangeDrafts.notes],
+      ],
+      income: [
+        ["income-date", incomeSheetName, incomeRangeDrafts.date],
+        ["income-source", incomeSheetName, incomeRangeDrafts.source],
+        ["income-amount", incomeSheetName, incomeRangeDrafts.amount],
+        ["income-category", incomeSheetName, incomeRangeDrafts.category],
+        ["income-notes", incomeSheetName, incomeRangeDrafts.notes],
+      ],
+      expense_categories: [
+        ["expense-cat-name", expenseCategoriesSheetName, expenseCategoryRangeDrafts.name],
+        ["expense-cat-target", expenseCategoriesSheetName, expenseCategoryRangeDrafts.target],
+      ],
+      income_categories: [
+        ["income-cat-name", incomeCategoriesSheetName, incomeCategoryRangeDrafts.name],
+        ["income-cat-target", incomeCategoriesSheetName, incomeCategoryRangeDrafts.target],
+      ],
+    };
+
+    const entries = tabFields[activeMappingTab] || [];
+    const toLoad = entries.filter(([key, , draft]) => !columnPreviewByKey[key] && Boolean(draft.startCell));
+    if (toLoad.length === 0) return;
+
+    let cancelled = false;
+    const loadPreviews = async () => {
+      for (const [key, sheetName, draft] of toLoad) {
+        if (cancelled) return;
+        await updatePreview(key, sheetName, draft);
+      }
+    };
+    void loadPreviews();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMappingTab, sheetUrl, googleSheetsAccessToken]);
 
   useEffect(() => {
     if (!sheetUrl || !googleSheetsConnected) return;

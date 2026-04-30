@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import {
   BarChart3,
   Bell,
+  CalendarCheck,
   CalendarDays,
   CircleHelp,
   Home,
@@ -34,6 +35,7 @@ const PAGE_META: Record<View, { title: string; searchPlaceholder: string }> = {
   dashboard: { title: "Dashboard", searchPlaceholder: "Search insights..." },
   transactions: { title: "Transactions", searchPlaceholder: "Search transactions..." },
   analysis: { title: "Stats", searchPlaceholder: "Search insights..." },
+  "monthly-analysis": { title: "Monthly Analysis", searchPlaceholder: "Search categories..." },
   settings: { title: "Settings", searchPlaceholder: "Search settings..." },
 };
 
@@ -46,6 +48,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
     { id: "dashboard", icon: Home, label: "Home" },
     { id: "transactions", icon: List, label: "Transactions" },
     { id: "analysis", icon: BarChart3, label: "Stats" },
+    { id: "monthly-analysis", icon: CalendarCheck, label: "Monthly" },
     { id: "settings", icon: SettingsIcon, label: "Settings" },
   ]), []);
 

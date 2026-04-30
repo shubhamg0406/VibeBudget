@@ -1,5 +1,5 @@
 import React from "react";
-import { BarChart3, Home, List, Settings as SettingsIcon } from "lucide-react";
+import { BarChart3, CalendarCheck, Home, List, Settings as SettingsIcon } from "lucide-react";
 import { View } from "../../types";
 
 interface BottomNavProps {
@@ -11,6 +11,7 @@ const navItems: Array<{ id: View; label: string; icon: React.ComponentType<{ siz
   { id: "dashboard", label: "Dashboard", icon: Home },
   { id: "transactions", label: "Transactions", icon: List },
   { id: "analysis", label: "Stats", icon: BarChart3 },
+  { id: "monthly-analysis", label: "Monthly", icon: CalendarCheck },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
 

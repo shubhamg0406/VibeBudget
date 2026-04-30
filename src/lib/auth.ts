@@ -17,6 +17,12 @@ const shouldFallbackToRedirect = (error: unknown) => {
   ].includes(code);
 };
 
+const getAuthErrorCode = (error: unknown) => (
+  typeof error === "object" && error && "code" in error
+    ? String((error as { code?: string }).code)
+    : ""
+);
+
 const isNativePlatform = async () => {
   try {
     const moduleName = "@capacitor/core";
@@ -25,6 +31,17 @@ const isNativePlatform = async () => {
   } catch {
     return false;
   }
+};
+
+const isEmbeddedBrowser = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent.toLowerCase();
+  return (
+    ua.includes("codex") ||
+    ua.includes("electron") ||
+    ua.includes("wv") ||
+    ua.includes("webview")
+  );
 };
 
 const signInWithNativePlugin = async (auth: Auth) => {
@@ -51,13 +68,24 @@ export const signInWithGoogle = async (
     }
   }
 
+  // Embedded browsers commonly block popups; use redirect first there.
+  if (isEmbeddedBrowser()) {
+    await signInWithRedirect(auth, provider);
+    return;
+  }
+
   try {
     return await signInWithPopup(auth, provider);
   } catch (error) {
+    const code = getAuthErrorCode(error);
+    if (code === "auth/unauthorized-domain") {
+      throw new Error(
+        "Google sign-in is blocked for this origin. In Firebase Console -> Authentication -> Settings -> Authorized domains, add localhost and 127.0.0.1, then retry."
+      );
+    }
     if (!shouldFallbackToRedirect(error)) {
       throw error;
     }
+    await signInWithRedirect(auth, provider);
   }
-
-  await signInWithRedirect(auth, provider);
 };

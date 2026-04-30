@@ -71,7 +71,7 @@ export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });
 
 export const googleDriveProvider = new GoogleAuthProvider();
-googleDriveProvider.setCustomParameters({ prompt: "select_account" });
+googleDriveProvider.setCustomParameters({ prompt: "consent" });
 googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.file");
 googleDriveProvider.addScope("https://www.googleapis.com/auth/spreadsheets");
 
