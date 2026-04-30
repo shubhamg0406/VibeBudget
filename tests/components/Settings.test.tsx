@@ -4,12 +4,12 @@ import { Settings } from "../../src/components/Settings";
 import { renderWithProviders } from "../utils/renderWithProviders";
 
 describe("Settings", () => {
-  it("switches to the cloud sync tab and shows drive actions", () => {
+  it("switches to the google workspace tab and shows drive actions", () => {
     renderWithProviders(<Settings onRefresh={() => {}} />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Cloud Sync/i })[0]);
-    expect(screen.getByText(/Create \/ Connect Folder/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Google Sheets Sync/i).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    expect(screen.getByRole("button", { name: /^Connect Drive$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Manage your Google Sheets data source and Drive backup vault/i)).toBeInTheDocument();
   });
 
   it("loads spreadsheet columns through the mocked context", async () => {
@@ -44,15 +44,15 @@ describe("Settings", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Cloud Sync/i })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
     fireEvent.change(screen.getByPlaceholderText("https://docs.google.com/spreadsheets/d/..."), {
       target: { value: "https://docs.google.com/spreadsheets/d/sheet-1/edit" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Load Columns/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Verify Sheet Access/i }));
 
     await waitFor(() => {
       expect(inspectGoogleSheetsSpreadsheet).toHaveBeenCalled();
-      expect(screen.getByText(/Loaded sheet tabs and suggested column mappings/i)).toBeInTheDocument();
+      expect(screen.getByText(/Connection verified: sheet tabs and suggested mappings loaded/i)).toBeInTheDocument();
       expect(screen.getByText("Quarterly Budget")).toBeInTheDocument();
     });
   });
@@ -79,6 +79,32 @@ describe("Settings", () => {
     });
     expect(syncGoogleSheets).not.toHaveBeenCalled();
     expect(screen.getByText(/expenses wiped successfully/i)).toBeInTheDocument();
+  });
+
+  it("previews and commits CSV imports through the Import Center", async () => {
+    const commitImport = vi.fn(async () => ({ imported: 1, skipped: 0, invalid: 0 }));
+
+    renderWithProviders(<Settings onRefresh={() => {}} />, {
+      firebase: {
+        commitImport,
+      },
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/Paste CSV/i), {
+      target: {
+        value: "Date,Vendor,Amount,Category,Notes\n2026-04-10,Cafe,7.50,Groceries,Latte",
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Preview Import/i }));
+
+    expect(await screen.findByText("Cafe")).toBeInTheDocument();
+    expect(screen.getByText("new")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Commit 1/i }));
+
+    await waitFor(() => {
+      expect(commitImport).toHaveBeenCalled();
+    });
   });
 
 });

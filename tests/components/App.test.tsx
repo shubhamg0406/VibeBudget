@@ -46,8 +46,12 @@ describe("App", () => {
 
   it("shows the signed-out home when there is no user", () => {
     renderWithProviders(<App />, {
-      firebase: {
+      seed: {
         user: null,
+      },
+      firebase: {
+        ownerEmail: null,
+        budgetId: null,
         signIn: vi.fn(async () => {}),
       },
     });

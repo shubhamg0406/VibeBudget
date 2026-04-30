@@ -6,6 +6,8 @@ import { fileURLToPath } from "url";
 import fs from "fs";
 import dotenv from "dotenv";
 import { AiChatDependencies, registerAiChatRoute } from "./src/server/aiChat.js";
+import { registerPlaidRoutes } from "./src/server/plaid.js";
+import { registerTellerRoutes } from "./src/server/teller.js";
 import { computeUpcoming, materializeRule } from "./src/utils/recurring.js";
 import { getTodayStr } from "./src/utils/dateUtils.js";
 
@@ -104,21 +106,33 @@ export const initializeDatabase = (db: Database.Database) => {
     );
   `);
 
-  const hasColumn = (table: string, column: string) => {
-    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-    return columns.some((item) => item.name === column);
-  };
-  if (!hasColumn("transactions", "recurring_rule_id")) {
-    db.exec("ALTER TABLE transactions ADD COLUMN recurring_rule_id TEXT");
-  }
-  if (!hasColumn("transactions", "is_recurring_instance")) {
-    db.exec("ALTER TABLE transactions ADD COLUMN is_recurring_instance INTEGER DEFAULT 0");
-  }
-  if (!hasColumn("income", "recurring_rule_id")) {
-    db.exec("ALTER TABLE income ADD COLUMN recurring_rule_id TEXT");
-  }
-  if (!hasColumn("income", "is_recurring_instance")) {
-    db.exec("ALTER TABLE income ADD COLUMN is_recurring_instance INTEGER DEFAULT 0");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+  `);
+  const currentVersion = db.prepare("SELECT MAX(version) as v FROM schema_version").get() as { v: number | null };
+  const appliedVersion = currentVersion?.v ?? 0;
+
+  if (appliedVersion < 1) {
+    const hasColumn = (table: string, column: string) => {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      return columns.some((item) => item.name === column);
+    };
+    if (!hasColumn("transactions", "recurring_rule_id")) {
+      db.exec("ALTER TABLE transactions ADD COLUMN recurring_rule_id TEXT");
+    }
+    if (!hasColumn("transactions", "is_recurring_instance")) {
+      db.exec("ALTER TABLE transactions ADD COLUMN is_recurring_instance INTEGER DEFAULT 0");
+    }
+    if (!hasColumn("income", "recurring_rule_id")) {
+      db.exec("ALTER TABLE income ADD COLUMN recurring_rule_id TEXT");
+    }
+    if (!hasColumn("income", "is_recurring_instance")) {
+      db.exec("ALTER TABLE income ADD COLUMN is_recurring_instance INTEGER DEFAULT 0");
+    }
+    db.prepare("INSERT INTO schema_version (version, applied_at) VALUES (1, ?)").run(new Date().toISOString());
   }
 
   const categoryCount = db.prepare("SELECT COUNT(*) as count FROM categories").get() as { count: number };
@@ -130,6 +144,9 @@ export const initializeDatabase = (db: Database.Database) => {
 
 export const createDatabase = (dbPath = defaultDbPath) => {
   const db = new Database(dbPath);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000");
   initializeDatabase(db);
   return db;
 };
@@ -231,6 +248,8 @@ export const createApp = async ({
     res.json({ ok: true });
   });
   registerAiChatRoute(app, aiChatDeps);
+  registerPlaidRoutes(app);
+  registerTellerRoutes(app);
 
   app.get("/api/categories", (_req, res) => {
     const categories = db.prepare("SELECT * FROM categories ORDER BY name ASC").all();
@@ -242,8 +261,12 @@ export const createApp = async ({
     try {
       const result = db.prepare("INSERT INTO categories (name, target_amount) VALUES (?, ?)").run(name, target_amount);
       res.json({ id: result.lastInsertRowid, name, target_amount });
-    } catch {
-      res.status(400).json({ error: "Category already exists" });
+    } catch (err: any) {
+      if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" || err?.code === "SQLITE_CONSTRAINT") {
+        res.status(400).json({ error: "Category already exists" });
+      } else {
+        throw err;
+      }
     }
   });
 
@@ -485,6 +508,172 @@ export const createApp = async ({
     }
   });
 
+  app.post("/api/import/extract-transactions", async (req, res) => {
+    const uid = requireUid(req, res);
+    if (!uid) return;
+    void uid;
+
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
+      return res.status(500).json({ error: "Missing GEMINI_API_KEY server configuration." });
+    }
+
+    const { files, targetType } = req.body || {};
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: "`files` must be a non-empty array." });
+    }
+    if (files.length > 20) {
+      return res.status(400).json({ error: "Maximum 20 files per request." });
+    }
+
+    const candidates: Array<{
+      date: string;
+      merchant: string;
+      amount: number;
+      category: string;
+      notes: string;
+      confidence: number;
+      warnings: string[];
+      source_file: string;
+      page?: number;
+    }> = [];
+    const errors: Array<{ file: string; error: string }> = [];
+    const totalPages = files.reduce((sum, f) => sum + (f.type === "application/pdf" ? 10 : 1), 0);
+    if (totalPages > 50) {
+      return res.status(400).json({ error: `Estimated pages (${totalPages}) exceeds maximum of 50. Please split into smaller batches.` });
+    }
+
+    const typeHint = targetType === "income" ? "income" : "expense";
+    const receiptModeHint = targetType === "income"
+      ? "Each file typically represents one income document (pay stub, invoice). Aggregate line items into one row."
+      : "For receipt/invoice images: aggregate line items into one transaction row with total amount; include key line-item details in notes.";
+
+    for (const file of files) {
+      try {
+        const mimeType = file.type || "image/png";
+        const isPdf = mimeType === "application/pdf";
+        const fileSize = (file.content?.length || 0) * 0.75;
+        if (fileSize > 20 * 1024 * 1024) {
+          errors.push({ file: file.name, error: "File exceeds 20 MB limit." });
+          continue;
+        }
+
+        const prompt = [
+          "You are a financial document OCR assistant. Extract all transactions from the provided document.",
+          "Return ONLY valid JSON with NO markdown formatting, NO code fences, NO explanation.",
+          "The JSON must be an array of objects with these fields:",
+          "- date (string, YYYY-MM-DD format, use today if not visible)",
+          "- merchant (string, vendor/payee name)",
+          "- amount (number, positive value)",
+          "- category (string, best guess category like Groceries, Dining, Rent, Utilities, etc.)",
+          "- notes (string, additional context or line-item details)",
+          "- confidence (number, 0.0 to 1.0 how confident you are in the extraction)",
+          "- warnings (array of strings, any issues like blurry text, missing fields, uncertain values)",
+          "",
+          `This document is for ${typeHint} tracking.`,
+          receiptModeHint,
+          "",
+          "If the document is a bank or credit card statement with multiple transactions, extract ALL of them.",
+          "If the document is unreadable or contains no financial data, return an empty array [].",
+          `Date format: YYYY-MM-DD. Amount: positive number. If amount is absolute value (ignore +/- signs).`,
+        ].join("\n");
+
+        const parts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [
+          { text: prompt },
+        ];
+
+        if (isPdf) {
+          parts.push({ inline_data: { mime_type: "application/pdf", data: file.content } });
+        } else {
+          parts.push({ inline_data: { mime_type: mimeType, data: file.content } });
+        }
+
+        const geminiResponse = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(geminiApiKey)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts }],
+              generationConfig: {
+                temperature: 0.05,
+                maxOutputTokens: 8192,
+              },
+            }),
+          }
+        );
+
+        if (!geminiResponse.ok) {
+          const errorText = await geminiResponse.text().catch(() => "");
+          errors.push({ file: file.name, error: `Gemini API error (${geminiResponse.status}): ${errorText.slice(0, 500)}` });
+          continue;
+        }
+
+        const geminiData = await geminiResponse.json() as {
+          candidates?: Array<{
+            content?: { parts?: Array<{ text?: string }> };
+            finishReason?: string;
+          }>;
+          promptFeedback?: { blockReason?: string };
+        };
+
+        if (geminiData.promptFeedback?.blockReason) {
+          errors.push({ file: file.name, error: `Content blocked: ${geminiData.promptFeedback.blockReason}` });
+          continue;
+        }
+
+        const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (!responseText) {
+          errors.push({ file: file.name, error: "Gemini returned empty response." });
+          continue;
+        }
+
+        let parsed: Array<Record<string, unknown>>;
+        try {
+          const cleaned = responseText.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+          parsed = JSON.parse(cleaned);
+          if (!Array.isArray(parsed)) {
+            throw new Error("Response is not an array");
+          }
+        } catch {
+          errors.push({ file: file.name, error: "Failed to parse Gemini response as JSON array." });
+          continue;
+        }
+
+        if (parsed.length === 0) {
+          errors.push({ file: file.name, error: "No transactions found in document." });
+          continue;
+        }
+
+        for (const item of parsed) {
+          candidates.push({
+            date: String(item.date || ""),
+            merchant: String(item.merchant || ""),
+            amount: typeof item.amount === "number" ? item.amount : Number(item.amount) || 0,
+            category: String(item.category || ""),
+            notes: String(item.notes || ""),
+            confidence: typeof item.confidence === "number" ? item.confidence : 0.5,
+            warnings: Array.isArray(item.warnings) ? item.warnings.map(String) : [],
+            source_file: file.name,
+          });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        errors.push({ file: file.name, error: message });
+      }
+    }
+
+    return res.json({
+      candidates,
+      errors,
+      summary: {
+        filesProcessed: files.length,
+        filesFailed: errors.length,
+        totalCandidates: candidates.length,
+      },
+    } satisfies import("./src/types.js").ExtractTransactionsResponse);
+  });
+
   app.post("/api/import/expenses", (req, res) => {
     const { data } = req.body;
     if (!Array.isArray(data)) {
@@ -560,6 +749,15 @@ export const startServer = async (options: ServerOptions = {}) => {
   const server = app.listen(port, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${port}`);
   });
+
+  const shutdown = () => {
+    server.close(() => {
+      db.close();
+      process.exit(0);
+    });
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 
   return { app, db, server };
 };

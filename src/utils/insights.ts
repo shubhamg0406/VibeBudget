@@ -344,17 +344,17 @@ export const generateDashboardInsights = ({
     message: `Savings rate is ${savingsRate.toFixed(1)}% this period. Current surplus covers about ${Math.max(0, bufferMonths).toFixed(1)} month(s) of spend at this pace. ${debtLikeSpend > 0 ? `Debt-related outflow tracked: ${formatMoney(debtLikeSpend, symbol)}.` : "No debt-paydown category detected in this range."}`,
   };
 
-  const expenseHistory = allTransactions.map((item) => ({
+  const periodExpenseHistory = transactions.map((item) => ({
     ...item,
     baseAmount: toBase(item.amount, item.currency),
   }));
-  const stats = getAmountStats(expenseHistory.map((item) => item.baseAmount));
-  const unusual = expenseHistory
+  const stats = getAmountStats(periodExpenseHistory.map((item) => item.baseAmount));
+  const unusual = periodExpenseHistory
     .filter((item) => item.baseAmount > Math.max(stats.avg * 1.8, stats.avg + (2 * stats.std)))
     .sort((a, b) => b.baseAmount - a.baseAmount)[0];
 
   const duplicateMap = new Map<string, string[]>();
-  expenseHistory.forEach((item) => {
+  periodExpenseHistory.forEach((item) => {
     const key = `${(item.vendor || "").trim().toLowerCase()}|${item.baseAmount.toFixed(2)}`;
     if (!duplicateMap.has(key)) duplicateMap.set(key, []);
     duplicateMap.get(key)!.push(item.date);

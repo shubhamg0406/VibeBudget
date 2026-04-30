@@ -120,4 +120,66 @@ describe("dashboard insights", () => {
     expect(insights[2].tiles.map((item) => item.label)).toContain("Budget used");
     expect(insights.every((item) => item.tiles.length >= 2 && item.tiles.length <= 3)).toBe(true);
   });
+
+  it("scopes smart alerts to the active period transactions", () => {
+    const insights = generateDashboardInsights({
+      transactions: [
+        {
+          id: "t-current",
+          date: "2026-04-10",
+          vendor: "Grocery Store",
+          amount: 120,
+          currency: "CAD",
+          category_id: "groceries",
+          category_name: "Groceries",
+          notes: "",
+        },
+      ],
+      allTransactions: [
+        {
+          id: "t-current",
+          date: "2026-04-10",
+          vendor: "Grocery Store",
+          amount: 120,
+          currency: "CAD",
+          category_id: "groceries",
+          category_name: "Groceries",
+          notes: "",
+        },
+        {
+          id: "t-old-spike",
+          date: "2026-01-12",
+          vendor: "Land Purchase",
+          amount: 38500,
+          currency: "CAD",
+          category_id: "misc",
+          category_name: "Misc",
+          notes: "",
+        },
+      ],
+      income: [
+        {
+          id: "i1",
+          date: "2026-04-01",
+          source: "Employer",
+          amount: 5000,
+          currency: "CAD",
+          category: "Salary",
+          notes: "",
+        },
+      ],
+      previousTransactions: [],
+      previousIncome: [],
+      expenseCategories: [
+        { id: "groceries", name: "Groceries", target_amount: 600 },
+      ],
+      upcomingRecurring: [],
+      monthMultiplier: 1,
+      baseCurrency: "CAD",
+      exchangeRates: [],
+    });
+
+    const smartAlerts = insights.find((item) => item.pillar === "smart-alerts");
+    expect(smartAlerts?.alerts || []).toHaveLength(0);
+  });
 });

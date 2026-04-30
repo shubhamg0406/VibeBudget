@@ -12,7 +12,8 @@ import {
   Repeat,
   RotateCcw,
   SearchX,
-  RefreshCw
+  RefreshCw,
+  Upload
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { TransactionEntry } from "./TransactionEntry";
@@ -27,6 +28,7 @@ import {
 } from "../utils/publicSheetImport";
 import { BottomSheet } from "./common/BottomSheet";
 import { FAB } from "./common/FAB";
+import { BulkAddModal } from "./BulkAddModal";
 import { useBreakpoint } from "../hooks/useBreakpoint";
 
 interface TransactionsViewProps {
@@ -62,6 +64,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showBulkAdd, setShowBulkAdd] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<UnifiedTransaction | null>(null);
   const [filterType, setFilterType] = useState<"all" | "expense" | "income">("all");
   const [showFilters, setShowFilters] = useState(false);
@@ -77,7 +80,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     googleSheetsError,
     googleSheetsAccessToken,
     connectGoogleSheets,
-    importData,
+    upsertGoogleSheetRows,
     syncGoogleSheets,
   } = useFirebase();
   const [showUpcoming, setShowUpcoming] = useState(false);
@@ -213,12 +216,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       if (googleSheetsConfig) {
         await syncGoogleSheets("pull");
       } else {
-        const result = await refreshSavedTransactionSheetImports(googleSheetsAccessToken, importData);
+        const result = await refreshSavedTransactionSheetImports(googleSheetsAccessToken, upsertGoogleSheetRows);
         const totalImported = result.expenses + result.income;
         if (totalImported === 0) {
           setSheetRefreshStatus({
             type: "info",
-            message: "Saved Google Sheet import refreshed, but no transaction rows were found.",
+            message: "Saved Google Sheet import refreshed. No new transaction rows were added.",
           });
           return;
         }
@@ -226,7 +229,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
       setSheetRefreshStatus({
         type: "success",
-        message: "Google Sheet changes fetched.",
+        message: "Google Sheet changes fetched and added to transactions.",
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to refresh from Google Sheets.";
@@ -253,19 +256,32 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           )}
         </div>
 
-        {canRefreshFromSheets && (
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => void handleSheetRefresh()}
-            disabled={isSheetRefreshing}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border bg-[var(--app-panel)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-fintech-accent transition-colors hover:bg-fintech-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setShowBulkAdd(true)}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border bg-[var(--app-panel)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-fintech-accent transition-colors hover:bg-fintech-accent/10"
             style={{ borderColor: "var(--app-border)" }}
-            aria-label="Refresh transactions from Google Sheets"
+            aria-label="Bulk add transactions from files"
           >
-            <RefreshCw size={15} className={isSheetRefreshing ? "animate-spin" : ""} />
-            <span>{isSheetRefreshing ? "Refreshing..." : "Refresh Sheet"}</span>
+            <Upload size={15} />
+            <span>Bulk Add</span>
           </button>
-        )}
+
+          {canRefreshFromSheets && (
+            <button
+              type="button"
+              onClick={() => void handleSheetRefresh()}
+              disabled={isSheetRefreshing}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border bg-[var(--app-panel)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-fintech-accent transition-colors hover:bg-fintech-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ borderColor: "var(--app-border)" }}
+              aria-label="Refresh transactions from Google Sheets"
+            >
+              <RefreshCw size={15} className={isSheetRefreshing ? "animate-spin" : ""} />
+              <span>{isSheetRefreshing ? "Refreshing..." : "Refresh Sheet"}</span>
+            </button>
+          )}
+        </div>
       </header>
 
       {canRefreshFromSheets && (sheetRefreshStatus || googleSheetsError) && (
@@ -788,6 +804,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       <div className="pointer-events-none fixed bottom-24 right-24 z-40 lg:bottom-8 lg:right-28">
         <FAB onClick={() => setShowAddModal(true)} className="pointer-events-auto" />
       </div>
+
+      {/* Bulk Add from Files Modal */}
+      {showBulkAdd && (
+        <BulkAddModal
+          expenseCategories={expenseCategories}
+          incomeCategories={incomeCategories}
+          onClose={() => setShowBulkAdd(false)}
+          onRefresh={() => {
+            onRefresh();
+            setShowBulkAdd(false);
+          }}
+        />
+      )}
 
       {/* Add/Edit Transaction Modal */}
       <BottomSheet

@@ -729,7 +729,9 @@ export const inspectSpreadsheet = async (
   token: string,
   spreadsheetUrl: string,
   expensesSheetName: string,
-  incomeSheetName: string
+  incomeSheetName: string,
+  expenseCategoriesSheetName?: string,
+  incomeCategoriesSheetName?: string
 ): Promise<GoogleSheetsInspectionResult> => {
   const spreadsheetId = parseSpreadsheetId(spreadsheetUrl);
   if (!spreadsheetId) {
@@ -737,14 +739,24 @@ export const inspectSpreadsheet = async (
   }
 
   const metadata = await getSpreadsheetMetadata(token, spreadsheetId);
+  const sheetTitles = (metadata.sheets || []).map((sheet) => sheet.properties?.title || "").filter(Boolean);
   const expenseHeaders = (await getSheetValues(token, spreadsheetId, `${escapeSheetName(expensesSheetName)}!1:1`).catch(() => ({ values: [] }))).values?.[0] || [];
   const incomeHeaders = (await getSheetValues(token, spreadsheetId, `${escapeSheetName(incomeSheetName)}!1:1`).catch(() => ({ values: [] }))).values?.[0] || [];
+  const expenseCategoryHeaders = expenseCategoriesSheetName
+    ? (await getSheetValues(token, spreadsheetId, `${escapeSheetName(expenseCategoriesSheetName)}!1:1`).catch(() => ({ values: [] }))).values?.[0] || []
+    : [];
+  const incomeCategoryHeaders = incomeCategoriesSheetName
+    ? (await getSheetValues(token, spreadsheetId, `${escapeSheetName(incomeCategoriesSheetName)}!1:1`).catch(() => ({ values: [] }))).values?.[0] || []
+    : [];
 
   return {
     spreadsheetId,
     spreadsheetTitle: metadata.properties?.title || "Google Sheet",
+    sheetTitles,
     expenseHeaders,
     incomeHeaders,
+    expenseCategoryHeaders,
+    incomeCategoryHeaders,
     suggestedExpenseMapping: {
       ...getDefaultExpenseMapping(),
       ...detectExpenseMapping(expenseHeaders),
@@ -890,6 +902,9 @@ interface SyncSheetToAppArgs {
   transactions: Transaction[];
   income: Income[];
   ensureCategoryId: (name: string) => Promise<string>;
+  ensureIncomeCategoryName: (name: string) => Promise<string>;
+  upsertExpenseCategoryTarget: (name: string, targetAmount: number) => Promise<void>;
+  upsertIncomeCategoryTarget: (name: string, targetAmount: number) => Promise<void>;
   upsertTransaction: (id: string | null, data: Omit<Transaction, "id">) => Promise<void>;
   upsertIncome: (id: string | null, data: Omit<Income, "id">) => Promise<void>;
 }
@@ -900,22 +915,12 @@ export const syncSheetDataToApp = async ({
   transactions,
   income,
   ensureCategoryId,
+  ensureIncomeCategoryName,
+  upsertExpenseCategoryTarget,
+  upsertIncomeCategoryTarget,
   upsertTransaction,
   upsertIncome,
 }: SyncSheetToAppArgs) => {
-  await ensureSheetAndHeaders(
-    token,
-    config.spreadsheetId,
-    config.expensesSheetName,
-    getRequiredHeadersForConfig(config, "expenses")
-  );
-  await ensureSheetAndHeaders(
-    token,
-    config.spreadsheetId,
-    config.incomeSheetName,
-    getRequiredHeadersForConfig(config, "income")
-  );
-
   const expenseSheet = await readSheetRecords(token, config.spreadsheetId, config.expensesSheetName);
   const incomeSheet = await readSheetRecords(token, config.spreadsheetId, config.incomeSheetName);
   const expenseDateOrder = inferDateOrderFromValues(
@@ -929,6 +934,7 @@ export const syncSheetDataToApp = async ({
   const incomeById = new Map(income.map((item) => [item.id, item]));
 
   for (const row of expenseSheet.records) {
+    if (row.rowNumber < (config.expensesDataStartRow || 2)) continue;
     const id = row.values[config.expenseMapping.id] || null;
     const date = parseSheetDate(row.values[config.expenseMapping.date] || "", expenseDateOrder);
     const vendor = row.values[config.expenseMapping.vendor] || "";
@@ -964,6 +970,7 @@ export const syncSheetDataToApp = async ({
   }
 
   for (const row of incomeSheet.records) {
+    if (row.rowNumber < (config.incomeDataStartRow || 2)) continue;
     const id = row.values[config.incomeMapping.id] || null;
     const date = parseSheetDate(row.values[config.incomeMapping.date] || "", incomeDateOrder);
     const source = row.values[config.incomeMapping.source] || "";
@@ -994,5 +1001,47 @@ export const syncSheetDataToApp = async ({
       notes,
       updated_at: updatedAt,
     });
+    await ensureIncomeCategoryName(category);
+  }
+
+  const syncCategoryTargetsFromSheet = async (
+    sheetName: string,
+    dataStartRow: number | undefined,
+    nameColumn: string | undefined,
+    targetColumn: string | undefined,
+    upsertTarget: (name: string, targetAmount: number) => Promise<void>
+  ) => {
+    const records = await readSheetRecords(token, config.spreadsheetId, sheetName);
+    const headers = records.headers;
+    const nameHeader = nameColumn || matchHeader(headers, ["Name", "Category", "Category Name"]);
+    const targetHeader = targetColumn || matchHeader(headers, ["Monthly Target", "Target", "Amount"]);
+    if (!nameHeader || !targetHeader) return;
+
+    for (const row of records.records) {
+      if (row.rowNumber < (dataStartRow || 2)) continue;
+      const rawName = (row.values[nameHeader] || "").trim();
+      if (!rawName) continue;
+      const targetAmount = parseAmount(row.values[targetHeader] || "");
+      await upsertTarget(rawName, targetAmount);
+    }
+  };
+
+  if (config.expenseCategoriesSheetName?.trim()) {
+    await syncCategoryTargetsFromSheet(
+      config.expenseCategoriesSheetName.trim(),
+      config.expenseCategoriesDataStartRow,
+      config.expenseCategoryNameColumn,
+      config.expenseCategoryTargetColumn,
+      upsertExpenseCategoryTarget
+    );
+  }
+  if (config.incomeCategoriesSheetName?.trim()) {
+    await syncCategoryTargetsFromSheet(
+      config.incomeCategoriesSheetName.trim(),
+      config.incomeCategoriesDataStartRow,
+      config.incomeCategoryNameColumn,
+      config.incomeCategoryTargetColumn,
+      upsertIncomeCategoryTarget
+    );
   }
 };

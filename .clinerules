@@ -1,0 +1,37 @@
+# Cline — Permanent Development Rules for VibeBudget
+
+## Memory-First Development
+
+1. **Read memory-bank on every new chat start.**
+   - At the beginning of every new chat session, read ALL files in the `memory-bank/` folder first.
+   - Do NOT re-scan the entire project structure unless explicitly asked.
+   - All necessary context about the codebase is maintained in the memory bank.
+
+2. **Update memory-bank after every significant change.**
+   - After implementing features, refactoring code, or changing architecture:
+     - Update `activeContext.md` with what was done and what's next.
+     - Update `progress.md` to mark items complete or add new ones.
+     - Update `systemPatterns.md` if the architecture changed.
+     - Update `techContext.md` if dependencies or setup changed.
+   - Keep `projectBrief.md` and `productContext.md` stable — change only if the app's core purpose changes.
+
+3. **Always prioritize `activeContext.md` for current tasks.**
+   - The `activeContext.md` file describes the current task in progress.
+   - Use it to understand what you're working on right now.
+   - When a task is complete, update `activeContext.md` to reflect the new state.
+
+## Code Quality Rules
+
+4. **TypeScript strictness:** Use proper types from `src/types.ts`. Avoid `any` unless absolutely necessary (Firestore decode functions are a valid exception).
+
+5. **Firebase data operations:** Always use the `FirebaseContext` methods for CRUD. Never write directly to Firestore from components.
+
+6. **Import pipeline:** Always use `previewImport()` → review → `commitImport()` flow. Do not bypass deduplication.
+
+7. **Namespace isolation:** Never hardcode data namespaces. Always use `firebaseDataNamespace` from `src/firebase.ts`.
+
+8. **Environment variables:** All client env vars must use `VITE_` prefix. Server env vars must not have the prefix.
+
+9. **Testing:** Run `npm run test:unit` for utility changes, `npm run test:component` for component changes, `npm run test:api` for API changes. Run full `npm run verify` before significant deployments.
+
+10. **No secrets in code:** API keys, service account JSON, and tokens must only come from environment variables or .env files.

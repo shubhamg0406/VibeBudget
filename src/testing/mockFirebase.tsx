@@ -5,12 +5,20 @@ import type {
   ExpenseCategory,
   GoogleSheetsInspectionResult,
   GoogleSheetsSyncConfig,
+  ImportBatch,
+  ImportCommitSummary,
+  ImportPreviewOptions,
+  ImportSource,
   Income,
   IncomeCategory,
   Preferences,
   RecurringRule,
+  TellerCategoryMapping,
+  TellerConnection,
+  TellerCredentials,
   Transaction,
 } from "../types";
+import { previewImportBatch } from "../utils/importPipeline";
 
 export interface MockFirebaseSeed {
   user?: Partial<User> | null;
@@ -112,6 +120,21 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
   const googleSheetsConfig = seed?.googleSheetsConfig || null;
   const user = (seed?.user === undefined ? defaultUser : seed.user) as User | null;
   const noop = async () => {};
+  const previewImport = (
+    source: ImportSource,
+    payload: string | unknown[] | Record<string, unknown>,
+    options?: ImportPreviewOptions,
+  ): ImportBatch => previewImportBatch({
+    source,
+    payload,
+    options,
+    existing: {
+      transactions,
+      income,
+      expenseCategories,
+      incomeCategories,
+    },
+  });
 
   return {
     user,
@@ -145,7 +168,10 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     updateExpenseCategoryTarget: noop,
     updateIncomeCategoryTarget: noop,
     updateCategoryTarget: noop,
+    previewImport,
+    commitImport: async () => ({ imported: 0, skipped: 0, invalid: 0 } satisfies ImportCommitSummary),
     importData: noop,
+    upsertGoogleSheetRows: async () => ({ imported: 0, updated: 0, skipped: 0 }),
     wipeData: noop,
     backupToDrive: noop,
     syncToCloud: noop,
@@ -166,9 +192,43 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     driveConnected: false,
     driveSyncError: null,
     connectDriveFolder: noop,
+    previewBudgetFromDrive: async () => previewImport("manual_backup", JSON.stringify({
+      expenseCategories,
+      incomeCategories,
+      transactions,
+      income,
+    })),
     loadBudgetFromDrive: noop,
     disconnectDriveFolder: () => {},
     googleSheetsAccessToken: "mock-token",
+
+    // Plaid
+    plaidConnected: false,
+    plaidConnection: null,
+    plaidSyncing: false,
+    plaidError: null,
+    plaidCredentials: null,
+    plaidCategoryMappings: [],
+    connectPlaid: noop,
+    disconnectPlaid: noop,
+    syncPlaidTransactions: async () => ({ imported: 0, skipped: 0, invalid: 0 }),
+    fetchPlaidAccounts: async () => [],
+    setPlaidCredentials: noop,
+    setPlaidCategoryMappings: noop,
+
+    // Teller
+    tellerConnected: false,
+    tellerConnection: null,
+    tellerSyncing: false,
+    tellerError: null,
+    tellerCredentials: null,
+    tellerCategoryMappings: [],
+    connectTeller: noop,
+    disconnectTeller: noop,
+    syncTellerTransactions: async () => ({ imported: 0, skipped: 0, invalid: 0 }),
+    fetchTellerAccounts: async () => [],
+    setTellerCredentials: noop,
+    setTellerCategoryMappings: noop,
   };
 };
 
@@ -240,6 +300,94 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     },
     updateCategoryTarget: async (id, target) => {
       setExpenseCategories((current) => current.map((item) => (item.id === id ? { ...item, target_amount: target } : item)));
+    },
+    previewImport: (source, payload, options) => previewImportBatch({
+      source,
+      payload,
+      options,
+      existing: {
+        transactions,
+        income,
+        expenseCategories,
+        incomeCategories,
+      },
+    }),
+    commitImport: async (batch, options) => {
+      const allowedIds = options?.recordIds ? new Set(options.recordIds) : null;
+      const records = batch.records.filter((record) => {
+        if (allowedIds && !allowedIds.has(record.id)) return false;
+        if (record.status === "invalid") return false;
+        if (record.status === "duplicate" && !options?.includeDuplicates) return false;
+        return true;
+      });
+      setTransactions((current) => current.concat(records
+        .filter((record) => record.kind === "expense")
+        .map((record, index) => ({
+          id: `imported-expense-${current.length + index + 1}`,
+          date: record.date || "2026-04-01",
+          vendor: record.merchant || "Imported expense",
+          amount: record.amount || 0,
+          category_id: "expense-food",
+          category_name: record.category || "Misc.",
+          notes: record.notes || "",
+          import_source: record.source,
+          source_id: record.source_id,
+          import_batch_id: batch.id,
+        }))));
+      setIncome((current) => current.concat(records
+        .filter((record) => record.kind === "income")
+        .map((record, index) => ({
+          id: `imported-income-${current.length + index + 1}`,
+          date: record.date || "2026-04-01",
+          source: record.merchant || "Imported income",
+          amount: record.amount || 0,
+          category_id: "income-salary",
+          category: record.category || "Uncategorized",
+          notes: record.notes || "",
+          import_source: record.source,
+          source_id: record.source_id,
+          import_batch_id: batch.id,
+        }))));
+      return {
+        imported: records.length,
+        skipped: batch.records.length - records.length,
+        invalid: batch.summary.invalid,
+      };
+    },
+    upsertGoogleSheetRows: async (type, rows) => {
+      if (type === "expenses") {
+        setTransactions((current) => current.concat(rows.map((row, index) => {
+          const [date, vendor, amount, category, notes] = Array.isArray(row) ? row : [];
+          return {
+            id: `sheet-expense-${current.length + index + 1}`,
+            date: String(date || "2026-04-01"),
+            vendor: String(vendor || "Imported expense"),
+            amount: Number(amount) || 0,
+            category_id: "expense-food",
+            category_name: String(category || "Misc."),
+            notes: String(notes || ""),
+            import_source: "google_sheet" as const,
+            source_id: `mock-sheet-expense-${current.length + index + 1}`,
+          };
+        })));
+      }
+      if (type === "income") {
+        setIncome((current) => current.concat(rows.map((row, index) => {
+          const [date, source, amount, category, notes] = Array.isArray(row) ? row : [];
+          return {
+            id: `sheet-income-${current.length + index + 1}`,
+            date: String(date || "2026-04-01"),
+            source: String(source || "Imported income"),
+            amount: Number(amount) || 0,
+            category_id: "income-salary",
+            category: String(category || "Uncategorized"),
+            notes: String(notes || ""),
+            import_source: "google_sheet" as const,
+            source_id: `mock-sheet-income-${current.length + index + 1}`,
+          };
+        })));
+      }
+      return { imported: rows.length, updated: 0, skipped: 0 };
     },
     wipeData: async (type) => {
       if (type === "expenses") setTransactions([]);

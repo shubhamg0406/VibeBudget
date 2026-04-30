@@ -12,6 +12,7 @@ import {
   Search,
   Settings as SettingsIcon,
   SunMedium,
+  Upload,
   User,
   Wallet2
 } from "lucide-react";
@@ -19,6 +20,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Theme, View } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { BottomNav } from "./nav/BottomNav";
+import { DataHub } from "./DataHub";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -38,6 +40,7 @@ const PAGE_META: Record<View, { title: string; searchPlaceholder: string }> = {
 export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, theme, onToggleTheme }) => {
   const { user, signIn, logout } = useFirebase();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showDataHub, setShowDataHub] = useState(false);
 
   const navItems = useMemo(() => ([
     { id: "dashboard", icon: Home, label: "Home" },
@@ -138,6 +141,13 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
                   {isLight ? <Moon size={15} /> : <SunMedium size={15} />}
                   <span>{isLight ? "Dark" : "Light"}</span>
                 </button>
+                <button
+                  onClick={() => setShowDataHub(true)}
+                  className="relative text-fintech-muted transition-colors hover:text-fintech-accent"
+                  title="Data Hub — Import & Refresh"
+                >
+                  <Upload size={19} />
+                </button>
                 <button className="text-fintech-muted transition-colors hover:text-fintech-accent">
                   <CalendarDays size={19} />
                 </button>
@@ -231,6 +241,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
           </>
         )}
       </AnimatePresence>
+
+      {showDataHub && <DataHub onClose={() => setShowDataHub(false)} />}
     </div>
   );
 };

@@ -25,17 +25,32 @@ import {
   GoogleSheetsInspectionResult,
   GoogleSheetsSyncConfig,
   GoogleSheetsSyncDirection,
+  ImportBatch,
+  ImportCommitOptions,
+  ImportCommitSummary,
+  ImportPreviewOptions,
+  ImportSource,
   Income,
   IncomeCategory,
+  PlaidCategoryMapping,
+  PlaidConnection,
+  PlaidCredentials,
+  PlaidEnv,
   Preferences,
   RecurringRule,
+  TellerCategoryMapping,
+  TellerConnection,
+  TellerCredentials,
+  TellerEnv,
   Transaction,
   UpcomingRecurringInstance,
 } from "../types";
 import {
-  ensureSheetAndHeaders,
-  getRequiredHeadersForConfig,
+  getSheetColumnValuesUntilEmptyRun,
+  getSheetValues,
   inspectSpreadsheet,
+  parseA1CellReference,
+  parseSpreadsheetId,
   syncAppDataToSheet,
   syncSheetDataToApp,
 } from "../utils/googleSheetsSync";
@@ -50,19 +65,11 @@ import {
 import { signInWithGoogle } from "../lib/auth";
 import { computeUpcoming, materializeRule } from "../utils/recurring";
 import { getTodayStr } from "../utils/dateUtils";
-import {
-  dedupeExpensesByImportFingerprint,
-  dedupeIncomeByImportFingerprint,
-  getExpenseImportFingerprint,
-  getIncomeImportFingerprint,
-  getStableImportedExpenseId,
-  getStableImportedIncomeId,
-} from "../utils/importDedupe";
+import { previewImportBatch } from "../utils/importPipeline";
 
 const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
 const LOCAL_STATE_KEY = "vibebudgetLocalState";
 const TRANSACTIONS_CACHE_KEY_PREFIX = "vb_transactions_cache";
-const DEFAULT_SYNC_INTERVAL_SECONDS = 30;
 const DEFAULT_BUDGET_FILE_NAME = "budget.json";
 const FIRESTORE_BATCH_WRITE_LIMIT = 450;
 const LEGACY_CATEGORY_RENAMES: Record<string, string> = {
@@ -128,6 +135,24 @@ const normalizeExpenseCategoryName = (name: string) => {
   }
   return FALLBACK_EXPENSE_CATEGORY_NAME;
 };
+
+const normalizeSheetIdentityText = (value: unknown) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+const normalizeSheetIdentityAmount = (value: unknown) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number.parseFloat(String(value || "").replace(/[^-0-9.]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+const hashSheetIdentity = (value: string) => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
+const makeSheetRowIdentity = (...values: unknown[]) => values
+  .map((value) => (typeof value === "number" ? value.toFixed(2) : normalizeSheetIdentityText(value)))
+  .join("|");
 
 const dedupeCategoriesByName = <T extends { id: string; name: string; target_amount: number }>(categories: T[]) => {
   const categoriesByName = new Map<string, T>();
@@ -327,6 +352,10 @@ interface UserProfileDocument {
   preferences?: Preferences;
   googleSheetsConfig?: GoogleSheetsSyncConfig | null;
   driveConnection?: DriveConnection | null;
+  plaidConnection?: PlaidConnection | null;
+  plaidCategoryMappings?: PlaidCategoryMapping[];
+  tellerConnection?: TellerConnection | null;
+  tellerCategoryMappings?: TellerCategoryMapping[];
   lastSyncedAt?: string | null;
 }
 
@@ -362,7 +391,10 @@ export interface FirebaseContextType {
   updateExpenseCategoryTarget: (id: string, target: number) => Promise<void>;
   updateIncomeCategoryTarget: (id: string, target: number) => Promise<void>;
   updateCategoryTarget: (id: string, target: number) => Promise<void>;
+  previewImport: (source: ImportSource, payload: string | unknown[] | Record<string, unknown>, options?: ImportPreviewOptions) => ImportBatch;
+  commitImport: (batch: ImportBatch, options?: ImportCommitOptions, onProgress?: (current: number, total: number) => void) => Promise<ImportCommitSummary>;
   importData: (type: string, data: any[], isUpsert?: boolean, onProgress?: (current: number, total: number) => void) => Promise<void>;
+  upsertGoogleSheetRows: (type: "expenses" | "income", rows: any[]) => Promise<{ imported: number; updated: number; skipped: number }>;
   wipeData: (type: string) => Promise<void>;
   backupToDrive: () => Promise<void>;
   syncToCloud: () => Promise<void>;
@@ -373,7 +405,24 @@ export interface FirebaseContextType {
   googleSheetsError: string | null;
   connectGoogleSheets: () => Promise<void>;
   disconnectGoogleSheets: () => void;
-  inspectGoogleSheetsSpreadsheet: (spreadsheetUrl: string, expensesSheetName: string, incomeSheetName: string) => Promise<GoogleSheetsInspectionResult>;
+  inspectGoogleSheetsSpreadsheet: (
+    spreadsheetUrl: string,
+    expensesSheetName: string,
+    incomeSheetName: string,
+    expenseCategoriesSheetName?: string,
+    incomeCategoriesSheetName?: string
+  ) => Promise<GoogleSheetsInspectionResult>;
+  previewGoogleSheetColumn: (
+    spreadsheetUrl: string,
+    sheetName: string,
+    startCell: string,
+    endCell: string | null,
+    noEndRange: boolean
+  ) => Promise<{
+    headerValue: string;
+    samples: Array<{ cell: string; value: string }>;
+    last: { cell: string; value: string } | null;
+  }>;
   saveGoogleSheetsConfig: (config: Omit<GoogleSheetsSyncConfig, "connectedAt" | "connectedBy">) => Promise<void>;
   syncGoogleSheets: (direction?: GoogleSheetsSyncDirection) => Promise<void>;
   backingUp: boolean;
@@ -383,9 +432,38 @@ export interface FirebaseContextType {
   driveConnected: boolean;
   driveSyncError: string | null;
   connectDriveFolder: (folderRef?: string) => Promise<void>;
+  previewBudgetFromDrive: () => Promise<ImportBatch>;
   loadBudgetFromDrive: () => Promise<void>;
   disconnectDriveFolder: () => void;
   googleSheetsAccessToken: string | null;
+
+  // Plaid
+  plaidConnected: boolean;
+  plaidConnection: PlaidConnection | null;
+  plaidSyncing: boolean;
+  plaidError: string | null;
+  plaidCredentials: PlaidCredentials | null;
+  plaidCategoryMappings: PlaidCategoryMapping[];
+  connectPlaid: (publicToken: string) => Promise<void>;
+  disconnectPlaid: () => Promise<void>;
+  syncPlaidTransactions: () => Promise<ImportCommitSummary>;
+  fetchPlaidAccounts: () => Promise<import("../types").PlaidAccount[]>;
+  setPlaidCredentials: (creds: PlaidCredentials | null) => void;
+  setPlaidCategoryMappings: (mappings: PlaidCategoryMapping[]) => void;
+
+  // Teller
+  tellerConnected: boolean;
+  tellerConnection: TellerConnection | null;
+  tellerSyncing: boolean;
+  tellerError: string | null;
+  tellerCredentials: TellerCredentials | null;
+  tellerCategoryMappings: TellerCategoryMapping[];
+  connectTeller: (enrollment: import("../types").TellerEnrollment) => Promise<void>;
+  disconnectTeller: () => Promise<void>;
+  syncTellerTransactions: () => Promise<ImportCommitSummary>;
+  fetchTellerAccounts: () => Promise<import("../types").TellerAccount[]>;
+  setTellerCredentials: (creds: TellerCredentials | null) => void;
+  setTellerCategoryMappings: (mappings: TellerCategoryMapping[]) => void;
 }
 
 export const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -421,12 +499,36 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [googleSheetsConfig, setGoogleSheetsConfig] = useState<GoogleSheetsSyncConfig | null>(null);
   const [driveConnection, setDriveConnection] = useState<DriveConnection | null>(null);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
-  const [googleSheetsAccessToken, setGoogleSheetsAccessToken] = useState<string | null>(sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY));
+  const [googleSheetsAccessToken, setGoogleSheetsAccessToken] = useState<string | null>(
+    localStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY) || sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY)
+  );
   const [googleSheetsSyncing, setGoogleSheetsSyncing] = useState(false);
   const [googleSheetsError, setGoogleSheetsError] = useState<string | null>(null);
   const [driveSyncError, setDriveSyncError] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Plaid state
+  const [plaidConnection, setPlaidConnection] = useState<PlaidConnection | null>(null);
+  const [plaidSyncing, setPlaidSyncing] = useState(false);
+  const [plaidError, setPlaidError] = useState<string | null>(null);
+  const [plaidCredentials, setPlaidCredentials] = useState<PlaidCredentials | null>(() => {
+    const raw = sessionStorage.getItem("vibebudgetPlaidCredentials");
+    if (!raw) return null;
+    try { return JSON.parse(raw) as PlaidCredentials; } catch { return null; }
+  });
+  const [plaidCategoryMappings, setPlaidCategoryMappings] = useState<PlaidCategoryMapping[]>([]);
+
+  // Teller state
+  const [tellerConnection, setTellerConnection] = useState<TellerConnection | null>(null);
+  const [tellerSyncing, setTellerSyncing] = useState(false);
+  const [tellerError, setTellerError] = useState<string | null>(null);
+  const [tellerCredentials, setTellerCredentials] = useState<TellerCredentials | null>(() => {
+    const raw = sessionStorage.getItem("vibebudgetTellerCredentials");
+    if (!raw) return null;
+    try { return JSON.parse(raw) as TellerCredentials; } catch { return null; }
+  });
+  const [tellerCategoryMappings, setTellerCategoryMappings] = useState<TellerCategoryMapping[]>([]);
 
   const expenseCategoriesRef = useRef(expenseCategories);
   const incomeCategoriesRef = useRef(incomeCategories);
@@ -455,6 +557,21 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => { preferencesRef.current = preferences; }, [preferences]);
   useEffect(() => { sheetsConfigRef.current = googleSheetsConfig; }, [googleSheetsConfig]);
   useEffect(() => { driveConnectionRef.current = driveConnection; }, [driveConnection]);
+  useEffect(() => {
+    if (plaidCredentials) {
+      sessionStorage.setItem("vibebudgetPlaidCredentials", JSON.stringify(plaidCredentials));
+    } else {
+      sessionStorage.removeItem("vibebudgetPlaidCredentials");
+    }
+  }, [plaidCredentials]);
+
+  useEffect(() => {
+    if (tellerCredentials) {
+      sessionStorage.setItem("vibebudgetTellerCredentials", JSON.stringify(tellerCredentials));
+    } else {
+      sessionStorage.removeItem("vibebudgetTellerCredentials");
+    }
+  }, [tellerCredentials]);
 
   const resetBudgetState = useCallback(() => {
     const defaults = createEmptyLocalState();
@@ -471,6 +588,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAuthError(null);
     setGoogleSheetsError(null);
     setDriveSyncError(null);
+    setPlaidConnection(null);
+    setPlaidSyncing(false);
+    setPlaidError(null);
+    setPlaidCredentials(null);
+    setPlaidCategoryMappings([]);
   }, []);
 
   const formatAuthBootstrapError = (error: unknown) => {
@@ -516,11 +638,38 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const storeAccessToken = (token: string | null) => {
     setGoogleSheetsAccessToken(token);
     if (token) {
+      localStorage.setItem(GOOGLE_ACCESS_TOKEN_KEY, token);
       sessionStorage.setItem(GOOGLE_ACCESS_TOKEN_KEY, token);
     } else {
+      localStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
       sessionStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
     }
   };
+
+  useEffect(() => {
+    const payload: LocalStatePayload = {
+      expenseCategories,
+      incomeCategories,
+      transactions,
+      income,
+      recurringRules,
+      googleSheetsConfig,
+      driveConnection,
+      lastSyncedAt: lastSynced ? lastSynced.toISOString() : null,
+      preferences: normalizePreferences(preferences),
+    };
+    localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(payload));
+  }, [
+    driveConnection,
+    expenseCategories,
+    googleSheetsConfig,
+    income,
+    incomeCategories,
+    lastSynced,
+    preferences,
+    recurringRules,
+    transactions,
+  ]);
 
   const saveUserProfilePatch = useCallback(async (patch: Partial<UserProfileDocument>) => {
     if (!auth.currentUser) {
@@ -790,6 +939,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setPreferences(normalizePreferences(data?.preferences));
         setGoogleSheetsConfig(data?.googleSheetsConfig || null);
         setDriveConnection(data?.driveConnection || null);
+        setPlaidConnection(data?.plaidConnection || null);
+        setPlaidCategoryMappings(Array.isArray(data?.plaidCategoryMappings) ? data.plaidCategoryMappings : []);
+        setTellerConnection(data?.tellerConnection || null);
+        setTellerCategoryMappings(Array.isArray(data?.tellerCategoryMappings) ? data.tellerCategoryMappings : []);
         setLastSynced(data?.lastSyncedAt ? new Date(data.lastSyncedAt) : null);
         loadedState.profile = true;
         markLoaded();
@@ -931,6 +1084,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...currentConnection,
       budgetFileId: ensuredFile.fileId,
       budgetFileName: ensuredFile.fileName,
+      lastMirrorAt: getIsoNow(),
+      lastError: null,
     };
 
     await updateBudgetFileContent(token, ensuredFile.fileId, content);
@@ -961,7 +1116,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         nextIncome: parsed.income,
         nextPreferences: preferencesRef.current,
         nextSheetsConfig: parsed.googleSheetsConfig,
-        nextDriveConnection: currentConnection,
+        nextDriveConnection: {
+          ...currentConnection,
+          lastRestoreAt: getIsoNow(),
+          lastError: null,
+        },
         nextLastSynced: new Date(),
       });
       setDriveSyncError(null);
@@ -969,6 +1128,17 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       loadingDriveRef.current = false;
       setIsSyncing(false);
     }
+  };
+
+  const previewBudgetFromDrive = async () => {
+    const token = googleSheetsAccessToken;
+    const currentConnection = driveConnectionRef.current;
+    if (!token || !currentConnection?.budgetFileId) {
+      throw new Error("No Drive budget file connected yet.");
+    }
+
+    const raw = await readBudgetFileContent(token, currentConnection.budgetFileId);
+    return previewImport("manual_backup", raw, {});
   };
 
   const connectDriveFolder = async (folderRef?: string) => {
@@ -999,6 +1169,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         budgetFileId: budgetFile.fileId,
         budgetFileName: budgetFile.fileName,
         connectedAt: getIsoNow(),
+        lastMirrorAt: null,
+        lastRestoreAt: null,
+        lastError: null,
       };
 
       await saveUserProfilePatch({ driveConnection: nextConnection });
@@ -1032,7 +1205,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setBackingUp(true);
       void saveBudgetToDrive()
         .catch((error) => {
-          setDriveSyncError(error instanceof Error ? error.message : "Failed to save budget.json to Drive.");
+          const message = error instanceof Error ? error.message : "Failed to save budget.json to Drive.";
+          setDriveSyncError(message);
+          if (driveConnectionRef.current) {
+            void saveUserProfilePatch({
+              driveConnection: {
+                ...driveConnectionRef.current,
+                lastError: message,
+              },
+            });
+          }
         })
         .finally(() => {
           setBackingUp(false);
@@ -1049,13 +1231,95 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const inspectGoogleSheetsSpreadsheet = async (
     spreadsheetUrl: string,
     expensesSheetName: string,
-    incomeSheetName: string
+    incomeSheetName: string,
+    expenseCategoriesSheetName?: string,
+    incomeCategoriesSheetName?: string
   ) => {
     if (!googleSheetsAccessToken) {
       throw new Error("Sign in with Google first.");
     }
 
-    return inspectSpreadsheet(googleSheetsAccessToken, spreadsheetUrl, expensesSheetName, incomeSheetName);
+    return inspectSpreadsheet(
+      googleSheetsAccessToken,
+      spreadsheetUrl,
+      expensesSheetName,
+      incomeSheetName,
+      expenseCategoriesSheetName,
+      incomeCategoriesSheetName
+    );
+  };
+
+  const previewGoogleSheetColumn = async (
+    spreadsheetUrl: string,
+    sheetName: string,
+    startCell: string,
+    endCell: string | null,
+    noEndRange: boolean
+  ) => {
+    if (!googleSheetsAccessToken) {
+      throw new Error("Sign in with Google first.");
+    }
+    const spreadsheetId = parseSpreadsheetId(spreadsheetUrl);
+    if (!spreadsheetId) {
+      throw new Error("Invalid spreadsheet URL.");
+    }
+    const start = parseA1CellReference(startCell);
+    if (!start) {
+      throw new Error("Invalid start cell.");
+    }
+
+    const toColumnLabel = (columnIndex: number) => {
+      let n = columnIndex + 1;
+      let result = "";
+      while (n > 0) {
+        const rem = (n - 1) % 26;
+        result = String.fromCharCode(65 + rem) + result;
+        n = Math.floor((n - 1) / 26);
+      }
+      return result;
+    };
+    const col = toColumnLabel(start.columnIndex);
+
+    if (noEndRange) {
+      const headerRange = `'${sheetName.replace(/'/g, "''")}'!${start.cellRef}:${start.cellRef}`;
+      const headerResponse = await getSheetValues(googleSheetsAccessToken, spreadsheetId, headerRange);
+      const headerValue = headerResponse.values?.[0]?.[0] || "";
+      const values = await getSheetColumnValuesUntilEmptyRun(
+        googleSheetsAccessToken,
+        spreadsheetId,
+        sheetName,
+        start.columnIndex,
+        start.rowIndex + 1,
+      );
+      const samples = values.slice(0, 3).map((value, index) => ({
+        cell: `${col}${start.rowIndex + 1 + index}`,
+        value,
+      }));
+      const lastIndex = values.length - 1;
+      const last = lastIndex >= 0
+        ? { cell: `${col}${start.rowIndex + 1 + lastIndex}`, value: values[lastIndex] || "" }
+        : null;
+      return { headerValue, samples, last };
+    }
+
+    const end = endCell ? parseA1CellReference(endCell) : null;
+    if (!end) {
+      return { headerValue: "", samples: [], last: null };
+    }
+    const range = `'${sheetName.replace(/'/g, "''")}'!${start.cellRef}:${end.cellRef}`;
+    const response = await getSheetValues(googleSheetsAccessToken, spreadsheetId, range);
+    const rows = response.values || [];
+    const values = rows.map((row) => row[0] || "");
+    const headerValue = values[0] || "";
+    const dataValues = values.slice(1).filter((value) => value.trim().length > 0);
+    const samples = dataValues.slice(0, 3).map((value, index) => ({
+      cell: `${col}${start.rowIndex + 1 + index}`,
+      value,
+    }));
+    const last = dataValues.length > 0
+      ? { cell: `${col}${start.rowIndex + dataValues.length}`, value: dataValues[dataValues.length - 1] || "" }
+      : null;
+    return { headerValue, samples, last };
   };
 
   const connectGoogleSheets = async () => {
@@ -1063,6 +1327,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const disconnectGoogleSheets = () => {
+    storeAccessToken(null);
     setGoogleSheetsError(null);
     void saveUserProfilePatch({ googleSheetsConfig: null });
   };
@@ -1081,19 +1346,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       lastPullAt: sheetsConfigRef.current?.lastPullAt || null,
       lastPushAt: sheetsConfigRef.current?.lastPushAt || null,
     };
-
-    await ensureSheetAndHeaders(
-      googleSheetsAccessToken,
-      payload.spreadsheetId,
-      payload.expensesSheetName,
-      getRequiredHeadersForConfig(payload, "expenses")
-    );
-    await ensureSheetAndHeaders(
-      googleSheetsAccessToken,
-      payload.spreadsheetId,
-      payload.incomeSheetName,
-      getRequiredHeadersForConfig(payload, "income")
-    );
 
     await saveUserProfilePatch({ googleSheetsConfig: payload });
     setGoogleSheetsError(null);
@@ -1153,6 +1405,28 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await setDoc(doc(getIncomeCollection(auth.currentUser.uid), finalId), { id: finalId, ...data });
   };
 
+  const upsertExpenseCategoryTargetByName = async (name: string, targetAmount: number) => {
+    if (!auth.currentUser) throw new Error("Sign in with Google first.");
+    const categoryId = await ensureExpenseCategoryId(name);
+    const existing = expenseCategoriesRef.current.find((item) => item.id === categoryId);
+    if (!existing) return;
+    await setDoc(doc(getExpenseCategoriesCollection(auth.currentUser.uid), categoryId), {
+      ...existing,
+      target_amount: targetAmount,
+    });
+  };
+
+  const upsertIncomeCategoryTargetByName = async (name: string, targetAmount: number) => {
+    if (!auth.currentUser) throw new Error("Sign in with Google first.");
+    const categoryId = await ensureIncomeCategoryId(name);
+    const existing = incomeCategoriesRef.current.find((item) => item.id === categoryId);
+    if (!existing) return;
+    await setDoc(doc(getIncomeCategoriesCollection(auth.currentUser.uid), categoryId), {
+      ...existing,
+      target_amount: targetAmount,
+    });
+  };
+
   const syncGoogleSheets = async (direction: GoogleSheetsSyncDirection = "both") => {
     if (!googleSheetsAccessToken || !sheetsConfigRef.current) {
       throw new Error("Configure Google Sheets first.");
@@ -1171,6 +1445,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           transactions: transactionsRef.current,
           income: incomeRef.current,
           ensureCategoryId: ensureExpenseCategoryId,
+          ensureIncomeCategoryName: ensureIncomeCategoryId,
+          upsertExpenseCategoryTarget: upsertExpenseCategoryTargetByName,
+          upsertIncomeCategoryTarget: upsertIncomeCategoryTargetByName,
           upsertTransaction: upsertTransactionFromSync,
           upsertIncome: upsertIncomeFromSync,
         });
@@ -1223,14 +1500,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   useEffect(() => {
-    if (!googleSheetsAccessToken || !googleSheetsConfig?.autoSync) return;
-
-    const interval = Math.max(15, googleSheetsConfig.syncIntervalSeconds || DEFAULT_SYNC_INTERVAL_SECONDS) * 1000;
-    const timer = window.setInterval(() => {
-      void syncGoogleSheets("push").catch(() => undefined);
-    }, interval);
-
-    return () => window.clearInterval(timer);
+    // Sheets is now an explicit import/export workspace. Keep the saved cadence
+    // for legacy configs, but do not run background two-way sync.
   }, [googleSheetsAccessToken, googleSheetsConfig]);
 
   const signIn = async () => {
@@ -1505,7 +1776,27 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateCategoryTarget = updateExpenseCategoryTarget;
 
-  const importData = async (type: string, rows: any[], isUpsert = false, onProgress?: (current: number, total: number) => void) => {
+  const previewImport = (
+    source: ImportSource,
+    payload: string | unknown[] | Record<string, unknown>,
+    options?: ImportPreviewOptions
+  ) => previewImportBatch({
+    source,
+    payload,
+    options,
+    existing: {
+      transactions: transactionsRef.current,
+      income: incomeRef.current,
+      expenseCategories: expenseCategoriesRef.current,
+      incomeCategories: incomeCategoriesRef.current,
+    },
+  });
+
+  const commitImport = async (
+    batch: ImportBatch,
+    options: ImportCommitOptions = {},
+    onProgress?: (current: number, total: number) => void,
+  ): Promise<ImportCommitSummary> => {
     if (!auth.currentUser) {
       throw new Error("Sign in with Google first.");
     }
@@ -1514,8 +1805,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let nextIncomeCategories = migrateIncomeCategories([...incomeCategoriesRef.current]);
     let nextTransactions = [...transactionsRef.current];
     let nextIncome = [...incomeRef.current];
-    const importedExpenseFingerprints = new Set<string>();
-    const importedIncomeFingerprints = new Set<string>();
+    const allowedIds = options.recordIds ? new Set(options.recordIds) : null;
+    const records = batch.records.filter((record) => {
+      if (allowedIds && !allowedIds.has(record.id)) return false;
+      if (record.status === "invalid") return false;
+      if (record.status === "duplicate" && !options.includeDuplicates) return false;
+      return true;
+    });
+    let skipped = batch.records.length - records.length;
 
     const getOrCreateExpenseCategoryId = (name: string) => {
       const normalizedName = normalizeExpenseCategoryName(name);
@@ -1535,53 +1832,42 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return created.id;
     };
 
-    rows.forEach((row, index) => {
-      if (type === "targets" || type === "expenseCategories") {
-        const [name, target] = row;
-        const id = getOrCreateExpenseCategoryId(name);
-        nextExpenseCategories = nextExpenseCategories.map((item) => item.id === id ? { ...item, target_amount: target } : item);
+    records.forEach((record, index) => {
+      if (record.kind === "expenseCategory") {
+        const id = getOrCreateExpenseCategoryId(record.merchant || "");
+        nextExpenseCategories = nextExpenseCategories.map((item) => item.id === id ? { ...item, target_amount: record.amount || 0 } : item);
       }
 
-      if (type === "incomeCategories") {
-        const [name, target] = row;
-        const id = getOrCreateIncomeCategoryId(name);
-        nextIncomeCategories = nextIncomeCategories.map((item) => item.id === id ? { ...item, target_amount: target } : item);
+      if (record.kind === "incomeCategory") {
+        const id = getOrCreateIncomeCategoryId(record.merchant || "");
+        nextIncomeCategories = nextIncomeCategories.map((item) => item.id === id ? { ...item, target_amount: record.amount || 0 } : item);
       }
 
-      if (type === "expenses") {
-        const [date, vendor, amount, categoryName, notes] = row;
-        const normalizedCategoryName = normalizeExpenseCategoryName(categoryName);
+      if (record.kind === "expense") {
+        const normalizedCategoryName = normalizeExpenseCategoryName(record.category || FALLBACK_EXPENSE_CATEGORY_NAME);
         const categoryId = getOrCreateExpenseCategoryId(normalizedCategoryName);
-        const fingerprint = getExpenseImportFingerprint({
-          date,
-          vendor,
-          amount,
-          category_name: normalizedCategoryName,
-          notes,
-        });
-        importedExpenseFingerprints.add(fingerprint);
-        const existingIndex = isUpsert
-          ? nextTransactions.findIndex((item) => getExpenseImportFingerprint(item) === fingerprint)
+        const existingIndex = record.source_id
+          ? nextTransactions.findIndex((item) => item.import_source === record.source && item.source_id === record.source_id)
           : -1;
+        const now = getIsoNow();
         const payload: Transaction = {
           id: existingIndex >= 0
             ? nextTransactions[existingIndex].id
-            : isUpsert
-              ? getStableImportedExpenseId({
-                  date,
-                  vendor,
-                  amount,
-                  category_name: normalizedCategoryName,
-                  notes,
-                })
+            : record.source_id
+              ? `${record.source}-expense-${record.source_id}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120)
               : crypto.randomUUID(),
-          date,
-          vendor,
-          amount,
+          date: record.date || getTodayStr(),
+          vendor: record.merchant || "Imported expense",
+          amount: record.amount || 0,
           category_id: categoryId,
           category_name: normalizedCategoryName,
-          notes,
-          updated_at: getIsoNow(),
+          notes: record.notes || "",
+          import_source: record.source,
+          source_id: record.source_id,
+          import_batch_id: batch.id,
+          raw_description: record.raw_description,
+          status: "posted",
+          updated_at: now,
         };
         if (existingIndex >= 0) {
           nextTransactions[existingIndex] = payload;
@@ -1590,40 +1876,31 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       }
 
-      if (type === "income") {
-        const [date, source, amount, category, notes] = row;
-        const normalizedCategoryName = normalizeCategoryName(category);
+      if (record.kind === "income") {
+        const normalizedCategoryName = normalizeCategoryName(record.category || "Uncategorized");
         const categoryId = getOrCreateIncomeCategoryId(normalizedCategoryName);
-        const fingerprint = getIncomeImportFingerprint({
-          date,
-          source,
-          amount,
-          category: normalizedCategoryName,
-          notes,
-        });
-        importedIncomeFingerprints.add(fingerprint);
-        const existingIndex = isUpsert
-          ? nextIncome.findIndex((item) => getIncomeImportFingerprint(item) === fingerprint)
+        const existingIndex = record.source_id
+          ? nextIncome.findIndex((item) => item.import_source === record.source && item.source_id === record.source_id)
           : -1;
+        const now = getIsoNow();
         const payload: Income = {
           id: existingIndex >= 0
             ? nextIncome[existingIndex].id
-            : isUpsert
-              ? getStableImportedIncomeId({
-                  date,
-                  source,
-                  amount,
-                  category: normalizedCategoryName,
-                  notes,
-                })
+            : record.source_id
+              ? `${record.source}-income-${record.source_id}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120)
               : crypto.randomUUID(),
-          date,
-          source,
-          amount,
+          date: record.date || getTodayStr(),
+          source: record.merchant || "Imported income",
+          amount: record.amount || 0,
           category_id: existingIndex >= 0 ? nextIncome[existingIndex].category_id || categoryId : categoryId,
           category: normalizedCategoryName,
-          notes,
-          updated_at: getIsoNow(),
+          notes: record.notes || "",
+          import_source: record.source,
+          source_id: record.source_id,
+          import_batch_id: batch.id,
+          raw_description: record.raw_description,
+          status: "posted",
+          updated_at: now,
         };
         if (existingIndex >= 0) {
           nextIncome[existingIndex] = payload;
@@ -1632,17 +1909,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
       }
 
-      onProgress?.(index + 1, rows.length);
+      onProgress?.(index + 1, records.length);
     });
-
-    if (isUpsert) {
-      if (type === "expenses") {
-        nextTransactions = dedupeExpensesByImportFingerprint(nextTransactions, importedExpenseFingerprints);
-      }
-      if (type === "income") {
-        nextIncome = dedupeIncomeByImportFingerprint(nextIncome, importedIncomeFingerprints);
-      }
-    }
 
     pendingImportRef.current = {
       expenseCategories: nextExpenseCategories.length,
@@ -1679,6 +1947,196 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }).finally(() => {
       pendingImportRef.current = null;
     });
+
+    return {
+      imported: records.length,
+      skipped,
+      invalid: batch.summary.invalid,
+    };
+  };
+
+  const importData = async (type: string, rows: any[], isUpsert = false, onProgress?: (current: number, total: number) => void) => {
+    const source: ImportSource = "csv";
+    const previewType = type === "targets" ? "expenseCategories" : type as ImportPreviewOptions["type"];
+    const batch = previewImport(source, rows, { type: previewType, hasHeader: false });
+    await commitImport(batch, { includeDuplicates: !isUpsert }, onProgress);
+  };
+
+  const upsertGoogleSheetRows = async (
+    type: "expenses" | "income",
+    rows: any[],
+  ): Promise<{ imported: number; updated: number; skipped: number }> => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    let nextExpenseCategories = migrateExpenseCategories([...expenseCategoriesRef.current]);
+    let nextIncomeCategories = migrateIncomeCategories([...incomeCategoriesRef.current]);
+    let nextTransactions = [...transactionsRef.current];
+    let nextIncome = [...incomeRef.current];
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+    const now = getIsoNow();
+
+    const getOrCreateExpenseCategoryId = (name: string) => {
+      const normalizedName = normalizeExpenseCategoryName(name || FALLBACK_EXPENSE_CATEGORY_NAME);
+      const existing = nextExpenseCategories.find((item) => normalizeCategoryName(item.name) === normalizedName);
+      if (existing) return existing.id;
+      const created: ExpenseCategory = { id: crypto.randomUUID(), name: normalizedName, target_amount: 0 };
+      nextExpenseCategories = [...nextExpenseCategories, created].sort((a, b) => a.name.localeCompare(b.name));
+      return created.id;
+    };
+
+    const getOrCreateIncomeCategoryId = (name: string) => {
+      const normalizedName = normalizeCategoryName(name || "Uncategorized") || "Uncategorized";
+      const existing = nextIncomeCategories.find((item) => normalizeCategoryName(item.name) === normalizedName);
+      if (existing) return existing.id;
+      const created: IncomeCategory = { id: crypto.randomUUID(), name: normalizedName, target_amount: 0 };
+      nextIncomeCategories = [...nextIncomeCategories, created].sort((a, b) => a.name.localeCompare(b.name));
+      return created.id;
+    };
+
+    if (type === "expenses") {
+      const existingByIdentity = new Map<string, number>();
+      nextTransactions.forEach((item, index) => {
+        existingByIdentity.set(makeSheetRowIdentity(item.date, item.vendor, item.amount, item.category_name, item.notes || ""), index);
+      });
+
+      rows.forEach((row) => {
+        const values = Array.isArray(row) ? row : [];
+        const [dateRaw, vendorRaw, amountRaw, categoryRaw, notesRaw] = values;
+        const date = String(dateRaw || "").trim() || getTodayStr();
+        const vendor = String(vendorRaw || "").trim();
+        const amount = normalizeSheetIdentityAmount(amountRaw);
+        const categoryName = normalizeExpenseCategoryName(String(categoryRaw || FALLBACK_EXPENSE_CATEGORY_NAME));
+        const notes = String(notesRaw || "").trim();
+
+        if (!date || !vendor || amount <= 0) {
+          skipped += 1;
+          return;
+        }
+
+        const identity = makeSheetRowIdentity(date, vendor, amount, categoryName, notes);
+        const existingIndex = existingByIdentity.get(identity);
+        const categoryId = getOrCreateExpenseCategoryId(categoryName);
+        const payload: Transaction = {
+          id: existingIndex !== undefined
+            ? nextTransactions[existingIndex].id
+            : `google_sheet-expense-${hashSheetIdentity(identity)}`,
+          date,
+          vendor,
+          amount,
+          category_id: existingIndex !== undefined ? nextTransactions[existingIndex].category_id || categoryId : categoryId,
+          category_name: categoryName,
+          notes,
+          import_source: "google_sheet",
+          source_id: `sheet-expense-${hashSheetIdentity(identity)}`,
+          import_batch_id: `sheet-refresh-${now}`,
+          raw_description: [date, vendor, amount, categoryName, notes].join(", "),
+          status: "posted",
+          updated_at: now,
+        };
+
+        if (existingIndex !== undefined) {
+          nextTransactions[existingIndex] = { ...nextTransactions[existingIndex], ...payload };
+          updated += 1;
+        } else {
+          nextTransactions.push(payload);
+          existingByIdentity.set(identity, nextTransactions.length - 1);
+          imported += 1;
+        }
+      });
+    }
+
+    if (type === "income") {
+      const existingByIdentity = new Map<string, number>();
+      nextIncome.forEach((item, index) => {
+        existingByIdentity.set(makeSheetRowIdentity(item.date, item.source, item.amount, item.category, item.notes || ""), index);
+      });
+
+      rows.forEach((row) => {
+        const values = Array.isArray(row) ? row : [];
+        const [dateRaw, sourceRaw, amountRaw, categoryRaw, notesRaw] = values;
+        const date = String(dateRaw || "").trim() || getTodayStr();
+        const source = String(sourceRaw || "").trim();
+        const amount = normalizeSheetIdentityAmount(amountRaw);
+        const categoryName = normalizeCategoryName(String(categoryRaw || "Uncategorized")) || "Uncategorized";
+        const notes = String(notesRaw || "").trim();
+
+        if (!date || !source || amount <= 0) {
+          skipped += 1;
+          return;
+        }
+
+        const identity = makeSheetRowIdentity(date, source, amount, categoryName, notes);
+        const existingIndex = existingByIdentity.get(identity);
+        const categoryId = getOrCreateIncomeCategoryId(categoryName);
+        const payload: Income = {
+          id: existingIndex !== undefined
+            ? nextIncome[existingIndex].id
+            : `google_sheet-income-${hashSheetIdentity(identity)}`,
+          date,
+          source,
+          amount,
+          category_id: existingIndex !== undefined ? nextIncome[existingIndex].category_id || categoryId : categoryId,
+          category: categoryName,
+          notes,
+          import_source: "google_sheet",
+          source_id: `sheet-income-${hashSheetIdentity(identity)}`,
+          import_batch_id: `sheet-refresh-${now}`,
+          raw_description: [date, source, amount, categoryName, notes].join(", "),
+          status: "posted",
+          updated_at: now,
+        };
+
+        if (existingIndex !== undefined) {
+          nextIncome[existingIndex] = { ...nextIncome[existingIndex], ...payload };
+          updated += 1;
+        } else {
+          nextIncome.push(payload);
+          existingByIdentity.set(identity, nextIncome.length - 1);
+          imported += 1;
+        }
+      });
+    }
+
+    pendingImportRef.current = {
+      expenseCategories: nextExpenseCategories.length,
+      incomeCategories: nextIncomeCategories.length,
+      transactions: nextTransactions.length,
+      income: nextIncome.length,
+    };
+
+    const persistImport = replaceBudgetDataInFirestore({
+      nextExpenseCategories,
+      nextIncomeCategories,
+      nextTransactions,
+      nextIncome,
+      nextPreferences: preferencesRef.current,
+      nextSheetsConfig: sheetsConfigRef.current,
+      nextDriveConnection: driveConnectionRef.current,
+      nextLastSynced: lastSynced,
+    });
+
+    setExpenseCategories(nextExpenseCategories);
+    setIncomeCategories(nextIncomeCategories);
+    setTransactions(nextTransactions);
+    setIncome(nextIncome);
+    expenseCategoriesRef.current = nextExpenseCategories;
+    incomeCategoriesRef.current = nextIncomeCategories;
+    transactionsRef.current = nextTransactions;
+    incomeRef.current = nextIncome;
+    saveTransactionsCache(auth.currentUser.uid, nextTransactions);
+
+    void persistImport.catch((error) => {
+      console.error("Failed to persist Google Sheet refresh", error);
+      setAuthError(error instanceof Error ? error.message : "Failed to persist Google Sheet refresh.");
+    }).finally(() => {
+      pendingImportRef.current = null;
+    });
+
+    return { imported, updated, skipped };
   };
 
   const wipeData = async (type: string) => {
@@ -1741,6 +2199,399 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await loadBudgetFromDrive();
   };
 
+  // ─── Plaid Methods ──────────────────────────────────────────────────
+
+  const plaidConnected = Boolean(plaidConnection);
+
+  const plaidApiFetch = useCallback(async <T,>(action: string, body: Record<string, unknown>): Promise<T> => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    // Try the Express server first, fall back to Vercel API route
+    const serverUrl = process.env.VITE_PLAID_SERVER_URL || "";
+    const uid = auth.currentUser.uid;
+
+    if (serverUrl) {
+      const response = await fetch(`${serverUrl}/api/plaid/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, uid }),
+      });
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error((errorBody as any).error || `Plaid ${action} failed (${response.status})`);
+      }
+      return response.json() as Promise<T>;
+    }
+
+    // Fallback to Vercel API route
+    const response = await fetch("/api/plaid", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...body, uid }),
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error((errorBody as any).error || `Plaid ${action} failed (${response.status})`);
+    }
+    return response.json() as Promise<T>;
+  }, []);
+
+  const connectPlaid = useCallback(async (publicToken: string) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    if (!plaidCredentials) {
+      throw new Error("Configure your Plaid API credentials in Settings first.");
+    }
+
+    setPlaidSyncing(true);
+    setPlaidError(null);
+
+    try {
+      const result = await plaidApiFetch<{
+        encryptedAccessToken: string;
+        itemId: string;
+        institutionName?: string;
+        institutionId?: string;
+      }>("exchange", {
+        publicToken,
+        clientId: plaidCredentials.clientId,
+        secret: plaidCredentials.secret,
+        environment: plaidCredentials.environment,
+      });
+
+      const connection: PlaidConnection = {
+        itemId: result.itemId,
+        institutionName: result.institutionName || "Unknown Bank",
+        institutionId: result.institutionId,
+        accounts: [],
+        encryptedAccessToken: result.encryptedAccessToken,
+        connectedAt: getIsoNow(),
+        lastSyncAt: undefined,
+        syncCursor: undefined,
+      };
+
+      await saveUserProfilePatch({ plaidConnection: connection });
+      setPlaidConnection(connection);
+      setPlaidError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to connect Plaid.";
+      setPlaidError(message);
+      throw error;
+    } finally {
+      setPlaidSyncing(false);
+    }
+  }, [plaidCredentials, plaidApiFetch, saveUserProfilePatch]);
+
+  const disconnectPlaid = useCallback(async () => {
+    await saveUserProfilePatch({ plaidConnection: null, plaidCategoryMappings: [] });
+    setPlaidConnection(null);
+    setPlaidCategoryMappings([]);
+    setPlaidError(null);
+  }, [saveUserProfilePatch]);
+
+  const syncPlaidTransactions = useCallback(async (): Promise<ImportCommitSummary> => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    if (!plaidCredentials || !plaidConnection) {
+      throw new Error("Connect a bank account first.");
+    }
+
+    setPlaidSyncing(true);
+    setPlaidError(null);
+
+    try {
+      const result = await plaidApiFetch<{
+        added: import("../types").PlaidTransaction[];
+        nextCursor: string;
+        hasMore: boolean;
+      }>("transactions", {
+        encryptedAccessToken: plaidConnection.encryptedAccessToken,
+        clientId: plaidCredentials.clientId,
+        secret: plaidCredentials.secret,
+        environment: plaidCredentials.environment,
+        cursor: plaidConnection.syncCursor,
+      });
+
+      if (result.added.length === 0) {
+        // Update cursor even if no new transactions
+        const updatedConnection: PlaidConnection = {
+          ...plaidConnection,
+          syncCursor: result.nextCursor,
+          lastSyncAt: getIsoNow(),
+        };
+        await saveUserProfilePatch({ plaidConnection: updatedConnection });
+        setPlaidConnection(updatedConnection);
+        return { imported: 0, skipped: 0, invalid: 0 };
+      }
+
+      // Map Plaid transactions to import records
+      const { mapPlaidCategory } = await import("../utils/plaidCategoryMap");
+      const importRows = result.added.map((tx) => {
+        const categoryName = mapPlaidCategory(tx.category, plaidCategoryMappings);
+        return [
+          tx.date,
+          tx.merchantName || tx.name,
+          String(tx.amount),
+          categoryName,
+          `Plaid: ${tx.name}`,
+        ];
+      });
+
+      // Use the existing import pipeline to commit
+      const batch = previewImportBatch({
+        source: "plaid",
+        payload: importRows,
+        options: { type: "expenses", hasHeader: false },
+        existing: {
+          transactions: transactionsRef.current,
+          income: incomeRef.current,
+          expenseCategories: expenseCategoriesRef.current,
+          incomeCategories: incomeCategoriesRef.current,
+        },
+      });
+
+      const summary = await commitImport(batch, { includeDuplicates: false });
+
+      // Update cursor and sync time
+      const updatedConnection: PlaidConnection = {
+        ...plaidConnection,
+        syncCursor: result.nextCursor,
+        lastSyncAt: getIsoNow(),
+      };
+      await saveUserProfilePatch({ plaidConnection: updatedConnection });
+      setPlaidConnection(updatedConnection);
+
+      return summary;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to sync Plaid transactions.";
+      setPlaidError(message);
+      throw error;
+    } finally {
+      setPlaidSyncing(false);
+    }
+  }, [plaidCredentials, plaidConnection, plaidCategoryMappings, plaidApiFetch, saveUserProfilePatch, commitImport]);
+
+  const fetchPlaidAccounts = useCallback(async (): Promise<import("../types").PlaidAccount[]> => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    if (!plaidCredentials || !plaidConnection) {
+      throw new Error("Connect a bank account first.");
+    }
+
+    const result = await plaidApiFetch<{ accounts: import("../types").PlaidAccount[] }>("accounts", {
+      encryptedAccessToken: plaidConnection.encryptedAccessToken,
+      clientId: plaidCredentials.clientId,
+      secret: plaidCredentials.secret,
+      environment: plaidCredentials.environment,
+    });
+
+    return result.accounts;
+  }, [plaidCredentials, plaidConnection, plaidApiFetch]);
+
+  // ─── Teller Methods ─────────────────────────────────────────────────
+
+  const tellerConnected = Boolean(tellerConnection);
+
+  const tellerApiFetch = useCallback(async <T,>(action: string, body: Record<string, unknown>): Promise<T> => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    // Try the Express server first, fall back to Vercel API route
+    const serverUrl = process.env.VITE_PLAID_SERVER_URL || "";
+    const uid = auth.currentUser.uid;
+
+    if (serverUrl) {
+      const response = await fetch(`${serverUrl}/api/teller`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...body, uid }),
+      });
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error((errorBody as any).error || `Teller ${action} failed (${response.status})`);
+      }
+      return response.json() as Promise<T>;
+    }
+
+    // Fallback to Vercel API route
+    const response = await fetch("/api/teller", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...body, uid }),
+    });
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      throw new Error((errorBody as any).error || `Teller ${action} failed (${response.status})`);
+    }
+    return response.json() as Promise<T>;
+  }, []);
+
+  const connectTeller = useCallback(async (enrollment: import("../types").TellerEnrollment) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    if (!tellerCredentials) {
+      throw new Error("Configure your Teller application credentials in Settings first.");
+    }
+
+    setTellerSyncing(true);
+    setTellerError(null);
+
+    try {
+      // Fetch accounts using the access token from the enrollment
+      const result = await tellerApiFetch<{ accounts: import("../types").TellerAccount[] }>("accounts", {
+        accessToken: enrollment.accessToken,
+        certificate: tellerCredentials.certificate,
+        privateKey: tellerCredentials.privateKey,
+        environment: tellerCredentials.environment,
+      });
+
+      const connection: TellerConnection = {
+        enrollmentId: enrollment.enrollment.id,
+        accessToken: enrollment.accessToken,
+        institutionName: enrollment.enrollment.institution.name,
+        institutionId: enrollment.enrollment.institution.id,
+        userId: enrollment.user.id,
+        accounts: result.accounts,
+        connectedAt: getIsoNow(),
+        lastSyncAt: undefined,
+      };
+
+      await saveUserProfilePatch({ tellerConnection: connection });
+      setTellerConnection(connection);
+      setTellerError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to connect Teller.";
+      setTellerError(message);
+      throw error;
+    } finally {
+      setTellerSyncing(false);
+    }
+  }, [tellerCredentials, tellerApiFetch, saveUserProfilePatch]);
+
+  const disconnectTeller = useCallback(async () => {
+    await saveUserProfilePatch({ tellerConnection: null, tellerCategoryMappings: [] });
+    setTellerConnection(null);
+    setTellerCategoryMappings([]);
+    setTellerError(null);
+  }, [saveUserProfilePatch]);
+
+  const syncTellerTransactions = useCallback(async (): Promise<ImportCommitSummary> => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    if (!tellerCredentials || !tellerConnection) {
+      throw new Error("Connect a bank account first.");
+    }
+
+    setTellerSyncing(true);
+    setTellerError(null);
+
+    try {
+      // Fetch transactions from all accounts
+      const result = await tellerApiFetch<{ transactions: import("../types").TellerTransaction[] }>("sync-all", {
+        accessToken: tellerConnection.accessToken,
+        certificate: tellerCredentials.certificate,
+        privateKey: tellerCredentials.privateKey,
+        environment: tellerCredentials.environment,
+        accounts: tellerConnection.accounts,
+      });
+
+      if (result.transactions.length === 0) {
+        const updatedConnection: TellerConnection = {
+          ...tellerConnection,
+          lastSyncAt: getIsoNow(),
+        };
+        await saveUserProfilePatch({ tellerConnection: updatedConnection });
+        setTellerConnection(updatedConnection);
+        return { imported: 0, skipped: 0, invalid: 0 };
+      }
+
+      // Map Teller transactions to import records
+      const { mapTellerCategory } = await import("../utils/tellerCategoryMap");
+      const importRows = result.transactions
+        .filter((tx) => tx.type === "withdrawal") // Only expenses
+        .map((tx) => {
+          const categoryName = mapTellerCategory(
+            { description: tx.description, details: tx.details },
+            tellerCategoryMappings,
+          );
+          return [
+            tx.date,
+            tx.details?.merchant || tx.description,
+            String(tx.amount),
+            categoryName,
+            `Teller: ${tx.description}`,
+          ];
+        });
+
+      if (importRows.length === 0) {
+        const updatedConnection: TellerConnection = {
+          ...tellerConnection,
+          lastSyncAt: getIsoNow(),
+        };
+        await saveUserProfilePatch({ tellerConnection: updatedConnection });
+        setTellerConnection(updatedConnection);
+        return { imported: 0, skipped: 0, invalid: 0 };
+      }
+
+      // Use the existing import pipeline to commit
+      const batch = previewImportBatch({
+        source: "bank_feed",
+        payload: importRows,
+        options: { type: "expenses", hasHeader: false },
+        existing: {
+          transactions: transactionsRef.current,
+          income: incomeRef.current,
+          expenseCategories: expenseCategoriesRef.current,
+          incomeCategories: incomeCategoriesRef.current,
+        },
+      });
+
+      const summary = await commitImport(batch, { includeDuplicates: false });
+
+      // Update sync time
+      const updatedConnection: TellerConnection = {
+        ...tellerConnection,
+        lastSyncAt: getIsoNow(),
+      };
+      await saveUserProfilePatch({ tellerConnection: updatedConnection });
+      setTellerConnection(updatedConnection);
+
+      return summary;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to sync Teller transactions.";
+      setTellerError(message);
+      throw error;
+    } finally {
+      setTellerSyncing(false);
+    }
+  }, [tellerCredentials, tellerConnection, tellerCategoryMappings, tellerApiFetch, saveUserProfilePatch, commitImport]);
+
+  const fetchTellerAccounts = useCallback(async (): Promise<import("../types").TellerAccount[]> => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    if (!tellerCredentials || !tellerConnection) {
+      throw new Error("Connect a bank account first.");
+    }
+
+    const result = await tellerApiFetch<{ accounts: import("../types").TellerAccount[] }>("accounts", {
+      accessToken: tellerConnection.accessToken,
+      certificate: tellerCredentials.certificate,
+      privateKey: tellerCredentials.privateKey,
+      environment: tellerCredentials.environment,
+    });
+
+    return result.accounts;
+  }, [tellerCredentials, tellerConnection, tellerApiFetch]);
+
   return (
     <FirebaseContext.Provider
       value={{
@@ -1775,7 +2626,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateExpenseCategoryTarget,
         updateIncomeCategoryTarget,
         updateCategoryTarget,
+        previewImport,
+        commitImport,
         importData,
+        upsertGoogleSheetRows,
         wipeData,
         backupToDrive,
         syncToCloud,
@@ -1787,6 +2641,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         connectGoogleSheets,
         disconnectGoogleSheets,
         inspectGoogleSheetsSpreadsheet,
+        previewGoogleSheetColumn,
         saveGoogleSheetsConfig,
         syncGoogleSheets,
         backingUp,
@@ -1796,9 +2651,38 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         driveConnected: Boolean(driveConnection),
         driveSyncError,
         connectDriveFolder,
+        previewBudgetFromDrive,
         loadBudgetFromDrive,
         disconnectDriveFolder,
         googleSheetsAccessToken,
+
+        // Plaid
+        plaidConnected,
+        plaidConnection,
+        plaidSyncing,
+        plaidError,
+        plaidCredentials,
+        plaidCategoryMappings,
+        connectPlaid,
+        disconnectPlaid,
+        syncPlaidTransactions,
+        fetchPlaidAccounts,
+        setPlaidCredentials,
+        setPlaidCategoryMappings,
+
+        // Teller
+        tellerConnected,
+        tellerConnection,
+        tellerSyncing,
+        tellerError,
+        tellerCredentials,
+        tellerCategoryMappings,
+        connectTeller,
+        disconnectTeller,
+        syncTellerTransactions,
+        fetchTellerAccounts,
+        setTellerCredentials,
+        setTellerCategoryMappings,
       }}
     >
       {children}
