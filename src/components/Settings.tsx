@@ -29,6 +29,7 @@ import {
   IncomeSheetMapping,
   PublicSheetImportConfig,
   PublicSheetImportRangeSelection,
+  SheetRangeDraft,
   Transaction,
 } from "../types";
 import { CURRENCIES, getCurrencySymbol } from "../utils/currencyUtils";
@@ -51,7 +52,7 @@ interface SettingsProps {
 }
 
 type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance";
-type RangeDraft = { startCell: string; endCell: string; noEnd: boolean };
+type RangeDraft = SheetRangeDraft;
 type MappingTab = "expenses" | "income" | "expense_categories" | "income_categories" | "sync";
 type StatusLevel = "success" | "info" | "warning" | "error";
 type DataHubMode = "one_time" | "live_sync";
@@ -391,6 +392,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     setSheetAutoSync(googleSheetsConfig.autoSync);
     setExpenseMapping(googleSheetsConfig.expenseMapping);
     setIncomeMapping(googleSheetsConfig.incomeMapping);
+    if (googleSheetsConfig.expenseRangeDrafts) setExpenseRangeDrafts(googleSheetsConfig.expenseRangeDrafts);
+    if (googleSheetsConfig.incomeRangeDrafts) setIncomeRangeDrafts(googleSheetsConfig.incomeRangeDrafts);
+    if (googleSheetsConfig.expenseCategoryRangeDrafts) setExpenseCategoryRangeDrafts(googleSheetsConfig.expenseCategoryRangeDrafts);
+    if (googleSheetsConfig.incomeCategoryRangeDrafts) setIncomeCategoryRangeDrafts(googleSheetsConfig.incomeCategoryRangeDrafts);
   }, [googleSheetsConfig]);
 
   useEffect(() => {
@@ -964,6 +969,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         },
         autoSync: sheetAutoSync,
         syncIntervalSeconds: Math.max(15, Number.parseInt(syncIntervalSeconds, 10) || 30),
+        expenseRangeDrafts,
+        incomeRangeDrafts,
+        expenseCategoryRangeDrafts,
+        incomeCategoryRangeDrafts,
         lastError: null,
         lastPullAt: googleSheetsConfig?.lastPullAt || null,
         lastPushAt: googleSheetsConfig?.lastPushAt || null,
