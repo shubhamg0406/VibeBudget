@@ -1,0 +1,22 @@
+{
+  "defaultBaseBranch": "main",
+  "defaultEmailFallback": "63102408+shubhamg0406@users.noreply.github.com",
+  "agents": {
+    "codex": {
+      "name": "Shubham-Codex",
+      "email": "63102408+shubhamg0406+codex@users.noreply.github.com"
+    },
+    "cline": {
+      "name": "Shubham-Cline",
+      "email": "63102408+shubhamg0406+cline@users.noreply.github.com"
+    },
+    "claude": {
+      "name": "Shubham-Claude",
+      "email": "63102408+shubhamg0406+claude@users.noreply.github.com"
+    },
+    "deepseek": {
+      "name": "Shubham-Deepseek",
+      "email": "63102408+shubhamg0406+deepseek@users.noreply.github.com"
+    }
+  }
+}

@@ -18,7 +18,10 @@
     "test:component": "vitest run tests/components",
     "test:api": "vitest run --environment=node tests/api",
     "test:smoke": "playwright test",
-    "verify": "node ./scripts/verify.mjs"
+    "verify": "node ./scripts/verify.mjs",
+    "agent:start": "node scripts/agent-start.mjs",
+    "agent:pr": "node scripts/agent-pr.mjs",
+    "agent:whoami": "node scripts/agent-whoami.mjs"
   },
   "dependencies": {
     "@capacitor/browser": "^8.0.3",

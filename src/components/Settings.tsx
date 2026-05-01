@@ -109,6 +109,13 @@ interface SheetMappingRefreshCursor {
   updatedAt: string;
 }
 
+interface PersistedRangeDrafts {
+  expenseRangeDrafts: Record<string, RangeDraft>;
+  incomeRangeDrafts: Record<string, RangeDraft>;
+  expenseCategoryRangeDrafts: Record<string, RangeDraft>;
+  incomeCategoryRangeDrafts: Record<string, RangeDraft>;
+}
+
 const MAINTENANCE_WIPE_TIMEOUT_MS = 15000;
 const IMPORT_FINISH_TIMEOUT_MS = 30000;
 const IMPORT_HISTORY_KEY = "settings_import_history_v1";
@@ -117,6 +124,9 @@ const TRACKED_CURRENCIES_KEY = "settings_tracked_currencies_v1";
 const SHEET_MAPPING_META_KEY = "settings_sheet_mapping_meta_v1";
 const SHEET_VALIDATION_KEY = "settings_sheet_validation_v1";
 const SHEET_MAPPING_CURSOR_KEY = "settings_sheet_mapping_refresh_cursor_v1";
+const GOOGLE_SHEETS_LOW_QUOTA_MODE_KEY = "settings_google_sheets_low_quota_mode_v1";
+const GOOGLE_SHEETS_DRAFT_URL_KEY = "settings_google_sheets_draft_url_v1";
+const GOOGLE_SHEETS_RANGE_DRAFTS_KEY = "settings_google_sheets_range_drafts_v1";
 
 const domains: DataDomain[] = [
   {
@@ -258,6 +268,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
 
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("data");
+  const [showGoogleWorkspaceInDataHub, setShowGoogleWorkspaceInDataHub] = useState(false);
+  const [googleWorkspaceModalTab, setGoogleWorkspaceModalTab] = useState<"sheets" | "drive">("sheets");
   const [aiProvider, setAiProvider] = useState<AiProvider>(aiConfig?.provider || "gemini");
   const [aiModel, setAiModel] = useState(aiConfig?.model || AI_PROVIDER_DEFAULT_MODEL.gemini);
   const [aiApiKey, setAiApiKey] = useState(aiConfig?.apiKey || "");
@@ -313,30 +325,47 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   const [expenseCategoryTargetColumn, setExpenseCategoryTargetColumn] = useState("Monthly Target");
   const [incomeCategoryNameColumn, setIncomeCategoryNameColumn] = useState("Name");
   const [incomeCategoryTargetColumn, setIncomeCategoryTargetColumn] = useState("Monthly Target");
-  const [expenseRangeDrafts, setExpenseRangeDrafts] = useState<Record<string, RangeDraft>>({
-    date: { startCell: "A1", endCell: "", noEnd: true },
-    vendor: { startCell: "B1", endCell: "", noEnd: true },
-    amount: { startCell: "C1", endCell: "", noEnd: true },
-    category: { startCell: "D1", endCell: "", noEnd: true },
-    notes: { startCell: "E1", endCell: "", noEnd: true },
+  const [expenseRangeDrafts, setExpenseRangeDrafts] = useState<Record<string, RangeDraft>>(() => {
+    const persisted = readJson<PersistedRangeDrafts | null>(GOOGLE_SHEETS_RANGE_DRAFTS_KEY, null);
+    return persisted?.expenseRangeDrafts || {
+      date: { startCell: "A1", endCell: "", noEnd: true },
+      vendor: { startCell: "B1", endCell: "", noEnd: true },
+      amount: { startCell: "C1", endCell: "", noEnd: true },
+      category: { startCell: "D1", endCell: "", noEnd: true },
+      notes: { startCell: "E1", endCell: "", noEnd: true },
+    };
   });
-  const [incomeRangeDrafts, setIncomeRangeDrafts] = useState<Record<string, RangeDraft>>({
-    date: { startCell: "A1", endCell: "", noEnd: true },
-    source: { startCell: "B1", endCell: "", noEnd: true },
-    amount: { startCell: "C1", endCell: "", noEnd: true },
-    category: { startCell: "D1", endCell: "", noEnd: true },
-    notes: { startCell: "E1", endCell: "", noEnd: true },
+  const [incomeRangeDrafts, setIncomeRangeDrafts] = useState<Record<string, RangeDraft>>(() => {
+    const persisted = readJson<PersistedRangeDrafts | null>(GOOGLE_SHEETS_RANGE_DRAFTS_KEY, null);
+    return persisted?.incomeRangeDrafts || {
+      date: { startCell: "A1", endCell: "", noEnd: true },
+      source: { startCell: "B1", endCell: "", noEnd: true },
+      amount: { startCell: "C1", endCell: "", noEnd: true },
+      category: { startCell: "D1", endCell: "", noEnd: true },
+      notes: { startCell: "E1", endCell: "", noEnd: true },
+    };
   });
-  const [expenseCategoryRangeDrafts, setExpenseCategoryRangeDrafts] = useState<Record<string, RangeDraft>>({
-    name: { startCell: "A1", endCell: "", noEnd: true },
-    target: { startCell: "B1", endCell: "", noEnd: true },
+  const [expenseCategoryRangeDrafts, setExpenseCategoryRangeDrafts] = useState<Record<string, RangeDraft>>(() => {
+    const persisted = readJson<PersistedRangeDrafts | null>(GOOGLE_SHEETS_RANGE_DRAFTS_KEY, null);
+    return persisted?.expenseCategoryRangeDrafts || {
+      name: { startCell: "A1", endCell: "", noEnd: true },
+      target: { startCell: "B1", endCell: "", noEnd: true },
+    };
   });
-  const [incomeCategoryRangeDrafts, setIncomeCategoryRangeDrafts] = useState<Record<string, RangeDraft>>({
-    name: { startCell: "A1", endCell: "", noEnd: true },
-    target: { startCell: "B1", endCell: "", noEnd: true },
+  const [incomeCategoryRangeDrafts, setIncomeCategoryRangeDrafts] = useState<Record<string, RangeDraft>>(() => {
+    const persisted = readJson<PersistedRangeDrafts | null>(GOOGLE_SHEETS_RANGE_DRAFTS_KEY, null);
+    return persisted?.incomeCategoryRangeDrafts || {
+      name: { startCell: "A1", endCell: "", noEnd: true },
+      target: { startCell: "B1", endCell: "", noEnd: true },
+    };
   });
   const [activeMappingTab, setActiveMappingTab] = useState<MappingTab>("expenses");
   const [columnPreviewByKey, setColumnPreviewByKey] = useState<Record<string, string>>({});
+  const [lowQuotaMode, setLowQuotaMode] = useState<boolean>(() => {
+    const raw = localStorage.getItem(GOOGLE_SHEETS_LOW_QUOTA_MODE_KEY);
+    if (raw === null) return true;
+    return raw === "1";
+  });
   const [expenseMapping, setExpenseMapping] = useState<ExpenseSheetMapping>({
     date: "Date",
     vendor: "Vendor",
@@ -390,6 +419,19 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   }, [lastSheetValidatedAt]);
 
   useEffect(() => {
+    localStorage.setItem(GOOGLE_SHEETS_LOW_QUOTA_MODE_KEY, lowQuotaMode ? "1" : "0");
+  }, [lowQuotaMode]);
+
+  useEffect(() => {
+    writeJson(GOOGLE_SHEETS_RANGE_DRAFTS_KEY, {
+      expenseRangeDrafts,
+      incomeRangeDrafts,
+      expenseCategoryRangeDrafts,
+      incomeCategoryRangeDrafts,
+    } satisfies PersistedRangeDrafts);
+  }, [expenseRangeDrafts, incomeRangeDrafts, expenseCategoryRangeDrafts, incomeCategoryRangeDrafts]);
+
+  useEffect(() => {
     if (!googleSheetsConfig) return;
     setSheetUrl(googleSheetsConfig.spreadsheetUrl);
     setSheetTitle(googleSheetsConfig.spreadsheetTitle || "");
@@ -415,6 +457,21 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     if (googleSheetsConfig.incomeCategoryRangeDrafts) setIncomeCategoryRangeDrafts(googleSheetsConfig.incomeCategoryRangeDrafts);
     if (googleSheetsConfig.mappingSavedAt) setMappingSavedAt(googleSheetsConfig.mappingSavedAt);
   }, [googleSheetsConfig]);
+
+  useEffect(() => {
+    if (googleSheetsConfig?.spreadsheetUrl) return;
+    const draftUrl = localStorage.getItem(GOOGLE_SHEETS_DRAFT_URL_KEY);
+    if (draftUrl) setSheetUrl(draftUrl);
+  }, [googleSheetsConfig?.spreadsheetUrl]);
+
+  useEffect(() => {
+    const trimmed = sheetUrl.trim();
+    if (trimmed) {
+      localStorage.setItem(GOOGLE_SHEETS_DRAFT_URL_KEY, trimmed);
+    } else {
+      localStorage.removeItem(GOOGLE_SHEETS_DRAFT_URL_KEY);
+    }
+  }, [sheetUrl]);
 
   useEffect(() => {
     if (!preferences?.exchangeRates) return;
@@ -937,21 +994,69 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   };
 
   const handleSaveGoogleSheetsConfig = async () => {
-    const allowed = await ensureSheetAuthorization();
-    if (!allowed) return;
     if (!sheetUrl) {
       setSectionStatus("google_workspace", "error", "Add a Google Sheet URL first.");
       return;
     }
     setSavingSheetConfig(true);
     try {
-      const inspection = await inspectGoogleSheetsSpreadsheet(
-        sheetUrl,
-        expensesSheetName,
-        incomeSheetName,
-        expenseCategoriesSheetName.trim() || undefined,
-        incomeCategoriesSheetName.trim() || undefined
-      );
+      const hasLiveGoogleAuth = Boolean(googleSheetsConnected && googleSheetsAccessToken);
+      const parsedSpreadsheetId = parseSpreadsheetId(sheetUrl);
+      if (!parsedSpreadsheetId) {
+        throw new Error("Invalid spreadsheet URL.");
+      }
+      let inspection: {
+        spreadsheetId: string;
+        spreadsheetTitle: string;
+        sheetTitles: string[];
+        expenseHeaders: string[];
+        incomeHeaders: string[];
+        expenseCategoryHeaders: string[];
+        incomeCategoryHeaders: string[];
+        suggestedExpenseMapping: ExpenseSheetMapping;
+        suggestedIncomeMapping: IncomeSheetMapping;
+      };
+      if (hasLiveGoogleAuth) {
+        try {
+          inspection = await inspectGoogleSheetsSpreadsheet(
+            sheetUrl,
+            expensesSheetName,
+            incomeSheetName,
+            expenseCategoriesSheetName.trim() || undefined,
+            incomeCategoriesSheetName.trim() || undefined
+          );
+        } catch {
+          inspection = {
+            spreadsheetId: parsedSpreadsheetId,
+            spreadsheetTitle: googleSheetsConfig?.spreadsheetTitle || sheetTitle || "Unverified Sheet",
+            sheetTitles: availableSheetTabs,
+            expenseHeaders,
+            incomeHeaders,
+            expenseCategoryHeaders,
+            incomeCategoryHeaders,
+            suggestedExpenseMapping: expenseMapping,
+            suggestedIncomeMapping: incomeMapping,
+          };
+        }
+      } else {
+        inspection = {
+          spreadsheetId: parsedSpreadsheetId,
+          spreadsheetTitle: googleSheetsConfig?.spreadsheetTitle || sheetTitle || "Unverified Sheet",
+          sheetTitles: availableSheetTabs,
+          expenseHeaders,
+          incomeHeaders,
+          expenseCategoryHeaders,
+          incomeCategoryHeaders,
+          suggestedExpenseMapping: expenseMapping,
+          suggestedIncomeMapping: incomeMapping,
+        };
+      }
+      if (inspection.sheetTitles?.length > 0) {
+        setAvailableSheetTabs(inspection.sheetTitles);
+      }
+      if (inspection.spreadsheetTitle) {
+        setSheetTitle(inspection.spreadsheetTitle);
+      }
       const readHeader = async (sheetName: string, startCell: string) => {
         const preview = await previewGoogleSheetColumn(sheetUrl, sheetName, startCell, startCell, false);
         return preview.headerValue || "";
@@ -964,28 +1069,39 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         }
       };
 
-      const expenseDateHeader = await readHeader(expensesSheetName, expenseRangeDrafts.date.startCell);
-      const expenseVendorHeader = await readHeader(expensesSheetName, expenseRangeDrafts.vendor.startCell);
-      const expenseAmountHeader = await readHeader(expensesSheetName, expenseRangeDrafts.amount.startCell);
-      const expenseCategoryHeader = await readHeader(expensesSheetName, expenseRangeDrafts.category.startCell);
-      const expenseNotesHeader = await readHeader(expensesSheetName, expenseRangeDrafts.notes.startCell);
+      const sheetTabs = inspection.sheetTitles || availableSheetTabs;
+      const canReadExpenseSheet = hasLiveGoogleAuth && sheetTabs.includes(expensesSheetName);
+      const canReadIncomeSheet = hasLiveGoogleAuth && sheetTabs.includes(incomeSheetName);
 
-      const incomeDateHeader = await readHeader(incomeSheetName, incomeRangeDrafts.date.startCell);
-      const incomeSourceHeader = await readHeader(incomeSheetName, incomeRangeDrafts.source.startCell);
-      const incomeAmountHeader = await readHeader(incomeSheetName, incomeRangeDrafts.amount.startCell);
-      const incomeCategoryHeader = await readHeader(incomeSheetName, incomeRangeDrafts.category.startCell);
-      const incomeNotesHeader = await readHeader(incomeSheetName, incomeRangeDrafts.notes.startCell);
+      const expenseDateHeader = canReadExpenseSheet ? await safeReadHeader(expensesSheetName, expenseRangeDrafts.date.startCell) : "";
+      const expenseVendorHeader = canReadExpenseSheet ? await safeReadHeader(expensesSheetName, expenseRangeDrafts.vendor.startCell) : "";
+      const expenseAmountHeader = canReadExpenseSheet ? await safeReadHeader(expensesSheetName, expenseRangeDrafts.amount.startCell) : "";
+      const expenseCategoryHeader = canReadExpenseSheet ? await safeReadHeader(expensesSheetName, expenseRangeDrafts.category.startCell) : "";
+      const expenseNotesHeader = canReadExpenseSheet ? await safeReadHeader(expensesSheetName, expenseRangeDrafts.notes.startCell) : "";
 
-      const expenseCategoryNameHeader = expenseCategoriesSheetName
+      const incomeDateHeader = canReadIncomeSheet ? await safeReadHeader(incomeSheetName, incomeRangeDrafts.date.startCell) : "";
+      const incomeSourceHeader = canReadIncomeSheet ? await safeReadHeader(incomeSheetName, incomeRangeDrafts.source.startCell) : "";
+      const incomeAmountHeader = canReadIncomeSheet ? await safeReadHeader(incomeSheetName, incomeRangeDrafts.amount.startCell) : "";
+      const incomeCategoryHeader = canReadIncomeSheet ? await safeReadHeader(incomeSheetName, incomeRangeDrafts.category.startCell) : "";
+      const incomeNotesHeader = canReadIncomeSheet ? await safeReadHeader(incomeSheetName, incomeRangeDrafts.notes.startCell) : "";
+
+      const canReadExpenseCategorySheet = hasLiveGoogleAuth
+        && Boolean(expenseCategoriesSheetName)
+        && sheetTabs.includes(expenseCategoriesSheetName);
+      const canReadIncomeCategorySheet = hasLiveGoogleAuth
+        && Boolean(incomeCategoriesSheetName)
+        && sheetTabs.includes(incomeCategoriesSheetName);
+
+      const expenseCategoryNameHeader = canReadExpenseCategorySheet
         ? await safeReadHeader(expenseCategoriesSheetName, expenseCategoryRangeDrafts.name.startCell)
         : "";
-      const expenseCategoryTargetHeader = expenseCategoriesSheetName
+      const expenseCategoryTargetHeader = canReadExpenseCategorySheet
         ? await safeReadHeader(expenseCategoriesSheetName, expenseCategoryRangeDrafts.target.startCell)
         : "";
-      const incomeCategoryNameHeader = incomeCategoriesSheetName
+      const incomeCategoryNameHeader = canReadIncomeCategorySheet
         ? await safeReadHeader(incomeCategoriesSheetName, incomeCategoryRangeDrafts.name.startCell)
         : "";
-      const incomeCategoryTargetHeader = incomeCategoriesSheetName
+      const incomeCategoryTargetHeader = canReadIncomeCategorySheet
         ? await safeReadHeader(incomeCategoriesSheetName, incomeCategoryRangeDrafts.target.startCell)
         : "";
 
@@ -1034,7 +1150,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       };
       await saveGoogleSheetsConfig(payload);
       setMappingSavedAt(new Date().toISOString());
-      setSectionStatus("google_workspace", "success", `Mapping saved at ${new Date().toLocaleTimeString()}.`);
+      setSectionStatus(
+        "google_workspace",
+        "success",
+        hasLiveGoogleAuth
+          ? `Mapping saved at ${new Date().toLocaleTimeString()}.`
+          : "Mapping saved locally to your profile without live Google verification. Reconnect Google when ready to verify/pull."
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save CloudSync config.";
       setSectionStatus("google_workspace", "error", getCloudActionableError(message));
@@ -1553,6 +1675,15 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     return Number.isFinite(parsed) ? parsed + 1 : fallback;
   };
 
+  const buildPreviewEndCell = (startCell: string, previewRows = 40) => {
+    const match = startCell.trim().toUpperCase().match(/^([A-Z]+)(\d+)$/);
+    if (!match) return "";
+    const [, column, rowStr] = match;
+    const startRow = Number.parseInt(rowStr, 10);
+    if (!Number.isFinite(startRow)) return "";
+    return `${column}${startRow + Math.max(1, previewRows)}`;
+  };
+
   const updatePreview = async (key: string, sheetName: string, draft: RangeDraft) => {
     if (!sheetUrl || !sheetName || !draft.startCell) return;
     if (!googleSheetsAccessToken) {
@@ -1560,12 +1691,17 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       return;
     }
     try {
+      // Preview is intentionally bounded to avoid burning Google Sheets read quota
+      // when "No end range" is enabled on mapping fields.
+      const previewEndCell = draft.noEnd
+        ? buildPreviewEndCell(draft.startCell, 40)
+        : (draft.endCell || null);
       const result = await previewGoogleSheetColumn(
         sheetUrl,
         sheetName,
         draft.startCell,
-        draft.endCell || null,
-        draft.noEnd
+        previewEndCell,
+        false
       );
       const head = result.headerValue ? `${draft.startCell}: ${result.headerValue}` : `${draft.startCell}: (empty)`;
       const samples = result.samples.length > 0
@@ -1579,6 +1715,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   };
 
   useEffect(() => {
+    if (lowQuotaMode) return;
     if (!sheetUrl || !googleSheetsAccessToken) return;
 
     const tabFields: Record<string, Array<[string, string, RangeDraft]>> = {
@@ -1620,19 +1757,25 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     void loadPreviews();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeMappingTab, sheetUrl, googleSheetsAccessToken]);
+  }, [activeMappingTab, sheetUrl, googleSheetsAccessToken, lowQuotaMode]);
 
   useEffect(() => {
     if (!sheetUrl || !googleSheetsConnected) return;
     let cancelled = false;
     const refreshHeadersForSelectedTabs = async () => {
       try {
+        const optionalExpenseCategoryTab = availableSheetTabs.includes(expenseCategoriesSheetName)
+          ? expenseCategoriesSheetName.trim() || undefined
+          : undefined;
+        const optionalIncomeCategoryTab = availableSheetTabs.includes(incomeCategoriesSheetName)
+          ? incomeCategoriesSheetName.trim() || undefined
+          : undefined;
         const result = await inspectGoogleSheetsSpreadsheet(
           sheetUrl,
           expensesSheetName,
           incomeSheetName,
-          expenseCategoriesSheetName.trim() || undefined,
-          incomeCategoriesSheetName.trim() || undefined
+          optionalExpenseCategoryTab,
+          optionalIncomeCategoryTab
         );
         if (cancelled) return;
         setExpenseHeaders(ensureMappingOption(result.expenseHeaders, "VibeBudget ID"));
@@ -1654,6 +1797,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     incomeSheetName,
     expenseCategoriesSheetName,
     incomeCategoriesSheetName,
+    availableSheetTabs,
     inspectGoogleSheetsSpreadsheet,
     googleSheetsAccessToken,
   ]);
@@ -1668,16 +1812,38 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     <tr className="border-t" style={{ borderColor: "var(--app-border)" }}>
       <td className="px-2 py-1.5 text-xs font-semibold text-fintech-muted">{label}</td>
       <td className="px-2 py-1.5">
-        <input value={draft.startCell} onChange={(e) => onDraftChange({ ...draft, startCell: e.target.value.toUpperCase() })} onBlur={() => void updatePreview(previewKey, sheetName, draft)} placeholder="C1" className="w-full rounded-md border bg-[var(--app-panel-strong)] px-2 py-1.5 text-xs font-mono" style={{ borderColor: "var(--app-border)" }} />
+        <input
+          value={draft.startCell}
+          onChange={(e) => onDraftChange({ ...draft, startCell: e.target.value.toUpperCase() })}
+          onBlur={() => { if (!lowQuotaMode) void updatePreview(previewKey, sheetName, draft); }}
+          placeholder="C1"
+          className="w-full rounded-md border bg-[var(--app-panel-strong)] px-2 py-1.5 text-xs font-mono"
+          style={{ borderColor: "var(--app-border)" }}
+        />
         <div className="mt-1 text-[10px] text-fintech-muted">{columnPreviewByKey[previewKey] || renderRangePreview(draft)}</div>
       </td>
       <td className="px-2 py-1.5">
-        <div className="flex items-center gap-2">
-          <input disabled={draft.noEnd} value={draft.endCell} onChange={(e) => onDraftChange({ ...draft, endCell: e.target.value.toUpperCase() })} onBlur={() => void updatePreview(previewKey, sheetName, draft)} placeholder={draft.noEnd ? "" : "C19"} className="w-full rounded-md border bg-[var(--app-panel-strong)] px-2 py-1.5 text-xs font-mono disabled:opacity-50" style={{ borderColor: "var(--app-border)" }} />
-          <label className="inline-flex min-w-fit items-center gap-1 text-[10px] text-fintech-muted">
-          <input type="checkbox" checked={draft.noEnd} onChange={(e) => onDraftChange({ ...draft, noEnd: e.target.checked })} />
-          No end range
-        </label>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+          <input
+            disabled={draft.noEnd}
+            value={draft.endCell}
+            onChange={(e) => onDraftChange({ ...draft, endCell: e.target.value.toUpperCase() })}
+            onBlur={() => { if (!lowQuotaMode) void updatePreview(previewKey, sheetName, draft); }}
+            placeholder={draft.noEnd ? "" : "C19"}
+            className="w-full rounded-md border bg-[var(--app-panel-strong)] px-2 py-1.5 text-xs font-mono disabled:opacity-50"
+            style={{ borderColor: "var(--app-border)" }}
+          />
+          <label className="inline-flex min-w-fit items-center gap-1 text-[10px] text-fintech-muted whitespace-nowrap">
+            <input type="checkbox" checked={draft.noEnd} onChange={(e) => onDraftChange({ ...draft, noEnd: e.target.checked })} />
+            No end range
+          </label>
+          <button
+            type="button"
+            onClick={() => void updatePreview(previewKey, sheetName, draft)}
+            className="rounded-md bg-[var(--app-ghost)] px-2.5 py-1.5 text-[10px] font-bold text-fintech-muted hover:bg-[var(--app-border)]"
+          >
+            Preview
+          </button>
         </div>
       </td>
     </tr>
@@ -1880,17 +2046,26 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       </header>
 
       <div className="flex w-fit flex-wrap gap-2 rounded-xl border bg-[var(--app-ghost)] p-1" style={{ borderColor: "var(--app-border)" }}>
-        <button onClick={() => setActiveTab("data")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "data" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>1. ImpEx</button>
+        <button onClick={() => setActiveTab("data")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "data" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>1. Data Hub</button>
         <button onClick={() => setActiveTab("currency")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "currency" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>2. Currency</button>
-        <button onClick={() => setActiveTab("google_workspace")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "google_workspace" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>3. Google Workspace</button>
-        <button onClick={() => setActiveTab("finance_feeds")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "finance_feeds" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>4. Finance Feeds</button>
-        <button onClick={() => setActiveTab("maintenance")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>5. Maintenance</button>
-        <button onClick={() => setActiveTab("ai")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "ai" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>6. AI</button>
+        <button onClick={() => setActiveTab("finance_feeds")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "finance_feeds" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>3. Finance Feeds</button>
+        <button onClick={() => setActiveTab("maintenance")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>4. Maintenance</button>
+        <button onClick={() => setActiveTab("ai")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "ai" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>5. AI</button>
 
       </div>
 
       <div className="space-y-6">
-        {activeTab === "data" && <ImpExCenter onRefresh={onRefresh} onNavigateToConnections={() => setActiveTab("google_workspace")} />}
+        {activeTab === "data" && (
+          <>
+            <ImpExCenter
+              onRefresh={onRefresh}
+              onNavigateToConnections={() => {
+                setGoogleWorkspaceModalTab("sheets");
+                setShowGoogleWorkspaceInDataHub(true);
+              }}
+            />
+          </>
+        )}
 
         {activeTab === "currency" && (
           <section className="space-y-5">
@@ -2029,8 +2204,42 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
           </section>
         )}
 
-        {activeTab === "google_workspace" && (
-          <section className="space-y-5">
+        {(activeTab === "google_workspace" || (activeTab === "data" && showGoogleWorkspaceInDataHub)) && (
+          <section
+            className={activeTab === "data" ? "fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto p-6 backdrop-blur-sm" : ""}
+            style={activeTab === "data" ? { backgroundColor: "var(--app-overlay)" } : undefined}
+          >
+            <div className={activeTab === "data" ? "w-full max-w-6xl space-y-5 rounded-2xl border bg-[var(--app-shell)] p-5" : "space-y-5"} style={activeTab === "data" ? { borderColor: "var(--app-border)" } : undefined}>
+            {activeTab === "data" && (
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold">Google Management</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleWorkspaceInDataHub(false)}
+                  className="rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-xs font-bold text-fintech-muted hover:bg-[var(--app-border)]"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+            {activeTab === "data" && (
+              <div className="flex w-fit gap-1 rounded-lg bg-[var(--app-ghost)] p-1">
+                <button
+                  type="button"
+                  onClick={() => setGoogleWorkspaceModalTab("sheets")}
+                  className={`rounded-md px-3 py-1.5 text-xs font-bold ${googleWorkspaceModalTab === "sheets" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}
+                >
+                  Google Sheets
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGoogleWorkspaceModalTab("drive")}
+                  className={`rounded-md px-3 py-1.5 text-xs font-bold ${googleWorkspaceModalTab === "drive" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}
+                >
+                  Google Drive
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Cloud size={16} className="text-fintech-accent" /> Google Workspace</div>
             <p className="text-xs text-fintech-muted">Mapping-first pull flow: connect a sheet, map your columns, then pull data.</p>
             {renderStatusStrip("google_workspace")}
@@ -2043,6 +2252,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
               </span>
             </div>
 
+            {(activeTab !== "data" || googleWorkspaceModalTab === "sheets") && (
+            <>
             {/* Step 1: Connect Google Sheets */}
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
               <div className="mb-4 flex items-center gap-2">
@@ -2117,8 +2328,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
               </div>
             </div>
 
-            {/* Step 2: Map Columns — only shown after sheet verified */}
-            {(expenseHeaders.length > 0 || incomeHeaders.length > 0) && (
+            {/* Step 2: Map Columns — shown after verification or existing saved config */}
+            {(expenseHeaders.length > 0 || incomeHeaders.length > 0 || Boolean(googleSheetsConfig?.spreadsheetUrl)) && (
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
               <div className="mb-4 flex items-center gap-2">
                 <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${mappingSavedAt ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>2</span>
@@ -2128,6 +2339,23 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                     <CheckCircle2 size={10} /> Mapping saved at {new Date(mappingSavedAt).toLocaleTimeString()}
                   </span>
                 )}
+              </div>
+              <div className="mb-4 flex items-center justify-between rounded-lg bg-[var(--app-ghost)] px-3 py-2">
+                <div>
+                  <div className="text-[11px] font-semibold">Low Quota Mode</div>
+                  <div className="text-[10px] text-fintech-muted">Manual previews only, no automatic preview fetch on tab open.</div>
+                </div>
+                <label className="inline-flex items-center gap-2 text-[11px] font-semibold text-fintech-muted">
+                  <input
+                    type="checkbox"
+                    checked={lowQuotaMode}
+                    onChange={(e) => setLowQuotaMode(e.target.checked)}
+                  />
+                  {lowQuotaMode ? "On" : "Off"}
+                </label>
+              </div>
+              <div className="mb-4 rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-[11px] text-fintech-muted">
+                Start cell is the header cell. Data import and preview samples begin from the next row.
               </div>
 
               {/* Mapping Tab Bar */}
@@ -2168,7 +2396,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                     <table className="min-w-full text-left">
                       <thead>
                         <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
-                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
+                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Header Cell + Preview</th><th className="px-3 py-2">End Cell</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2196,7 +2424,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                     <table className="min-w-full text-left">
                       <thead>
                         <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
-                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
+                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Header Cell + Preview</th><th className="px-3 py-2">End Cell</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2224,7 +2452,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                     <table className="min-w-full text-left">
                       <thead>
                         <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
-                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
+                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Header Cell + Preview</th><th className="px-3 py-2">End Cell</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2249,7 +2477,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                     <table className="min-w-full text-left">
                       <thead>
                         <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
-                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
+                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Header Cell + Preview</th><th className="px-3 py-2">End Cell</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2418,8 +2646,11 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 )}
               </div>
             </details>
+            </>
+            )}
 
             {/* Section B — Drive Backup Vault */}
+            {(activeTab !== "data" || googleWorkspaceModalTab === "drive") && (
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
               <div className="mb-4 flex items-center gap-2">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-fintech-accent/10 text-[10px] font-bold text-fintech-accent">B</span>
@@ -2442,6 +2673,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                 {driveConnection?.lastMirrorAt && <p className="text-[11px] text-fintech-muted">Last mirror: {new Date(driveConnection.lastMirrorAt).toLocaleString()}</p>}
                 {driveConnection?.lastRestoreAt && <p className="text-[11px] text-fintech-muted">Last restore: {new Date(driveConnection.lastRestoreAt).toLocaleString()}</p>}
               </div>
+            </div>
+            )}
             </div>
           </section>
         )}
