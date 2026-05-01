@@ -1336,6 +1336,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const disconnectGoogleSheets = () => {
     storeAccessToken(null);
+    setGoogleSheetsConfig(null);
     setGoogleSheetsError(null);
     void saveUserProfilePatch({ googleSheetsConfig: null });
   };
@@ -1356,6 +1357,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
 
     await saveUserProfilePatch({ googleSheetsConfig: payload });
+    setGoogleSheetsConfig(payload);
     setGoogleSheetsError(null);
   };
 
