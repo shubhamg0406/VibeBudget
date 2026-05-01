@@ -244,6 +244,12 @@ export interface IncomeSheetMapping {
   updatedAt: string;
 }
 
+export interface SheetRangeDraft {
+  startCell: string;
+  endCell: string;
+  noEnd: boolean;
+}
+
 export interface GoogleSheetsSyncConfig {
   spreadsheetId: string;
   spreadsheetUrl: string;
@@ -262,6 +268,11 @@ export interface GoogleSheetsSyncConfig {
   incomeCategoryTargetColumn?: string;
   expenseMapping: ExpenseSheetMapping;
   incomeMapping: IncomeSheetMapping;
+  /** Cell range drafts — persisted so the UI restores on refresh */
+  expenseRangeDrafts?: Record<string, SheetRangeDraft>;
+  incomeRangeDrafts?: Record<string, SheetRangeDraft>;
+  expenseCategoryRangeDrafts?: Record<string, SheetRangeDraft>;
+  incomeCategoryRangeDrafts?: Record<string, SheetRangeDraft>;
   autoSync: boolean;
   syncIntervalSeconds: number;
   connectedAt: string;
