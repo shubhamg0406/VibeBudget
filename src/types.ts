@@ -223,6 +223,20 @@ export interface DateRange {
 }
 
 export type GoogleSheetsSyncDirection = "pull" | "push" | "both";
+export type GoogleSheetsSyncMode = "incremental" | "full_reconcile";
+
+export interface GoogleSheetsSyncOptions {
+  mode?: GoogleSheetsSyncMode;
+}
+
+export interface GooglePullSummary {
+  fetched: number;
+  imported: number;
+  duplicateSkipped: number;
+  invalidSkipped: number;
+  netNew: number;
+  mode: GoogleSheetsSyncMode;
+}
 
 export interface ExpenseSheetMapping {
   date: string;
@@ -281,6 +295,13 @@ export interface GoogleSheetsSyncConfig {
   lastPushAt?: string | null;
   lastPullAt?: string | null;
   lastError?: string | null;
+  /** Mapping metadata */
+  mappingSavedAt?: string | null;
+  mappingVersion?: number;
+  /** Incremental cursor — absolute row offset for each type */
+  incrementalCursor?: Record<string, number>;
+  /** Last pull summary */
+  lastPullSummary?: GooglePullSummary | null;
 }
 
 export interface GoogleSheetsInspectionResult {

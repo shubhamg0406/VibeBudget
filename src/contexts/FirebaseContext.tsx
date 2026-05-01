@@ -23,9 +23,12 @@ import {
   Category,
   DriveConnection,
   ExpenseCategory,
+  GooglePullSummary,
   GoogleSheetsInspectionResult,
   GoogleSheetsSyncConfig,
   GoogleSheetsSyncDirection,
+  GoogleSheetsSyncMode,
+  GoogleSheetsSyncOptions,
   ImportBatch,
   ImportCommitOptions,
   ImportCommitSummary,
@@ -426,7 +429,9 @@ export interface FirebaseContextType {
     last: { cell: string; value: string } | null;
   }>;
   saveGoogleSheetsConfig: (config: Omit<GoogleSheetsSyncConfig, "connectedAt" | "connectedBy">) => Promise<void>;
-  syncGoogleSheets: (direction?: GoogleSheetsSyncDirection) => Promise<void>;
+  syncGoogleSheets: (direction?: GoogleSheetsSyncDirection, options?: GoogleSheetsSyncOptions) => Promise<GooglePullSummary | void>;
+  validateGoogleSheetsMapping: () => { valid: boolean; missing: string[] };
+  googlePullSummary: GooglePullSummary | null;
   backingUp: boolean;
   isSyncing: boolean;
   lastSynced: Date | null;
@@ -509,6 +514,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY) || sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY)
   );
   const [googleSheetsSyncing, setGoogleSheetsSyncing] = useState(false);
+  const [googlePullSummary, setGooglePullSummary] = useState<GooglePullSummary | null>(null);
   const [aiConfig, setAiConfig] = useState<AiProviderConfig | null>(null);
   const [googleSheetsError, setGoogleSheetsError] = useState<string | null>(null);
   const [driveSyncError, setDriveSyncError] = useState<string | null>(null);
@@ -1346,8 +1352,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       throw new Error("Sign in with Google first.");
     }
 
+    const prevVersion = sheetsConfigRef.current?.mappingVersion || 0;
+
     const payload: GoogleSheetsSyncConfig = {
       ...config,
+      mappingSavedAt: getIsoNow(),
+      mappingVersion: prevVersion + 1,
+      incrementalCursor: sheetsConfigRef.current?.incrementalCursor || config.incrementalCursor,
+      lastPullSummary: sheetsConfigRef.current?.lastPullSummary || config.lastPullSummary || null,
       connectedAt: sheetsConfigRef.current?.connectedAt || getIsoNow(),
       connectedBy: user.email || user.uid,
       lastError: null,
@@ -1360,6 +1372,67 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setGoogleSheetsConfig(payload);
     setGoogleSheetsError(null);
   };
+
+  /** Migrate legacy localStorage mapping to Firestore if Firestore config is missing */
+  const migrateLocalStorageMappings = useCallback(async () => {
+    if (!user || googleSheetsConfig) return; // Already have Firestore config
+
+    const legacyKeys = ["googleSheetImport_expenses", "googleSheetImport_income", "googleSheetImport_shared"];
+    const hasLegacy = legacyKeys.some((key) => localStorage.getItem(key));
+    if (!hasLegacy) return;
+
+    try {
+      const sharedRaw = localStorage.getItem("googleSheetImport_shared");
+      const shared = sharedRaw ? JSON.parse(sharedRaw) as { sheetUrl?: string; spreadsheetId?: string } : null;
+      if (!shared?.sheetUrl) return;
+
+      const expensesRaw = localStorage.getItem("googleSheetImport_expenses");
+      const incomeRaw = localStorage.getItem("googleSheetImport_income");
+      const expensesConfig = expensesRaw ? JSON.parse(expensesRaw) as { sheetTabName?: string; mapping?: Record<string, unknown> } : null;
+      const incomeConfig = incomeRaw ? JSON.parse(incomeRaw) as { sheetTabName?: string; mapping?: Record<string, unknown> } : null;
+
+      const config: GoogleSheetsSyncConfig = {
+        spreadsheetId: shared.spreadsheetId || "",
+        spreadsheetUrl: shared.sheetUrl,
+        spreadsheetTitle: "Migrated from localStorage",
+        expensesSheetName: expensesConfig?.sheetTabName || "Expenses",
+        incomeSheetName: incomeConfig?.sheetTabName || "Income",
+        expenseMapping: {
+          date: "Date",
+          vendor: "Vendor",
+          amount: "Amount",
+          category: "Category",
+          notes: "Notes",
+          id: "VibeBudget ID",
+          updatedAt: "Updated At",
+        },
+        incomeMapping: {
+          date: "Date",
+          source: "Source",
+          amount: "Amount",
+          category: "Category",
+          notes: "Notes",
+          id: "VibeBudget ID",
+          updatedAt: "Updated At",
+        },
+        autoSync: false,
+        syncIntervalSeconds: 30,
+        connectedAt: getIsoNow(),
+        connectedBy: user.email || user.uid,
+        mappingSavedAt: getIsoNow(),
+        mappingVersion: 1,
+        lastError: null,
+      };
+
+      await saveUserProfilePatch({ googleSheetsConfig: config });
+      setGoogleSheetsConfig(config);
+      // Mark as migrated by removing legacy keys
+      legacyKeys.forEach((key) => localStorage.removeItem(key));
+      console.log("Migrated legacy localStorage Google Sheets mapping to Firestore");
+    } catch (error) {
+      console.error("Failed to migrate legacy localStorage mapping", error);
+    }
+  }, [user, googleSheetsConfig, saveUserProfilePatch]);
 
   const saveAiConfigFn = useCallback(async (config: AiProviderConfig | null) => {
     if (!user) throw new Error("Sign in with Google first.");
@@ -1443,7 +1516,99 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
-  const syncGoogleSheets = async (direction: GoogleSheetsSyncDirection = "both") => {
+  const validateGoogleSheetsMappingFn = useCallback((): { valid: boolean; missing: string[] } => {
+    const config = sheetsConfigRef.current;
+    if (!config) return { valid: false, missing: ["No config saved"] };
+
+    const missing: string[] = [];
+    const reqExpFields = ["date", "vendor", "amount", "category"];
+    const reqIncFields = ["date", "source", "amount", "category"];
+
+    for (const field of reqExpFields) {
+      if (!(config.expenseMapping as Record<string, string>)[field]?.trim()) {
+        missing.push(`expenses.${field}`);
+      }
+    }
+    for (const field of reqIncFields) {
+      if (!(config.incomeMapping as Record<string, string>)[field]?.trim()) {
+        missing.push(`income.${field}`);
+      }
+    }
+
+    return { valid: missing.length === 0, missing };
+  }, []);
+
+  const buildSheetRowsForPull = useCallback(async (
+    token: string,
+    config: GoogleSheetsSyncConfig,
+    mode: GoogleSheetsSyncMode,
+  ): Promise<{ rows: any[]; count: number }> => {
+    const { readSheetRecords } = await import("../utils/googleSheetsSync");
+
+    const allRows: any[] = [];
+    let totalCount = 0;
+
+    // Build expense rows
+    const expSheet = await readSheetRecords(token, config.spreadsheetId, config.expensesSheetName);
+    const expMapping = config.expenseMapping;
+    const expStartRow = config.expensesDataStartRow || 2;
+    const expCursor = mode === "incremental" ? (config.incrementalCursor?.expenses || 0) : 0;
+
+    for (const record of expSheet.records) {
+      if (record.rowNumber < expStartRow) continue;
+      const absRowIndex = record.rowNumber - 1;
+      if (mode === "incremental" && absRowIndex < expCursor) continue;
+
+      const date = record.values[expMapping.date]?.trim() || "";
+      const vendor = record.values[expMapping.vendor]?.trim() || "";
+      const amountRaw = record.values[expMapping.amount]?.trim() || "";
+      const category = record.values[expMapping.category]?.trim() || "";
+      const notes = record.values[expMapping.notes]?.trim() || "";
+      const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
+
+      if (!date || !vendor || amount <= 0) continue;
+      totalCount += 1;
+      allRows.push({
+        __row: [date, vendor, amount, category, notes],
+        __sourceId: `google_sheet-row-${absRowIndex}`,
+        __rawDescription: [date, vendor, amount, category, notes].join(", "),
+      });
+    }
+
+    // Build income rows
+    const incSheet = await readSheetRecords(token, config.spreadsheetId, config.incomeSheetName);
+    const incMapping = config.incomeMapping;
+    const incStartRow = config.incomeDataStartRow || 2;
+    const incCursor = mode === "incremental" ? (config.incrementalCursor?.income || 0) : 0;
+
+    for (const record of incSheet.records) {
+      if (record.rowNumber < incStartRow) continue;
+      const absRowIndex = record.rowNumber - 1;
+      if (mode === "incremental" && absRowIndex < incCursor) continue;
+
+      const date = record.values[incMapping.date]?.trim() || "";
+      const source = record.values[incMapping.source]?.trim() || "";
+      const amountRaw = record.values[incMapping.amount]?.trim() || "";
+      const category = record.values[incMapping.category]?.trim() || "";
+      const notes = record.values[incMapping.notes]?.trim() || "";
+      const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
+
+      if (!date || !source || amount <= 0) continue;
+      totalCount += 1;
+      allRows.push({
+        __row: [date, source, amount, category, notes],
+        __sourceId: `google_sheet-income-row-${absRowIndex}`,
+        __rawDescription: [date, source, amount, category, notes].join(", "),
+      });
+    }
+
+    return { rows: allRows, count: totalCount };
+  }, []);
+
+  const syncGoogleSheets = async (
+    direction: GoogleSheetsSyncDirection = "both",
+    options?: GoogleSheetsSyncOptions,
+  ): Promise<GooglePullSummary | void> => {
     if (!googleSheetsAccessToken || !sheetsConfigRef.current) {
       throw new Error("Configure Google Sheets first.");
     }
@@ -1452,51 +1617,141 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     syncInFlightRef.current = true;
     setGoogleSheetsSyncing(true);
     setGoogleSheetsError(null);
+    setGooglePullSummary(null);
 
     try {
       if (direction === "pull" || direction === "both") {
-        await syncSheetDataToApp({
-          token: googleSheetsAccessToken,
-          config: sheetsConfigRef.current,
-          transactions: transactionsRef.current,
-          income: incomeRef.current,
-          ensureCategoryId: ensureExpenseCategoryId,
-          ensureIncomeCategoryName: ensureIncomeCategoryId,
-          upsertExpenseCategoryTarget: upsertExpenseCategoryTargetByName,
-          upsertIncomeCategoryTarget: upsertIncomeCategoryTargetByName,
-          upsertTransaction: upsertTransactionFromSync,
-          upsertIncome: upsertIncomeFromSync,
-        });
+        const mode = options?.mode || "incremental";
+
+        // Build rows from mapped sheet ranges
+        const { rows, count } = await buildSheetRowsForPull(
+          googleSheetsAccessToken,
+          sheetsConfigRef.current,
+          mode,
+        );
+
+        let fetched = count;
+        let imported = 0;
+        let duplicateSkipped = 0;
+        let invalidSkipped = 0;
+
+        if (rows.length > 0) {
+          // For expenses rows in the batch, route them through preview/commit
+          const expenseRows = rows.filter((r: any) => !r.__sourceId?.includes("income-"));
+          const incomeRows = rows.filter((r: any) => r.__sourceId?.includes("income-"));
+
+          if (expenseRows.length > 0) {
+            const batch = previewImportBatch({
+              source: "google_sheet",
+              payload: expenseRows,
+              options: { type: "expenses", hasHeader: false },
+              existing: {
+                transactions: transactionsRef.current,
+                income: incomeRef.current,
+                expenseCategories: expenseCategoriesRef.current,
+                incomeCategories: incomeCategoriesRef.current,
+              },
+            });
+            const summary = await commitImport(batch, { includeDuplicates: false });
+            imported += summary.imported;
+            duplicateSkipped += batch.summary.duplicate;
+            invalidSkipped += batch.summary.invalid;
+          }
+
+          if (incomeRows.length > 0) {
+            const batch = previewImportBatch({
+              source: "google_sheet",
+              payload: incomeRows,
+              options: { type: "income", hasHeader: false },
+              existing: {
+                transactions: transactionsRef.current,
+                income: incomeRef.current,
+                expenseCategories: expenseCategoriesRef.current,
+                incomeCategories: incomeCategoriesRef.current,
+              },
+            });
+            const summary = await commitImport(batch, { includeDuplicates: false });
+            imported += summary.imported;
+            duplicateSkipped += batch.summary.duplicate;
+            invalidSkipped += batch.summary.invalid;
+          }
+        }
+
+        const netNew = imported;
+        const pullSummary: GooglePullSummary = {
+          fetched,
+          imported,
+          duplicateSkipped,
+          invalidSkipped,
+          netNew,
+          mode,
+        };
+        setGooglePullSummary(pullSummary);
+
+        // Update cursor for incremental mode
+        const configAfterPull = sheetsConfigRef.current;
+        if (configAfterPull && mode === "incremental") {
+          const newCursor: Record<string, number> = {
+            ...(configAfterPull.incrementalCursor || {}),
+          };
+          // Find max absolute row from imports
+          const maxExpenseRow = expenseRows.reduce((max: number, r: any) => {
+            const match = (r.__sourceId || "").match(/row-(\d+)/);
+            return match ? Math.max(max, Number.parseInt(match[1], 10)) : max;
+          }, newCursor.expenses || 0);
+          const maxIncomeRow = incomeRows.reduce((max: number, r: any) => {
+            const match = (r.__sourceId || "").match(/row-(\d+)/);
+            return match ? Math.max(max, Number.parseInt(match[1], 10)) : max;
+          }, newCursor.income || 0);
+
+          newCursor.expenses = Math.max(newCursor.expenses || 0, maxExpenseRow);
+          newCursor.income = Math.max(newCursor.income || 0, maxIncomeRow);
+
+          const nextConfig: GoogleSheetsSyncConfig = {
+            ...configAfterPull,
+            incrementalCursor: newCursor,
+            lastPullSummary: pullSummary,
+            lastPullAt: getIsoNow(),
+            lastError: null,
+          };
+          await saveUserProfilePatch({ googleSheetsConfig: nextConfig });
+          setGoogleSheetsError(null);
+          return pullSummary;
+        }
+
+        const configAfterPullSimple = sheetsConfigRef.current;
+        if (configAfterPullSimple) {
+          const nextConfig: GoogleSheetsSyncConfig = {
+            ...configAfterPullSimple,
+            lastPullSummary: pullSummary,
+            lastPullAt: getIsoNow(),
+            lastError: null,
+          };
+          await saveUserProfilePatch({ googleSheetsConfig: nextConfig });
+        }
+        setGoogleSheetsError(null);
+        return pullSummary;
       }
 
-      const configAfterPull = sheetsConfigRef.current;
-      if (!configAfterPull) {
-        throw new Error("Google Sheets config missing after pull.");
-      }
-
+      // Push direction
       if (direction === "push" || direction === "both") {
+        const config = sheetsConfigRef.current;
+        if (!config) throw new Error("Google Sheets config missing.");
         await syncAppDataToSheet(
           googleSheetsAccessToken,
-          configAfterPull,
+          config,
           transactionsRef.current,
-          incomeRef.current
+          incomeRef.current,
         );
+        const timestamp = getIsoNow();
+        const nextConfig: GoogleSheetsSyncConfig = {
+          ...config,
+          lastPushAt: timestamp,
+          lastError: null,
+        };
+        await saveUserProfilePatch({ googleSheetsConfig: nextConfig });
+        setGoogleSheetsError(null);
       }
-
-      const timestamp = getIsoNow();
-      const nextConfig: GoogleSheetsSyncConfig = {
-        ...configAfterPull,
-        lastSyncedAt: timestamp,
-        lastPullAt: direction === "push" ? configAfterPull.lastPullAt || null : timestamp,
-        lastPushAt: direction === "pull" ? configAfterPull.lastPushAt || null : timestamp,
-        lastError: null,
-      };
-
-      await saveUserProfilePatch({
-        googleSheetsConfig: nextConfig,
-        lastSyncedAt: timestamp,
-      });
-      setGoogleSheetsError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Google Sheets sync failed.";
       setGoogleSheetsError(message);
@@ -1515,10 +1770,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  // Migrate legacy localStorage mappings to Firestore on first load
   useEffect(() => {
-    // Sheets is now an explicit import/export workspace. Keep the saved cadence
-    // for legacy configs, but do not run background two-way sync.
-  }, [googleSheetsAccessToken, googleSheetsConfig]);
+    if (!user || loading) return;
+    if (googleSheetsConfig) return; // Already has Firestore config
+    void migrateLocalStorageMappings();
+  }, [user, loading, googleSheetsConfig, migrateLocalStorageMappings]);
 
   const signIn = async () => {
     await beginGoogleAuth(false);
@@ -2660,6 +2917,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         previewGoogleSheetColumn,
         saveGoogleSheetsConfig,
         syncGoogleSheets,
+        validateGoogleSheetsMapping: validateGoogleSheetsMappingFn,
+        googlePullSummary,
         backingUp,
         isSyncing,
         lastSynced,
