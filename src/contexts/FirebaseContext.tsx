@@ -122,6 +122,19 @@ const DEFAULT_PREFERENCES: Preferences = {
   coreExcludedCategories: DEFAULT_CORE_EXCLUDED,
 };
 
+const stripUndefinedFields = <T,>(value: T): T => {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedFields(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, stripUndefinedFields(v)]);
+    return Object.fromEntries(entries) as T;
+  }
+  return value;
+};
+
 const getIsoNow = () => new Date().toISOString();
 
 const renameLegacyCategory = (name: string) => LEGACY_CATEGORY_RENAMES[name] || name;
@@ -692,13 +705,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const currentUser = auth.currentUser;
     await setDoc(
       getUserDocRef(currentUser.uid),
-      {
+      stripUndefinedFields({
         budgetId: currentUser.uid,
         email: currentUser.email || "",
         displayName: currentUser.displayName || null,
         photoURL: currentUser.photoURL || null,
         ...patch,
-      },
+      }),
       { merge: true }
     );
   }, [getUserDocRef]);
@@ -1323,15 +1336,32 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const range = `'${sheetName.replace(/'/g, "''")}'!${start.cellRef}:${end.cellRef}`;
     const response = await getSheetValues(googleSheetsAccessToken, spreadsheetId, range);
     const rows = response.values || [];
-    const values = rows.map((row) => row[0] || "");
-    const headerValue = values[0] || "";
-    const dataValues = values.slice(1).filter((value) => value.trim().length > 0);
-    const samples = dataValues.slice(0, 3).map((value, index) => ({
-      cell: `${col}${start.rowIndex + 1 + index}`,
-      value,
-    }));
-    const last = dataValues.length > 0
-      ? { cell: `${col}${start.rowIndex + dataValues.length}`, value: dataValues[dataValues.length - 1] || "" }
+    const headerValue = rows[0]?.[0] || "";
+    const flattened: Array<{ rowIndex: number; colIndex: number; value: string }> = [];
+    rows.forEach((row, rowOffset) => {
+      // Start-cell row is the header row; preview samples should begin from the next row.
+      if (rowOffset === 0) return;
+      row.forEach((rawValue, colOffset) => {
+        const value = String(rawValue || "");
+        if (value.trim().length === 0) return;
+        flattened.push({
+          rowIndex: start.rowIndex + rowOffset,
+          colIndex: start.columnIndex + colOffset,
+          value,
+        });
+      });
+    });
+
+    const samples = flattened
+      .slice(0, 3)
+      .map((entry) => ({
+        cell: `${toColumnLabel(entry.colIndex)}${entry.rowIndex}`,
+        value: entry.value,
+      }));
+
+    const lastEntry = flattened.length > 0 ? flattened[flattened.length - 1] : null;
+    const last = lastEntry
+      ? { cell: `${toColumnLabel(lastEntry.colIndex)}${lastEntry.rowIndex}`, value: lastEntry.value }
       : null;
     return { headerValue, samples, last };
   };
@@ -1342,9 +1372,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const disconnectGoogleSheets = () => {
     storeAccessToken(null);
-    setGoogleSheetsConfig(null);
     setGoogleSheetsError(null);
-    void saveUserProfilePatch({ googleSheetsConfig: null });
   };
 
   const saveGoogleSheetsConfig = async (config: Omit<GoogleSheetsSyncConfig, "connectedAt" | "connectedBy">) => {
@@ -1523,19 +1551,23 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const missing: string[] = [];
     const reqExpFields = ["date", "vendor", "amount", "category"];
     const reqIncFields = ["date", "source", "amount", "category"];
+    let expenseComplete = true;
+    let incomeComplete = true;
 
     for (const field of reqExpFields) {
       if (!(config.expenseMapping as Record<string, string>)[field]?.trim()) {
         missing.push(`expenses.${field}`);
+        expenseComplete = false;
       }
     }
     for (const field of reqIncFields) {
       if (!(config.incomeMapping as Record<string, string>)[field]?.trim()) {
         missing.push(`income.${field}`);
+        incomeComplete = false;
       }
     }
-
-    return { valid: missing.length === 0, missing };
+    const valid = expenseComplete || incomeComplete;
+    return { valid, missing };
   }, []);
 
   const buildSheetRowsForPull = useCallback(async (
@@ -1543,63 +1575,131 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     config: GoogleSheetsSyncConfig,
     mode: GoogleSheetsSyncMode,
   ): Promise<{ rows: any[]; count: number }> => {
-    const { readSheetRecords } = await import("../utils/googleSheetsSync");
+    const {
+      getSheetColumnValuesUntilEmptyRun,
+      getSheetValues,
+      parseA1CellReference,
+    } = await import("../utils/googleSheetsSync");
 
     const allRows: any[] = [];
     let totalCount = 0;
 
-    // Build expense rows
-    const expSheet = await readSheetRecords(token, config.spreadsheetId, config.expensesSheetName);
     const expMapping = config.expenseMapping;
-    const expStartRow = config.expensesDataStartRow || 2;
-    const expCursor = mode === "incremental" ? (config.incrementalCursor?.expenses || 0) : 0;
+    const incMapping = config.incomeMapping;
+    const expenseReady = Boolean(expMapping.date && expMapping.vendor && expMapping.amount && expMapping.category);
+    const incomeReady = Boolean(incMapping.date && incMapping.source && incMapping.amount && incMapping.category);
 
-    for (const record of expSheet.records) {
-      if (record.rowNumber < expStartRow) continue;
-      const absRowIndex = record.rowNumber - 1;
-      if (mode === "incremental" && absRowIndex < expCursor) continue;
+    const readDraftValues = async (
+      sheetName: string,
+      draft: SheetRangeDraft | undefined
+    ): Promise<{ values: string[]; dataStartRowNumber: number }> => {
+      const startCell = draft?.startCell || "";
+      const parsedStart = parseA1CellReference(startCell);
+      if (!parsedStart) {
+        return { values: [], dataStartRowNumber: 2 };
+      }
 
-      const date = record.values[expMapping.date]?.trim() || "";
-      const vendor = record.values[expMapping.vendor]?.trim() || "";
-      const amountRaw = record.values[expMapping.amount]?.trim() || "";
-      const category = record.values[expMapping.category]?.trim() || "";
-      const notes = record.values[expMapping.notes]?.trim() || "";
-      const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
+      const dataStartRowNumber = parsedStart.rowIndex + 1;
+      if (draft?.noEnd || !draft?.endCell) {
+        const values = await getSheetColumnValuesUntilEmptyRun(
+          token,
+          config.spreadsheetId,
+          sheetName,
+          parsedStart.columnIndex,
+          dataStartRowNumber,
+        );
+        return { values, dataStartRowNumber };
+      }
 
-      if (!date || !vendor || amount <= 0) continue;
-      totalCount += 1;
-      allRows.push({
-        __row: [date, vendor, amount, category, notes],
-        __sourceId: `google_sheet-row-${absRowIndex}`,
-        __rawDescription: [date, vendor, amount, category, notes].join(", "),
-      });
+      const range = `'${sheetName.replace(/'/g, "''")}'!${parsedStart.cellRef}:${draft.endCell}`;
+      const response = await getSheetValues(token, config.spreadsheetId, range);
+      const rows = response.values || [];
+      const values = rows.slice(1).map((row) => (row[0] || "").trim());
+      return { values, dataStartRowNumber };
+    };
+
+    // Build expense rows (optional)
+    if (expenseReady) {
+      try {
+        const expDate = await readDraftValues(config.expensesSheetName, config.expenseRangeDrafts?.date);
+        const expVendor = await readDraftValues(config.expensesSheetName, config.expenseRangeDrafts?.vendor);
+        const expAmount = await readDraftValues(config.expensesSheetName, config.expenseRangeDrafts?.amount);
+        const expCategory = await readDraftValues(config.expensesSheetName, config.expenseRangeDrafts?.category);
+        const expNotes = await readDraftValues(config.expensesSheetName, config.expenseRangeDrafts?.notes);
+        const expStartRow = expDate.dataStartRowNumber || config.expensesDataStartRow || 2;
+        const expCursor = mode === "incremental" ? (config.incrementalCursor?.expenses || 0) : 0;
+        const expRowCount = Math.max(
+          expDate.values.length,
+          expVendor.values.length,
+          expAmount.values.length,
+          expCategory.values.length,
+          expNotes.values.length,
+        );
+
+        for (let offset = 0; offset < expRowCount; offset += 1) {
+          const absRowIndex = expStartRow + offset - 1;
+          if (mode === "incremental" && absRowIndex < expCursor) continue;
+
+          const date = (expDate.values[offset] || "").trim();
+          const vendor = (expVendor.values[offset] || "").trim();
+          const amountRaw = (expAmount.values[offset] || "").trim();
+          const category = (expCategory.values[offset] || "").trim();
+          const notes = (expNotes.values[offset] || "").trim();
+          const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
+
+          if (!date || !vendor || amount <= 0) continue;
+          totalCount += 1;
+          allRows.push({
+            __row: [date, vendor, amount, category, notes],
+            __sourceId: `google_sheet-row-${absRowIndex}`,
+            __rawDescription: [date, vendor, amount, category, notes].join(", "),
+          });
+        }
+      } catch {
+        // Keep pull resilient for partial mapping setups (e.g., income-only).
+      }
     }
 
-    // Build income rows
-    const incSheet = await readSheetRecords(token, config.spreadsheetId, config.incomeSheetName);
-    const incMapping = config.incomeMapping;
-    const incStartRow = config.incomeDataStartRow || 2;
-    const incCursor = mode === "incremental" ? (config.incrementalCursor?.income || 0) : 0;
+    // Build income rows (optional)
+    if (incomeReady) {
+      try {
+        const incDate = await readDraftValues(config.incomeSheetName, config.incomeRangeDrafts?.date);
+        const incSource = await readDraftValues(config.incomeSheetName, config.incomeRangeDrafts?.source);
+        const incAmount = await readDraftValues(config.incomeSheetName, config.incomeRangeDrafts?.amount);
+        const incCategory = await readDraftValues(config.incomeSheetName, config.incomeRangeDrafts?.category);
+        const incNotes = await readDraftValues(config.incomeSheetName, config.incomeRangeDrafts?.notes);
+        const incStartRow = incDate.dataStartRowNumber || config.incomeDataStartRow || 2;
+        const incCursor = mode === "incremental" ? (config.incrementalCursor?.income || 0) : 0;
+        const incRowCount = Math.max(
+          incDate.values.length,
+          incSource.values.length,
+          incAmount.values.length,
+          incCategory.values.length,
+          incNotes.values.length,
+        );
 
-    for (const record of incSheet.records) {
-      if (record.rowNumber < incStartRow) continue;
-      const absRowIndex = record.rowNumber - 1;
-      if (mode === "incremental" && absRowIndex < incCursor) continue;
+        for (let offset = 0; offset < incRowCount; offset += 1) {
+          const absRowIndex = incStartRow + offset - 1;
+          if (mode === "incremental" && absRowIndex < incCursor) continue;
 
-      const date = record.values[incMapping.date]?.trim() || "";
-      const source = record.values[incMapping.source]?.trim() || "";
-      const amountRaw = record.values[incMapping.amount]?.trim() || "";
-      const category = record.values[incMapping.category]?.trim() || "";
-      const notes = record.values[incMapping.notes]?.trim() || "";
-      const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
+          const date = (incDate.values[offset] || "").trim();
+          const source = (incSource.values[offset] || "").trim();
+          const amountRaw = (incAmount.values[offset] || "").trim();
+          const category = (incCategory.values[offset] || "").trim();
+          const notes = (incNotes.values[offset] || "").trim();
+          const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
 
-      if (!date || !source || amount <= 0) continue;
-      totalCount += 1;
-      allRows.push({
-        __row: [date, source, amount, category, notes],
-        __sourceId: `google_sheet-income-row-${absRowIndex}`,
-        __rawDescription: [date, source, amount, category, notes].join(", "),
-      });
+          if (!date || !source || amount <= 0) continue;
+          totalCount += 1;
+          allRows.push({
+            __row: [date, source, amount, category, notes],
+            __sourceId: `google_sheet-income-row-${absRowIndex}`,
+            __rawDescription: [date, source, amount, category, notes].join(", "),
+          });
+        }
+      } catch {
+        // Keep pull resilient for partial mapping setups (e.g., expenses-only).
+      }
     }
 
     return { rows: allRows, count: totalCount };
@@ -1634,12 +1734,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         let imported = 0;
         let duplicateSkipped = 0;
         let invalidSkipped = 0;
+        const expenseRows = rows.filter((r: any) => !r.__sourceId?.includes("income-"));
+        const incomeRows = rows.filter((r: any) => r.__sourceId?.includes("income-"));
 
         if (rows.length > 0) {
-          // For expenses rows in the batch, route them through preview/commit
-          const expenseRows = rows.filter((r: any) => !r.__sourceId?.includes("income-"));
-          const incomeRows = rows.filter((r: any) => r.__sourceId?.includes("income-"));
-
           if (expenseRows.length > 0) {
             const batch = previewImportBatch({
               source: "google_sheet",

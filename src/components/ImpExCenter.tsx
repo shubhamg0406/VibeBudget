@@ -810,9 +810,9 @@ export const ImpExCenter: React.FC<ImpExCenterProps> = ({ onRefresh, onNavigateT
 
       {/* History */}
       <div className="rounded-2xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-        <h3 className="mb-4 flex items-center gap-2 font-bold"><History size={16} /> ImpEx Activity</h3>
+        <h3 className="mb-4 flex items-center gap-2 font-bold"><History size={16} /> Data Hub Activity</h3>
         {history.length === 0 ? (
-          <p className="text-xs text-fintech-muted">No ImpEx activity yet.</p>
+          <p className="text-xs text-fintech-muted">No Data Hub activity yet.</p>
         ) : (
           <div className="space-y-2">
             {history.map((entry) => (
