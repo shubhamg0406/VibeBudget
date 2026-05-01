@@ -109,7 +109,7 @@ const sanitizeMessages = (messages: unknown): ApiMessage[] => {
     .filter((item): item is ApiMessage => Boolean(item));
 };
 
-const readBody = (body: unknown): { messages: unknown; uid?: unknown; idToken?: unknown } => {
+const readBody = (body: unknown): { messages: unknown; uid?: unknown; idToken?: unknown; aiConfig?: unknown } => {
   if (!body) return { messages: [] };
   if (typeof body === "string") {
     try {
@@ -119,7 +119,7 @@ const readBody = (body: unknown): { messages: unknown; uid?: unknown; idToken?: 
     }
   }
   if (typeof body === "object") {
-    return body as { messages: unknown; uid?: unknown; idToken?: unknown };
+    return body as { messages: unknown; uid?: unknown; idToken?: unknown; aiConfig?: unknown };
   }
   return { messages: [] };
 };
@@ -710,10 +710,6 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: "Method not allowed." });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(500).json({ error: "Missing GEMINI_API_KEY server configuration." });
-  }
-
   const parsedBody = readBody(req.body);
   const messages = sanitizeMessages(parsedBody.messages);
   if (messages.length === 0) {
@@ -765,37 +761,26 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const rawAiConfig = parsedBody.aiConfig as Record<string, string> | undefined;
+  const hasUserConfig = rawAiConfig && typeof rawAiConfig.provider === "string" && typeof rawAiConfig.apiKey === "string";
+  const config: { provider: "gemini" | "deepseek"; model: string; apiKey: string } = hasUserConfig
+    ? { provider: rawAiConfig.provider as "gemini" | "deepseek", model: rawAiConfig.model || "deepseek-chat", apiKey: rawAiConfig.apiKey }
+    : { provider: "gemini", model: process.env.GEMINI_MODEL || "gemini-2.5-flash", apiKey: process.env.GEMINI_API_KEY || "" };
 
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: geminiModel,
-      temperature: 0.1,
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        ...messages,
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const details = await getProviderErrorMessage(response);
-    return res.status(response.status).json({ error: details });
+  if (!config.apiKey) {
+    return res.status(500).json({ error: "AI API key is not configured. Set it in Settings or add GEMINI_API_KEY to your environment." });
   }
 
-  const payload = await response.json() as GeminiCompletionResponse;
-  const reply = payload.choices?.[0]?.message?.content?.trim();
-  if (!reply) {
-    return res.status(502).json({ error: "Gemini returned an empty response." });
-  }
+  const { callAiChat } = await import("../src/server/aiClient.js");
 
-  return res.status(200).json({ reply });
+  try {
+    const reply = await callAiChat(config, [
+      { role: "system", content: systemPrompt },
+      ...messages,
+    ]);
+    return res.status(200).json({ reply });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "AI request failed";
+    return res.status(502).json({ error: message });
+  }
 }

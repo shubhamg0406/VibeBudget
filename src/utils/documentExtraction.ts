@@ -1,4 +1,4 @@
-import type { ExtractTransactionsResponse } from "../types";
+import type { AiProviderConfig, ExtractTransactionsResponse } from "../types";
 
 const readFileAsBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -16,7 +16,8 @@ const readFileAsBase64 = (file: File): Promise<string> => {
 export const extractTransactionsFromFiles = async (
   files: File[],
   targetType: "expenses" | "income",
-  uid?: string
+  uid?: string,
+  aiConfig?: AiProviderConfig | null,
 ): Promise<ExtractTransactionsResponse> => {
   const fileData = await Promise.all(
     files.map(async (file) => ({
@@ -32,7 +33,7 @@ export const extractTransactionsFromFiles = async (
       "Content-Type": "application/json",
       ...(uid ? { "x-user-id": uid } : {}),
     },
-    body: JSON.stringify({ files: fileData, targetType }),
+    body: JSON.stringify({ files: fileData, targetType, aiConfig }),
   });
 
   if (!response.ok) {

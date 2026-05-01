@@ -119,6 +119,7 @@ export interface ExtractedTransactionCandidate {
 export interface ExtractTransactionsRequest {
   files: Array<{ name: string; type: string; content: string }>;
   targetType: "expenses" | "income";
+  aiConfig?: AiProviderConfig;
 }
 
 export interface ExtractTransactionsResponse {
@@ -491,3 +492,33 @@ export interface RestoreStatusSummary {
     income: number;
   };
 }
+
+export type AiProvider = "gemini" | "deepseek";
+
+export interface AiProviderConfig {
+  provider: AiProvider;
+  model: string;
+  apiKey: string;
+}
+
+export const AI_PROVIDER_MODELS: Record<AiProvider, { label: string; value: string }[]> = {
+  gemini: [
+    { label: "Gemini 2.5 Flash (fast, good accuracy)", value: "gemini-2.5-flash" },
+    { label: "Gemini 2.5 Pro (best accuracy)", value: "gemini-2.5-pro" },
+    { label: "Gemini 2.5 Flash Lite (fastest, text-only)", value: "gemini-2.5-flash-lite" },
+  ],
+  deepseek: [
+    { label: "DeepSeek Chat (V3, general purpose)", value: "deepseek-chat" },
+    { label: "DeepSeek Reasoner (R1, reasoning)", value: "deepseek-reasoner" },
+  ],
+};
+
+export const AI_PROVIDER_LABELS: Record<AiProvider, string> = {
+  gemini: "Google Gemini",
+  deepseek: "DeepSeek",
+};
+
+export const AI_PROVIDER_DEFAULT_MODEL: Record<AiProvider, string> = {
+  gemini: "gemini-2.5-flash",
+  deepseek: "deepseek-chat",
+};

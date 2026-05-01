@@ -44,7 +44,7 @@ const readStoredMessages = (uid: string): ChatMessage[] => {
 };
 
 export const AiChat: React.FC = () => {
-  const { user } = useFirebase();
+  const { user, aiConfig } = useFirebase();
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -115,6 +115,7 @@ export const AiChat: React.FC = () => {
           messages: nextMessages,
           uid: user.uid,
           idToken,
+          aiConfig,
         }),
       });
 

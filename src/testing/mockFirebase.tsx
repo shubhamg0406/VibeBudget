@@ -229,6 +229,10 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     fetchTellerAccounts: async () => [],
     setTellerCredentials: noop,
     setTellerCategoryMappings: noop,
+
+    // AI
+    aiConfig: null,
+    saveAiConfig: async () => {},
   };
 };
 

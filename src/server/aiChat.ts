@@ -1,5 +1,7 @@
 import type express from "express";
 import fs from "fs";
+import { callAiChat } from "./aiClient.js";
+import type { AiProviderConfig } from "../types.js";
 
 export type ChatRole = "user" | "assistant";
 type ApiChatRole = "user" | "assistant";
@@ -75,8 +77,9 @@ const extractProviderErrorMessage = (rawPayload: unknown, fallback: string) => {
 export interface AiChatDependencies {
   verifyIdToken: (idToken: string) => Promise<DecodedToken>;
   loadUserBudgetData: (uid: string, now: Date, idToken?: string) => Promise<BudgetData>;
-  callGroq: (messages: Array<{ role: "system" | "user" | "assistant"; content: string }>) => Promise<string>;
+  callGroq: (messages: Array<{ role: "system" | "user" | "assistant"; content: string }>, aiConfig?: AiProviderConfig) => Promise<string>;
   now?: () => Date;
+  resolveAiConfig?: () => AiProviderConfig;
 }
 
 interface FirebaseAccountsLookupResponse {
@@ -404,40 +407,26 @@ const BASE_SYSTEM_PROMPT = [
   "If you do not have enough user-specific data, say that clearly instead of guessing.",
 ].join(" ");
 
+const resolveAiConfigFromEnv = (): AiProviderConfig => ({
+  provider: "gemini",
+  model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  apiKey: process.env.GEMINI_API_KEY || "",
+});
+
 const callGroqApiChat = async (
   messages: Array<{ role: ApiChatRole; content: string }>,
   systemPrompt: string,
+  aiConfig?: AiProviderConfig,
 ): Promise<string> => {
-  const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: geminiModel,
-      temperature: 0.1,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages,
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const rawPayload = await response.json().catch(() => null);
-    const message = extractProviderErrorMessage(rawPayload, `Gemini request failed (${response.status})`);
-    throw new HttpError(response.status, message);
+  const config = aiConfig || resolveAiConfigFromEnv();
+  if (!config.apiKey) {
+    throw new HttpError(500, "AI API key is not configured. Set it in Settings or add GEMINI_API_KEY to your environment.");
   }
 
-  const payload = await response.json() as GroqResponse;
-  const reply = payload.choices?.[0]?.message?.content?.trim();
-  if (!reply) {
-    throw new HttpError(502, "Gemini returned an empty response.");
-  }
-  return reply;
+  return callAiChat(config, [
+    { role: "system", content: systemPrompt },
+    ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+  ]);
 };
 
 const isRestFallbackEnabled = () => {
@@ -707,42 +696,20 @@ const isQuotaExceededError = (error: unknown) => {
 
 const callGroqChatCompletion = async (
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+  aiConfig?: AiProviderConfig,
 ): Promise<string> => {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new HttpError(500, "Missing GEMINI_API_KEY server configuration.");
-  }
-  const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: geminiModel,
-      temperature: 0.2,
-      messages,
-    }),
-  });
-
-  if (response.status === 429) {
-    throw new HttpError(429, "Gemini rate limit reached. Please retry in a moment.");
+  const config = aiConfig || resolveAiConfigFromEnv();
+  if (!config.apiKey) {
+    throw new HttpError(500, "AI API key is not configured. Set it in Settings or add GEMINI_API_KEY to your environment.");
   }
 
-  if (!response.ok) {
-    const rawPayload = await response.json().catch(() => null);
-    throw new HttpError(502, extractProviderErrorMessage(rawPayload, "Gemini request failed."));
+  try {
+    return await callAiChat(config, messages);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    const message = error instanceof Error ? error.message : "AI request failed";
+    throw new HttpError(502, message);
   }
-
-  const payload = await response.json() as GroqResponse;
-  const reply = payload.choices?.[0]?.message?.content?.trim();
-
-  if (!reply) {
-    throw new HttpError(502, "Gemini returned an empty response.");
-  }
-
-  return reply;
 };
 
 const defaultAiDeps: AiChatDependencies = {
@@ -783,8 +750,9 @@ const defaultAiDeps: AiChatDependencies = {
     }
   },
   loadUserBudgetData: loadUserBudgetDataFromFirestore,
-  callGroq: callGroqChatCompletion,
+  callGroq: async (messages, aiConfig) => callGroqChatCompletion(messages, aiConfig),
   now: () => new Date(),
+  resolveAiConfig: resolveAiConfigFromEnv,
 };
 
 export const registerAiChatRoute = (
@@ -797,10 +765,6 @@ export const registerAiChatRoute = (
     console.log("GEMINI_API_KEY present:", !!process.env.GEMINI_API_KEY);
 
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        return res.status(500).json({ error: "Missing GEMINI_API_KEY server configuration. Add GEMINI_API_KEY to .env.local (local) and your hosting environment settings (production)." });
-      }
-
       const rawMessages = req.body?.messages;
       if (!Array.isArray(rawMessages)) {
         return res.status(400).json({ error: "`messages` must be an array of { role, content } objects." });
@@ -859,7 +823,8 @@ export const registerAiChatRoute = (
         systemPrompt = buildSystemPrompt(summary, now);
       }
 
-      const reply = await callGroqApiChat(messages, systemPrompt);
+      const aiConfig = req.body?.aiConfig as AiProviderConfig | undefined;
+      const reply = await callGroqApiChat(messages, systemPrompt, aiConfig);
       return res.json({ reply });
     } catch (error) {
       if (error instanceof HttpError) {
@@ -873,7 +838,8 @@ export const registerAiChatRoute = (
   });
 
   app.post("/api/ai-chat", async (req, res) => {
-    const { message, uid, idToken, history } = req.body || {};
+    const { message, uid, idToken, history, aiConfig } = req.body || {};
+    const resolvedAiConfig = (aiConfig || aiDeps.resolveAiConfig?.()) as AiProviderConfig | undefined;
 
     if (!message || typeof message !== "string") {
       return res.status(400).json({ error: "`message` is required." });
@@ -930,11 +896,14 @@ export const registerAiChatRoute = (
       const systemPrompt = buildSystemPrompt(summary, now);
       const recentHistory = sanitizeHistory(history).slice(-20);
 
-      const reply = await aiDeps.callGroq([
-        { role: "system", content: systemPrompt },
-        ...recentHistory,
-        { role: "user", content: message.trim() },
-      ]);
+      const reply = await aiDeps.callGroq(
+        [
+          { role: "system", content: systemPrompt },
+          ...recentHistory,
+          { role: "user", content: message.trim() },
+        ],
+        resolvedAiConfig,
+      );
 
       return res.json({ reply });
     } catch (error) {
