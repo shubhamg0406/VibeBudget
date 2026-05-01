@@ -23,8 +23,10 @@ import {
   ExchangeRate,
   ExpenseCategory,
   ExpenseSheetMapping,
+  GooglePullSummary,
   GoogleSheetsSyncConfig,
   GoogleSheetsSyncDirection,
+  GoogleSheetsSyncMode,
   Income,
   IncomeCategory,
   IncomeSheetMapping,
@@ -208,6 +210,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     previewGoogleSheetColumn,
     saveGoogleSheetsConfig,
     syncGoogleSheets,
+    validateGoogleSheetsMapping,
+    googlePullSummary,
     driveConnection,
     driveConnected,
     driveSyncError,
@@ -294,6 +298,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   const [sheetAutoSync, setSheetAutoSync] = useState(true);
   const [loadingSheetConfig, setLoadingSheetConfig] = useState(false);
   const [savingSheetConfig, setSavingSheetConfig] = useState(false);
+  const [pullMode, setPullMode] = useState<GoogleSheetsSyncMode>("incremental");
+  const [mappingSavedAt, setMappingSavedAt] = useState<string | null>(null);
   const [expenseHeaders, setExpenseHeaders] = useState<string[]>([]);
   const [incomeHeaders, setIncomeHeaders] = useState<string[]>([]);
   const [expenseCategoryHeaders, setExpenseCategoryHeaders] = useState<string[]>([]);
@@ -407,6 +413,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     if (googleSheetsConfig.incomeRangeDrafts) setIncomeRangeDrafts(googleSheetsConfig.incomeRangeDrafts);
     if (googleSheetsConfig.expenseCategoryRangeDrafts) setExpenseCategoryRangeDrafts(googleSheetsConfig.expenseCategoryRangeDrafts);
     if (googleSheetsConfig.incomeCategoryRangeDrafts) setIncomeCategoryRangeDrafts(googleSheetsConfig.incomeCategoryRangeDrafts);
+    if (googleSheetsConfig.mappingSavedAt) setMappingSavedAt(googleSheetsConfig.mappingSavedAt);
   }, [googleSheetsConfig]);
 
   useEffect(() => {
@@ -429,6 +436,42 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   const setSectionStatus = (section: SettingsTab, level: StatusLevel, message: string, action?: string) => {
     setStatus({ section, level, message, action });
   };
+
+  const googleSheetsStage = useMemo<{
+    label: string;
+    color: string;
+    bg: string;
+    icon: string;
+  }>(() => {
+    if (googleSheetsError) {
+      return { label: "Error — check message below", color: "text-fintech-danger", bg: "bg-fintech-danger/10", icon: "X" };
+    }
+    if (googleSheetsSyncing) {
+      return { label: "Syncing...", color: "text-fintech-accent", bg: "bg-fintech-accent/10", icon: "RefreshCw" };
+    }
+    if (!googleSheetsConnected) {
+      return { label: "Disconnected — connect your Google account", color: "text-fintech-muted", bg: "bg-[var(--app-ghost)]", icon: "X" };
+    }
+    if (!googleSheetsConfig) {
+      return { label: "Connected — verify a sheet URL", color: "text-fintech-import", bg: "bg-fintech-import/10", icon: "Cloud" };
+    }
+    if (!mappingSavedAt) {
+      return { label: "Connected — save your column mapping", color: "text-fintech-import", bg: "bg-fintech-import/10", icon: "Save" };
+    }
+    if (googlePullSummary) {
+      return { label: `Last pull: ${googlePullSummary.fetched} fetched, ${googlePullSummary.imported} imported`, color: "text-fintech-accent", bg: "bg-fintech-accent/10", icon: "CheckCircle2" };
+    }
+    return { label: "Ready to pull data", color: "text-fintech-accent", bg: "bg-fintech-accent/10", icon: "RefreshCw" };
+  }, [googleSheetsConnected, googleSheetsConfig, googleSheetsSyncing, googleSheetsError, mappingSavedAt, googlePullSummary]);
+
+  const canPull = useMemo(() => {
+    if (!googleSheetsConnected) return false;
+    if (!googleSheetsConfig) return false;
+    if (!mappingSavedAt) return false;
+    if (googleSheetsSyncing) return false;
+    const mappingCheck = validateGoogleSheetsMapping();
+    return mappingCheck.valid;
+  }, [googleSheetsConnected, googleSheetsConfig, googleSheetsSyncing, mappingSavedAt, validateGoogleSheetsMapping]);
 
   const renderStatusStrip = (section: SettingsTab) => {
     const isWorkspace = section === "google_workspace";
@@ -990,7 +1033,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         lastSyncedAt: googleSheetsConfig?.lastSyncedAt || null,
       };
       await saveGoogleSheetsConfig(payload);
-      setSectionStatus("google_workspace", "success", "CloudSync configuration saved.");
+      setMappingSavedAt(new Date().toISOString());
+      setSectionStatus("google_workspace", "success", `Mapping saved at ${new Date().toLocaleTimeString()}.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save CloudSync config.";
       setSectionStatus("google_workspace", "error", getCloudActionableError(message));
@@ -999,17 +1043,25 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     }
   };
 
-  const handleGoogleSheetsSync = async (direction: GoogleSheetsSyncDirection = "pull") => {
+  const handleGoogleSheetsSync = async (direction: GoogleSheetsSyncDirection = "pull", mode?: GoogleSheetsSyncMode) => {
     const allowed = await ensureSheetAuthorization();
     if (!allowed) return;
     try {
-      await syncGoogleSheets(direction);
-      const message = direction === "both"
-        ? "Sync complete (pull + push)."
-        : direction === "push"
-          ? "Push complete. App changes uploaded to Google Sheet."
-          : "Pull complete. Latest sheet changes imported.";
-      setSectionStatus("google_workspace", "success", message, "sync-now");
+      const summary = await syncGoogleSheets(direction, { mode });
+      if (direction === "pull" && summary && typeof summary === "object" && "netNew" in summary) {
+        const s = summary as GooglePullSummary;
+        setSectionStatus("google_workspace", "success",
+          `Pull complete: ${s.fetched} fetched, ${s.imported} imported, ${s.duplicateSkipped} duplicates skipped, ${s.invalidSkipped} invalid, ${s.netNew} net new.`,
+          "sync-now"
+        );
+      } else {
+        const message = direction === "both"
+          ? "Sync complete (pull + push)."
+          : direction === "push"
+            ? "Push complete. App changes uploaded to Google Sheet."
+            : "Pull complete. Latest sheet changes imported.";
+        setSectionStatus("google_workspace", "success", message, "sync-now");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to sync Google Sheets.";
       setSectionStatus("google_workspace", "error", getCloudActionableError(message), "sync-now");
@@ -1980,308 +2032,371 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
         {activeTab === "google_workspace" && (
           <section className="space-y-5">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Cloud size={16} className="text-fintech-accent" /> Google Workspace</div>
-            <p className="text-xs text-fintech-muted">Manage your Google Sheets data source and Drive backup vault in one place.</p>
+            <p className="text-xs text-fintech-muted">Mapping-first pull flow: connect a sheet, map your columns, then pull data.</p>
             {renderStatusStrip("google_workspace")}
 
-            {/* Step 1 — Connection Hub */}
+            {/* Stage Indicator */}
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-[var(--app-panel)] px-4 py-3 text-xs" style={{ borderColor: "var(--app-border)" }}>
+              <span className="font-semibold text-fintech-muted">Status:</span>
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold ${googleSheetsStage.bg} ${googleSheetsStage.color}`}>
+                {googleSheetsStage.label}
+              </span>
+            </div>
+
+            {/* Step 1: Connect Google Sheets */}
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
               <div className="mb-4 flex items-center gap-2">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-fintech-accent/10 text-[10px] font-bold text-fintech-accent">1</span>
-                <h3 className="font-bold">Connect Your Accounts</h3>
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${googleSheetsConnected ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>1</span>
+                <h3 className="font-bold">Connect Google Sheets</h3>
+                {googleSheetsConnected && (
+                  <span className="ml-auto flex items-center gap-1 rounded-full bg-fintech-accent/10 px-2 py-0.5 text-[10px] font-bold text-fintech-accent">
+                    <CheckCircle2 size={10} /> Connected
+                  </span>
+                )}
               </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                {/* Google Account */}
-                <div className="flex flex-col gap-2 rounded-lg bg-[var(--app-ghost)] p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold">Google Account</span>
-                    {googleSheetsConnected ? (
-                      <span className="rounded-full bg-fintech-accent/10 px-2 py-0.5 text-[10px] font-bold text-fintech-accent">Connected</span>
-                    ) : (
-                      <span className="rounded-full bg-[var(--app-panel)] px-2 py-0.5 text-[10px] font-bold text-fintech-muted">Not Connected</span>
-                    )}
-                  </div>
-                  <p className="text-[10px] leading-relaxed text-fintech-muted">Authorization is requested only when you interact with a sheet.</p>
-                  <div>
-                    {!googleSheetsConnected ? (
-                      <button onClick={handleGoogleSheetsConnect} className="rounded-md bg-fintech-accent/10 px-3 py-1.5 text-[11px] font-bold text-fintech-accent hover:bg-fintech-accent/20 transition-colors">Authorize</button>
-                    ) : (
-                      <button onClick={disconnectGoogleSheets} className="rounded-md bg-[var(--app-panel)] px-3 py-1.5 text-[11px] font-bold hover:bg-[var(--app-border)] transition-colors">Disconnect</button>
-                    )}
-                  </div>
-                </div>
 
-                {/* Google Sheet Status */}
-                <div className="flex flex-col gap-2 rounded-lg bg-[var(--app-ghost)] p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold">Google Sheet</span>
-                    {googleSheetsConfig ? (
-                      <span className="rounded-full bg-fintech-accent/10 px-2 py-0.5 text-[10px] font-bold text-fintech-accent">Configured</span>
-                    ) : (
-                      <span className="rounded-full bg-[var(--app-panel)] px-2 py-0.5 text-[10px] font-bold text-fintech-muted">Not Set</span>
-                    )}
-                  </div>
-                  <p className="truncate text-[10px] leading-relaxed text-fintech-muted">{googleSheetsConfig?.spreadsheetTitle || "No spreadsheet linked yet"}</p>
-                  {googleSheetsConfig && (
-                    <div className="space-y-0.5 text-[10px] text-fintech-muted">
-                      <div>Tabs: {googleSheetsConfig.expensesSheetName} / {googleSheetsConfig.incomeSheetName}</div>
-                      {googleSheetsConfig.lastPullAt && <div>Last pull: {new Date(googleSheetsConfig.lastPullAt).toLocaleDateString()}</div>}
-                    </div>
+              {/* Google Account */}
+              <div className="mb-4 flex items-center justify-between rounded-lg bg-[var(--app-ghost)] p-3">
+                <div>
+                  <span className="text-xs font-semibold">Google Account</span>
+                  {!googleSheetsConnected && (
+                    <p className="mt-0.5 text-[10px] text-fintech-muted">Authorize Google to read your sheets</p>
                   )}
                 </div>
+                {!googleSheetsConnected ? (
+                  <button onClick={handleGoogleSheetsConnect} className="rounded-lg bg-fintech-accent px-4 py-2 text-xs font-bold text-[#002919] hover:bg-fintech-accent/90 transition-colors">Authorize Google</button>
+                ) : (
+                  <button onClick={disconnectGoogleSheets} className="rounded-lg bg-[var(--app-panel)] px-4 py-2 text-xs font-bold hover:bg-[var(--app-border)] transition-colors">Disconnect</button>
+                )}
+              </div>
 
-                {/* Drive Mirror Status */}
-                <div className="flex flex-col gap-2 rounded-lg bg-[var(--app-ghost)] p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold">Drive Mirror</span>
-                    {driveConnected ? (
-                      <span className="rounded-full bg-fintech-accent/10 px-2 py-0.5 text-[10px] font-bold text-fintech-accent">Connected</span>
-                    ) : (
-                      <span className="rounded-full bg-[var(--app-panel)] px-2 py-0.5 text-[10px] font-bold text-fintech-muted">Not Connected</span>
+              {/* Sheet URL + Verify */}
+              <div className="space-y-3">
+                <label className="block space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Spreadsheet URL</span>
+                  <div className="flex gap-2">
+                    <input
+                      value={sheetUrl}
+                      onChange={(e) => setSheetUrl(e.target.value)}
+                      placeholder="https://docs.google.com/spreadsheets/d/..."
+                      className="flex-1 rounded-lg border bg-[var(--app-panel-strong)] px-4 py-2 text-sm"
+                      style={{ borderColor: "var(--app-border)" }}
+                    />
+                    {googleSheetsConnected && (
+                      <button
+                        onClick={() => void handleInspectGoogleSheet()}
+                        disabled={loadingSheetConfig}
+                        className="rounded-lg bg-fintech-accent/10 px-4 py-2 text-xs font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors"
+                      >
+                        {loadingSheetConfig ? "Verifying..." : "Verify"}
+                      </button>
                     )}
                   </div>
-                  <p className="truncate text-[10px] leading-relaxed text-fintech-muted">{driveConnection?.folderName || "No drive folder linked"}</p>
-                  {driveConnection?.lastMirrorAt && <p className="text-[10px] text-fintech-muted">Last mirror: {new Date(driveConnection.lastMirrorAt).toLocaleDateString()}</p>}
-                  {driveConnection?.folderUrl && (
-                    <a className="mt-auto text-[10px] font-medium text-fintech-accent hover:underline" href={driveConnection.folderUrl} target="_blank" rel="noreferrer">Open Drive Folder</a>
-                  )}
-                </div>
+                </label>
+
+                {sheetTitle && (
+                  <div className="rounded-lg bg-fintech-accent/5 px-3 py-2 text-xs text-fintech-accent">
+                    Verified: <span className="font-semibold">{sheetTitle}</span>
+                    {availableSheetTabs.length > 0 && (
+                      <span className="ml-2 text-fintech-muted">· {availableSheetTabs.length} tab(s) found</span>
+                    )}
+                  </div>
+                )}
+
+                {googleSheetsError && (
+                  <div className="rounded-lg bg-fintech-danger/10 px-3 py-2 text-xs text-fintech-danger">
+                    {getCloudActionableError(googleSheetsError)}
+                  </div>
+                )}
+
+                {!sheetUrl && (
+                  <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-[11px] text-fintech-muted">
+                    Paste a Google Sheets URL above and click Verify to check access.
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Section A — Google Sheets Source */}
+            {/* Step 2: Map Columns — only shown after sheet verified */}
+            {(expenseHeaders.length > 0 || incomeHeaders.length > 0) && (
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
               <div className="mb-4 flex items-center gap-2">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-fintech-accent/10 text-[10px] font-bold text-fintech-accent">A</span>
-                <h3 className="font-bold">Google Sheets Source</h3>
-                {sheetTitle && <span className="ml-auto text-[10px] font-bold uppercase tracking-widest text-fintech-muted">{sheetTitle}</span>}
+                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${mappingSavedAt ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted"}`}>2</span>
+                <h3 className="font-bold">Map Columns</h3>
+                {mappingSavedAt && (
+                  <span className="ml-auto flex items-center gap-1 rounded-full bg-fintech-accent/10 px-2 py-0.5 text-[10px] font-bold text-fintech-accent">
+                    <CheckCircle2 size={10} /> Mapping saved at {new Date(mappingSavedAt).toLocaleTimeString()}
+                  </span>
+                )}
               </div>
 
-              {/* Mode Chooser */}
-              <div className="mb-4 flex items-center gap-2 rounded-lg bg-[var(--app-ghost)] p-1 w-fit">
-                <button onClick={() => setSheetMode("live_sync")} className={`rounded-md px-3 py-1 text-[11px] font-bold ${sheetMode === "live_sync" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>Live Sync</button>
-                <button onClick={() => setSheetMode("one_time")} className={`rounded-md px-3 py-1 text-[11px] font-bold ${sheetMode === "one_time" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>One-time Pull</button>
+              {/* Mapping Tab Bar */}
+              <div className="mb-4 flex flex-wrap gap-1.5">
+                {(["expenses", "income", "expense_categories", "income_categories"] as const).map((tab) => {
+                  const hasHeaders = tab === "expenses" ? expenseHeaders.length > 0
+                    : tab === "income" ? incomeHeaders.length > 0
+                    : tab === "expense_categories" ? expenseCategoryHeaders.length > 0
+                    : incomeCategoryHeaders.length > 0;
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveMappingTab(tab)}
+                      className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors ${activeMappingTab === tab ? "bg-fintech-accent text-[#002919]" : "bg-[var(--app-ghost)] text-fintech-muted hover:bg-[var(--app-border)]"}`}
+                    >
+                      {tab === "expenses" ? "Expenses" : tab === "income" ? "Income" : tab === "expense_categories" ? "Expense Categories" : "Income Categories"}
+                      {hasHeaders && (
+                        <span className={`rounded-full px-1.5 py-0 text-[9px] ${mappingSavedAt ? "bg-fintech-accent/20 text-[#002919]" : "bg-yellow-400/20 text-yellow-300"}`}>
+                          {mappingSavedAt ? "Mapped" : "Missing"}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
 
-              {sheetMode === "live_sync" ? (
-                <>
-                  <p className="mb-3 text-xs text-fintech-muted">Paste your spreadsheet URL, then verify access. Mapping is configured in the next step.</p>
-                  <div className="space-y-3">
-                    <label className="block space-y-1">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Spreadsheet URL</span>
-                      <input value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-4 py-2 text-sm" style={{ borderColor: "var(--app-border)" }} />
-                    </label>
-                    <button onClick={() => void handleInspectGoogleSheet()} disabled={loadingSheetConfig} className="w-full rounded-xl bg-[var(--app-ghost)] py-2 text-sm font-bold disabled:opacity-50 hover:bg-[var(--app-border)] transition-colors">{loadingSheetConfig ? "Verifying Sheet Access..." : "Verify Sheet Access"}</button>
-                  </div>
-                </>
-              ) : (
+              <div className="space-y-4">
+                {activeMappingTab === "expenses" && (
                 <div className="space-y-3">
-                  <p className="text-xs text-fintech-muted">One-time pulls import from a shared Google Sheet without persistent configuration. After import your mapping is saved as a preset for reuse.</p>
-                  <div className="rounded-lg bg-[var(--app-ghost)] p-3 text-center">
-                    <p className="text-xs text-fintech-muted">Use the <span className="font-bold text-fintech-accent">ImpEx</span> tab to trigger a one-time Google Sheet import.</p>
-                    <button onClick={() => setActiveTab("data")} className="mt-2 rounded-lg bg-fintech-accent/10 px-3 py-1.5 text-[11px] font-bold text-fintech-accent hover:bg-fintech-accent/20 transition-colors">Go to ImpEx</button>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Expenses Tab</span>
+                    <select value={expensesSheetName} onChange={(e) => setExpensesSheetName(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }}>
+                      <option value={expensesSheetName}>{expensesSheetName}</option>
+                      {availableSheetTabs.filter((tab) => tab !== expensesSheetName).map((tab) => <option key={`exp-${tab}`} value={tab}>{tab}</option>)}
+                    </select>
+                  </label>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-left">
+                      <thead>
+                        <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
+                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {renderRangeRow("Date", expenseRangeDrafts.date, (n) => setExpenseRangeDrafts((c) => ({ ...c, date: n })), "expense-date", expensesSheetName)}
+                        {renderRangeRow("Vendor", expenseRangeDrafts.vendor, (n) => setExpenseRangeDrafts((c) => ({ ...c, vendor: n })), "expense-vendor", expensesSheetName)}
+                        {renderRangeRow("Amount", expenseRangeDrafts.amount, (n) => setExpenseRangeDrafts((c) => ({ ...c, amount: n })), "expense-amount", expensesSheetName)}
+                        {renderRangeRow("Category", expenseRangeDrafts.category, (n) => setExpenseRangeDrafts((c) => ({ ...c, category: n })), "expense-category", expensesSheetName)}
+                        {renderRangeRow("Notes", expenseRangeDrafts.notes, (n) => setExpenseRangeDrafts((c) => ({ ...c, notes: n })), "expense-notes", expensesSheetName)}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              )}
-            </div>
+                )}
 
-            {/* Step 3 — Map Columns & Sync (live sync only) */}
-            {sheetMode === "live_sync" && (
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <div className="mb-4 flex items-center gap-2">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-fintech-accent/10 text-[10px] font-bold text-fintech-accent">3</span>
-                <h3 className="font-bold">Map Columns & Sync</h3>
+                {activeMappingTab === "income" && (
+                <div className="space-y-3">
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Income Tab</span>
+                    <select value={incomeSheetName} onChange={(e) => setIncomeSheetName(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }}>
+                      <option value={incomeSheetName}>{incomeSheetName}</option>
+                      {availableSheetTabs.filter((tab) => tab !== incomeSheetName).map((tab) => <option key={`inc-${tab}`} value={tab}>{tab}</option>)}
+                    </select>
+                  </label>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-left">
+                      <thead>
+                        <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
+                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {renderRangeRow("Date", incomeRangeDrafts.date, (n) => setIncomeRangeDrafts((c) => ({ ...c, date: n })), "income-date", incomeSheetName)}
+                        {renderRangeRow("Source", incomeRangeDrafts.source, (n) => setIncomeRangeDrafts((c) => ({ ...c, source: n })), "income-source", incomeSheetName)}
+                        {renderRangeRow("Amount", incomeRangeDrafts.amount, (n) => setIncomeRangeDrafts((c) => ({ ...c, amount: n })), "income-amount", incomeSheetName)}
+                        {renderRangeRow("Category", incomeRangeDrafts.category, (n) => setIncomeRangeDrafts((c) => ({ ...c, category: n })), "income-category", incomeSheetName)}
+                        {renderRangeRow("Notes", incomeRangeDrafts.notes, (n) => setIncomeRangeDrafts((c) => ({ ...c, notes: n })), "income-notes", incomeSheetName)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                )}
+
+                {activeMappingTab === "expense_categories" && (
+                <div className="space-y-3">
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Expense Categories Tab (Optional)</span>
+                    <select value={expenseCategoriesSheetName} onChange={(e) => setExpenseCategoriesSheetName(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }}>
+                      <option value={expenseCategoriesSheetName}>{expenseCategoriesSheetName}</option>
+                      {availableSheetTabs.filter((tab) => tab !== expenseCategoriesSheetName).map((tab) => <option key={`exp-cat-${tab}`} value={tab}>{tab}</option>)}
+                    </select>
+                  </label>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-left">
+                      <thead>
+                        <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
+                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {renderRangeRow("Name", expenseCategoryRangeDrafts.name, (n) => setExpenseCategoryRangeDrafts((c) => ({ ...c, name: n })), "expense-cat-name", expenseCategoriesSheetName)}
+                        {renderRangeRow("Target", expenseCategoryRangeDrafts.target, (n) => setExpenseCategoryRangeDrafts((c) => ({ ...c, target: n })), "expense-cat-target", expenseCategoriesSheetName)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                )}
+
+                {activeMappingTab === "income_categories" && (
+                <div className="space-y-3">
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Income Categories Tab (Optional)</span>
+                    <select value={incomeCategoriesSheetName} onChange={(e) => setIncomeCategoriesSheetName(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }}>
+                      <option value={incomeCategoriesSheetName}>{incomeCategoriesSheetName}</option>
+                      {availableSheetTabs.filter((tab) => tab !== incomeCategoriesSheetName).map((tab) => <option key={`inc-cat-${tab}`} value={tab}>{tab}</option>)}
+                    </select>
+                  </label>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-left">
+                      <thead>
+                        <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
+                          <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {renderRangeRow("Name", incomeCategoryRangeDrafts.name, (n) => setIncomeCategoryRangeDrafts((c) => ({ ...c, name: n })), "income-cat-name", incomeCategoriesSheetName)}
+                        {renderRangeRow("Target", incomeCategoryRangeDrafts.target, (n) => setIncomeCategoryRangeDrafts((c) => ({ ...c, target: n })), "income-cat-target", incomeCategoriesSheetName)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                )}
+
+                {/* Save Mapping Button */}
+                <div className="pt-2">
+                  <button
+                    onClick={() => void handleSaveGoogleSheetsConfig()}
+                    disabled={savingSheetConfig}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-fintech-accent px-4 py-3 text-sm font-bold text-[#002919] disabled:opacity-50 hover:bg-fintech-accent/90 transition-colors"
+                  >
+                    <Save size={14} />
+                    {savingSheetConfig ? "Saving..." : mappingSavedAt ? "Update Mapping" : "Save Mapping"}
+                  </button>
+                  {mappingSavedAt && (
+                    <p className="mt-1.5 text-center text-[11px] text-fintech-muted">
+                      Mapping saved at {new Date(mappingSavedAt).toLocaleTimeString()}
+                    </p>
+                  )}
+                  {!mappingSavedAt && (
+                    <p className="mt-1.5 text-center text-[11px] text-fintech-muted">
+                      Configure column ranges above, then save your mapping
+                    </p>
+                  )}
+                </div>
               </div>
-              {expenseHeaders.length > 0 || incomeHeaders.length > 0 ? (
-                <>
-                  <p className="mb-3 text-xs text-fintech-muted">Use table mapping per dataset. Pick header and range, and confirm the live preview before syncing.</p>
-
-                  <div className="mb-4 flex flex-wrap gap-2 rounded-lg bg-[var(--app-ghost)] p-1">
-                    <button onClick={() => setActiveMappingTab("expenses")} className={`rounded-md px-3 py-1 text-[11px] font-bold ${activeMappingTab === "expenses" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>Expenses</button>
-                    <button onClick={() => setActiveMappingTab("income")} className={`rounded-md px-3 py-1 text-[11px] font-bold ${activeMappingTab === "income" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>Income</button>
-                    <button onClick={() => setActiveMappingTab("expense_categories")} className={`rounded-md px-3 py-1 text-[11px] font-bold ${activeMappingTab === "expense_categories" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>Expense Categories</button>
-                    <button onClick={() => setActiveMappingTab("income_categories")} className={`rounded-md px-3 py-1 text-[11px] font-bold ${activeMappingTab === "income_categories" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>Income Categories</button>
-                    <button onClick={() => setActiveMappingTab("sync")} className={`rounded-md px-3 py-1 text-[11px] font-bold ${activeMappingTab === "sync" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>Sync</button>
-                  </div>
-
-                  <div className="space-y-4">
-                    {activeMappingTab === "expenses" && (
-                    <div className="rounded-lg border" style={{ borderColor: "var(--app-border)" }}>
-                      <div className="border-b px-3 py-2 text-sm font-bold" style={{ borderColor: "var(--app-border)" }}>Expenses Mapping</div>
-                      <div className="p-3">
-                        <label className="mb-3 block space-y-1">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Expenses Tab</span>
-                          <select value={expensesSheetName} onChange={(e) => setExpensesSheetName(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }}>
-                            <option value={expensesSheetName}>{expensesSheetName}</option>
-                            {availableSheetTabs.filter((tab) => tab !== expensesSheetName).map((tab) => <option key={`exp-${tab}`} value={tab}>{tab}</option>)}
-                          </select>
-                        </label>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-left">
-                            <thead>
-                              <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
-                                <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {renderRangeRow("Date", expenseRangeDrafts.date, (n) => setExpenseRangeDrafts((c) => ({ ...c, date: n })), "expense-date", expensesSheetName)}
-                              {renderRangeRow("Vendor", expenseRangeDrafts.vendor, (n) => setExpenseRangeDrafts((c) => ({ ...c, vendor: n })), "expense-vendor", expensesSheetName)}
-                              {renderRangeRow("Amount", expenseRangeDrafts.amount, (n) => setExpenseRangeDrafts((c) => ({ ...c, amount: n })), "expense-amount", expensesSheetName)}
-                              {renderRangeRow("Category", expenseRangeDrafts.category, (n) => setExpenseRangeDrafts((c) => ({ ...c, category: n })), "expense-category", expensesSheetName)}
-                              {renderRangeRow("Notes", expenseRangeDrafts.notes, (n) => setExpenseRangeDrafts((c) => ({ ...c, notes: n })), "expense-notes", expensesSheetName)}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div className="mt-4 flex gap-3">
-                          <button onClick={() => void handleSaveGoogleSheetsConfig()} disabled={savingSheetConfig} className="flex-1 rounded-xl bg-fintech-accent/10 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors">{savingSheetConfig ? "Saving..." : "Save Expenses Mapping"}</button>
-                          <button onClick={() => void handleGoogleSheetsSync("pull")} disabled={!googleSheetsConfig || googleSheetsSyncing} className="flex-1 rounded-xl bg-fintech-import/10 py-2 text-sm font-bold text-fintech-import disabled:opacity-50 hover:bg-fintech-import/20 transition-colors">{googleSheetsSyncing ? "Syncing..." : "Pull Now"}</button>
-                          <button onClick={() => void handleGoogleSheetsSync("push")} disabled={!googleSheetsConfig || googleSheetsSyncing} className="flex-1 rounded-xl bg-[var(--app-ghost)] py-2 text-sm font-bold disabled:opacity-50 hover:bg-[var(--app-border)] transition-colors">{googleSheetsSyncing ? "Syncing..." : "Push Now"}</button>
-                        </div>
-                      </div>
-                    </div>
-                    )}
-
-                    {activeMappingTab === "income" && (
-                    <div className="rounded-lg border" style={{ borderColor: "var(--app-border)" }}>
-                      <div className="border-b px-3 py-2 text-sm font-bold" style={{ borderColor: "var(--app-border)" }}>Income Mapping</div>
-                      <div className="p-3">
-                        <label className="mb-3 block space-y-1">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Income Tab</span>
-                          <select value={incomeSheetName} onChange={(e) => setIncomeSheetName(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }}>
-                            <option value={incomeSheetName}>{incomeSheetName}</option>
-                            {availableSheetTabs.filter((tab) => tab !== incomeSheetName).map((tab) => <option key={`inc-${tab}`} value={tab}>{tab}</option>)}
-                          </select>
-                        </label>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-left">
-                            <thead>
-                              <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
-                                <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {renderRangeRow("Date", incomeRangeDrafts.date, (n) => setIncomeRangeDrafts((c) => ({ ...c, date: n })), "income-date", incomeSheetName)}
-                              {renderRangeRow("Source", incomeRangeDrafts.source, (n) => setIncomeRangeDrafts((c) => ({ ...c, source: n })), "income-source", incomeSheetName)}
-                              {renderRangeRow("Amount", incomeRangeDrafts.amount, (n) => setIncomeRangeDrafts((c) => ({ ...c, amount: n })), "income-amount", incomeSheetName)}
-                              {renderRangeRow("Category", incomeRangeDrafts.category, (n) => setIncomeRangeDrafts((c) => ({ ...c, category: n })), "income-category", incomeSheetName)}
-                              {renderRangeRow("Notes", incomeRangeDrafts.notes, (n) => setIncomeRangeDrafts((c) => ({ ...c, notes: n })), "income-notes", incomeSheetName)}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div className="mt-4 flex gap-3">
-                          <button onClick={() => void handleSaveGoogleSheetsConfig()} disabled={savingSheetConfig} className="flex-1 rounded-xl bg-fintech-accent/10 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors">{savingSheetConfig ? "Saving..." : "Save Income Mapping"}</button>
-                          <button onClick={() => void handleGoogleSheetsSync("pull")} disabled={!googleSheetsConfig || googleSheetsSyncing} className="flex-1 rounded-xl bg-fintech-import/10 py-2 text-sm font-bold text-fintech-import disabled:opacity-50 hover:bg-fintech-import/20 transition-colors">{googleSheetsSyncing ? "Syncing..." : "Pull Now"}</button>
-                          <button onClick={() => void handleGoogleSheetsSync("push")} disabled={!googleSheetsConfig || googleSheetsSyncing} className="flex-1 rounded-xl bg-[var(--app-ghost)] py-2 text-sm font-bold disabled:opacity-50 hover:bg-[var(--app-border)] transition-colors">{googleSheetsSyncing ? "Syncing..." : "Push Now"}</button>
-                        </div>
-                      </div>
-                    </div>
-                    )}
-
-                    {activeMappingTab === "expense_categories" && (
-                    <div className="rounded-lg border" style={{ borderColor: "var(--app-border)" }}>
-                      <div className="border-b px-3 py-2 text-sm font-bold" style={{ borderColor: "var(--app-border)" }}>Expense Categories Mapping</div>
-                      <div className="p-3">
-                        <label className="mb-3 block space-y-1">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Expense Categories Tab (Optional)</span>
-                          <select value={expenseCategoriesSheetName} onChange={(e) => setExpenseCategoriesSheetName(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }}>
-                            <option value={expenseCategoriesSheetName}>{expenseCategoriesSheetName}</option>
-                            {availableSheetTabs.filter((tab) => tab !== expenseCategoriesSheetName).map((tab) => <option key={`exp-cat-${tab}`} value={tab}>{tab}</option>)}
-                          </select>
-                        </label>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-left">
-                            <thead>
-                              <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
-                                <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {renderRangeRow("Name", expenseCategoryRangeDrafts.name, (n) => setExpenseCategoryRangeDrafts((c) => ({ ...c, name: n })), "expense-cat-name", expenseCategoriesSheetName)}
-                              {renderRangeRow("Target", expenseCategoryRangeDrafts.target, (n) => setExpenseCategoryRangeDrafts((c) => ({ ...c, target: n })), "expense-cat-target", expenseCategoriesSheetName)}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div className="mt-4 flex gap-3">
-                          <button onClick={() => void handleSaveGoogleSheetsConfig()} disabled={savingSheetConfig} className="flex-1 rounded-xl bg-fintech-accent/10 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors">{savingSheetConfig ? "Saving..." : "Save Expense Categories Mapping"}</button>
-                          <button onClick={() => void handleGoogleSheetsSync("pull")} disabled={!googleSheetsConfig || googleSheetsSyncing} className="flex-1 rounded-xl bg-fintech-import/10 py-2 text-sm font-bold text-fintech-import disabled:opacity-50 hover:bg-fintech-import/20 transition-colors">{googleSheetsSyncing ? "Syncing..." : "Pull Now"}</button>
-                          <button onClick={() => void handleGoogleSheetsSync("push")} disabled={!googleSheetsConfig || googleSheetsSyncing} className="flex-1 rounded-xl bg-[var(--app-ghost)] py-2 text-sm font-bold disabled:opacity-50 hover:bg-[var(--app-border)] transition-colors">{googleSheetsSyncing ? "Syncing..." : "Push Now"}</button>
-                        </div>
-                      </div>
-                    </div>
-                    )}
-
-                    {activeMappingTab === "income_categories" && (
-                    <div className="rounded-lg border" style={{ borderColor: "var(--app-border)" }}>
-                      <div className="border-b px-3 py-2 text-sm font-bold" style={{ borderColor: "var(--app-border)" }}>Income Categories Mapping</div>
-                      <div className="p-3">
-                        <label className="mb-3 block space-y-1">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Income Categories Tab (Optional)</span>
-                          <select value={incomeCategoriesSheetName} onChange={(e) => setIncomeCategoriesSheetName(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }}>
-                            <option value={incomeCategoriesSheetName}>{incomeCategoriesSheetName}</option>
-                            {availableSheetTabs.filter((tab) => tab !== incomeCategoriesSheetName).map((tab) => <option key={`inc-cat-${tab}`} value={tab}>{tab}</option>)}
-                          </select>
-                        </label>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-left">
-                            <thead>
-                              <tr className="text-[10px] uppercase tracking-widest text-fintech-muted">
-                                <th className="px-3 py-2">Field</th><th className="px-3 py-2">Start Cell + Preview</th><th className="px-3 py-2">End Cell</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {renderRangeRow("Name", incomeCategoryRangeDrafts.name, (n) => setIncomeCategoryRangeDrafts((c) => ({ ...c, name: n })), "income-cat-name", incomeCategoriesSheetName)}
-                              {renderRangeRow("Target", incomeCategoryRangeDrafts.target, (n) => setIncomeCategoryRangeDrafts((c) => ({ ...c, target: n })), "income-cat-target", incomeCategoriesSheetName)}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div className="mt-4 flex gap-3">
-                          <button onClick={() => void handleSaveGoogleSheetsConfig()} disabled={savingSheetConfig} className="flex-1 rounded-xl bg-fintech-accent/10 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors">{savingSheetConfig ? "Saving..." : "Save Income Categories Mapping"}</button>
-                          <button onClick={() => void handleGoogleSheetsSync("pull")} disabled={!googleSheetsConfig || googleSheetsSyncing} className="flex-1 rounded-xl bg-fintech-import/10 py-2 text-sm font-bold text-fintech-import disabled:opacity-50 hover:bg-fintech-import/20 transition-colors">{googleSheetsSyncing ? "Syncing..." : "Pull Now"}</button>
-                          <button onClick={() => void handleGoogleSheetsSync("push")} disabled={!googleSheetsConfig || googleSheetsSyncing} className="flex-1 rounded-xl bg-[var(--app-ghost)] py-2 text-sm font-bold disabled:opacity-50 hover:bg-[var(--app-border)] transition-colors">{googleSheetsSyncing ? "Syncing..." : "Push Now"}</button>
-                        </div>
-                      </div>
-                    </div>
-                    )}
-
-                    {activeMappingTab === "sync" && (
-                    <div className="rounded-lg border" style={{ borderColor: "var(--app-border)" }}>
-                      <div className="border-b px-3 py-2 text-sm font-bold" style={{ borderColor: "var(--app-border)" }}>Sync Settings</div>
-                      <div className="p-3 grid gap-3 md:grid-cols-2">
-                        <label className="space-y-1 block">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Auto-Sync Interval (sec)</span>
-                          <input type="number" min="15" value={syncIntervalSeconds} onChange={(e) => setSyncIntervalSeconds(e.target.value)} className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }} />
-                        </label>
-                        <label className="flex items-end gap-2 pb-2 text-sm">
-                          <input type="checkbox" checked={sheetAutoSync} onChange={(e) => setSheetAutoSync(e.target.checked)} />
-                          Enable auto-sync while app is open
-                        </label>
-                      </div>
-                      <div className="px-3 pb-3">
-                        <button onClick={() => void handleSaveGoogleSheetsConfig()} disabled={savingSheetConfig} className="w-full rounded-xl bg-fintech-accent/10 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors">{savingSheetConfig ? "Saving..." : "Save Sync Settings"}</button>
-                      </div>
-                    </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="py-6 text-center">
-                  <p className="text-xs text-fintech-muted">Verify a sheet in Section A to populate column headers and set up mappings here.</p>
-                </div>
-              )}
             </div>
             )}
 
-            {/* Saved Mapping Presets */}
+            {/* Step 3: Pull Data — only shown after mapping is saved */}
+            {mappingSavedAt && (
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-bold">Saved Mapping Presets</h3>
-                <span className="rounded-full bg-[var(--app-ghost)] px-2 py-0.5 text-[10px] font-bold text-fintech-muted">{mappingSummaries.length}</span>
+              <div className="mb-4 flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-fintech-accent text-[11px] font-bold text-[#002919]">3</span>
+                <h3 className="font-bold">Pull Data</h3>
+                {googleSheetsSyncing && (
+                  <span className="ml-auto flex items-center gap-1 rounded-full bg-fintech-accent/10 px-2 py-0.5 text-[10px] font-bold text-fintech-accent">
+                    <RefreshCw size={10} className="animate-spin" /> Syncing...
+                  </span>
+                )}
               </div>
-              <p className="mb-3 text-xs text-fintech-muted">Presets are saved when you import from a shared Google Sheet in the ImpEx tab. You can refresh, edit, or clear them here.</p>
-              {mappingSummaries.length === 0 ? (
-                <p className="py-3 text-center text-xs text-fintech-muted">No saved mapping presets yet. They will appear here after you import from a sheet in the ImpEx tab.</p>
-              ) : (
-                <div className="space-y-2">
-                  {mappingSummaries.map((item) => (
+
+              {/* Pull Mode Selector */}
+              <div className="mb-4 flex items-center gap-2 rounded-lg bg-[var(--app-ghost)] p-1 w-fit">
+                <button
+                  onClick={() => setPullMode("incremental")}
+                  className={`rounded-md px-3 py-1.5 text-[11px] font-bold ${pullMode === "incremental" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}
+                >
+                  Incremental
+                </button>
+                <button
+                  onClick={() => setPullMode("full_reconcile")}
+                  className={`rounded-md px-3 py-1.5 text-[11px] font-bold ${pullMode === "full_reconcile" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}
+                >
+                  Re-import All
+                </button>
+              </div>
+              <p className="mb-4 text-[11px] text-fintech-muted">
+                {pullMode === "incremental"
+                  ? "Import only new rows since your last pull (uses cursor tracking)."
+                  : "Re-import all mapped rows. Duplicates are still skipped automatically."}
+              </p>
+
+              {/* Pull Now Button */}
+              <button
+                onClick={() => void handleGoogleSheetsSync("pull", pullMode)}
+                disabled={!canPull || googleSheetsSyncing}
+                className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition-colors ${
+                  canPull && !googleSheetsSyncing
+                    ? "bg-fintech-import text-white hover:bg-fintech-import/90"
+                    : "bg-[var(--app-ghost)] text-fintech-muted cursor-not-allowed"
+                }`}
+              >
+                <RefreshCw size={14} className={googleSheetsSyncing ? "animate-spin" : ""} />
+                {googleSheetsSyncing ? "Pulling Data..." : "Pull Now"}
+              </button>
+              {!canPull && !googleSheetsSyncing && (
+                <p className="mt-1.5 text-center text-[11px] text-fintech-muted">
+                  Save your column mapping first to enable pull
+                </p>
+              )}
+
+              {/* Pull Summary Card */}
+              {googlePullSummary && (
+                <div className="mt-4 rounded-xl border border-fintech-accent/20 bg-fintech-accent/5 p-4" style={{ borderColor: "var(--app-border)" }}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-fintech-accent" />
+                    <span className="text-xs font-bold">Pull Complete</span>
+                    <span className="rounded-full bg-[var(--app-ghost)] px-2 py-0.5 text-[10px] font-medium text-fintech-muted">
+                      {googlePullSummary.mode === "incremental" ? "Incremental" : "Full Reconcile"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                    <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2">
+                      <div className="text-fintech-muted">Fetched</div>
+                      <div className="text-lg font-bold">{googlePullSummary.fetched}</div>
+                    </div>
+                    <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2">
+                      <div className="text-fintech-muted">Imported</div>
+                      <div className="text-lg font-bold text-fintech-accent">{googlePullSummary.imported}</div>
+                    </div>
+                    <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2">
+                      <div className="text-fintech-muted">Duplicates Skipped</div>
+                      <div className="text-lg font-bold text-yellow-300">{googlePullSummary.duplicateSkipped}</div>
+                    </div>
+                    <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2">
+                      <div className="text-fintech-muted">Invalid Skipped</div>
+                      <div className="text-lg font-bold text-fintech-danger">{googlePullSummary.invalidSkipped}</div>
+                    </div>
+                    <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2">
+                      <div className="text-fintech-muted">Net New</div>
+                      <div className="text-lg font-bold">{googlePullSummary.netNew}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Push button */}
+              <div className="mt-4 pt-3 border-t" style={{ borderColor: "var(--app-border)" }}>
+                <button
+                  onClick={() => void handleGoogleSheetsSync("push")}
+                  disabled={!googleSheetsConfig || googleSheetsSyncing}
+                  className="w-full rounded-xl bg-[var(--app-ghost)] py-2 text-xs font-bold disabled:opacity-50 hover:bg-[var(--app-border)] transition-colors"
+                >
+                  Push App Data to Sheet
+                </button>
+              </div>
+            </div>
+            )}
+
+            {/* Saved Mapping Presets (legacy section, collapsed) */}
+            <details className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
+              <summary className="cursor-pointer text-xs font-bold text-fintech-muted">
+                Legacy Mapping Presets ({mappingSummaries.length})
+              </summary>
+              <div className="mt-3 space-y-2">
+                {mappingSummaries.length === 0 ? (
+                  <p className="text-xs text-fintech-muted">No legacy localStorage presets found.</p>
+                ) : (
+                  mappingSummaries.map((item) => (
                     <div key={item.type} className="rounded-lg bg-[var(--app-ghost)] p-3 text-xs">
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -2290,32 +2405,19 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
                             <span className="rounded bg-[var(--app-panel)] px-1.5 py-0.5 text-[10px] font-medium text-fintech-muted">{item.override ? "Replace" : "Upsert"}</span>
                           </div>
                           <div className="mt-1 text-fintech-muted">
-                            Tab: {item.sheetTabName} · {item.fieldsMapped} fields mapped · Last updated: {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "Unknown"}
+                            Tab: {item.sheetTabName} · {item.fieldsMapped} fields mapped
                           </div>
-                          {sheetMappingCursors[item.type] && (
-                            <div className="mt-1 text-fintech-muted">
-                              Incremental checkpoint: row {sheetMappingCursors[item.type].lastImportedAbsoluteRow} at {new Date(sheetMappingCursors[item.type].updatedAt).toLocaleDateString()}
-                            </div>
-                          )}
                         </div>
                         <div className="flex gap-1">
-                          <button
-                            onClick={() => void refreshSavedMapping(item)}
-                            disabled={refreshingMappingType === item.type}
-                            className="rounded-md bg-fintech-import/10 px-2 py-1 text-[11px] font-semibold text-fintech-import disabled:opacity-50 hover:bg-fintech-import/20 transition-colors"
-                          >
-                            {refreshingMappingType === item.type ? "Refreshing..." : "Refresh"}
-                          </button>
                           <button onClick={() => editSavedMapping(item.type)} className="rounded-md bg-[var(--app-panel)] px-2 py-1 text-[11px] font-semibold hover:bg-[var(--app-border)] transition-colors">Edit</button>
-                          <button onClick={() => void validateSavedMapping()} className="rounded-md bg-[var(--app-panel)] px-2 py-1 text-[11px] font-semibold hover:bg-[var(--app-border)] transition-colors">Test</button>
                           <button onClick={() => clearSavedMapping(item.type)} className="rounded-md bg-fintech-danger/10 px-2 py-1 text-[11px] font-semibold text-fintech-danger hover:bg-fintech-danger/20 transition-colors">Clear</button>
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                  ))
+                )}
+              </div>
+            </details>
 
             {/* Section B — Drive Backup Vault */}
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>

@@ -3,8 +3,10 @@ import type { User } from "firebase/auth";
 import { FirebaseContext, type FirebaseContextType } from "../contexts/FirebaseContext";
 import type {
   ExpenseCategory,
+  GooglePullSummary,
   GoogleSheetsInspectionResult,
   GoogleSheetsSyncConfig,
+  GoogleSheetsSyncOptions,
   ImportBatch,
   ImportCommitSummary,
   ImportPreviewOptions,
@@ -184,7 +186,16 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     disconnectGoogleSheets: () => {},
     inspectGoogleSheetsSpreadsheet: async () => defaultInspection,
     saveGoogleSheetsConfig: noop,
-    syncGoogleSheets: noop,
+    syncGoogleSheets: async (_direction?: string, _options?: GoogleSheetsSyncOptions) => ({
+      fetched: 10,
+      imported: 5,
+      duplicateSkipped: 3,
+      invalidSkipped: 1,
+      netNew: 5,
+      mode: _options?.mode || "incremental",
+    } satisfies GooglePullSummary),
+    validateGoogleSheetsMapping: () => ({ valid: true, missing: [] }),
+    googlePullSummary: null,
     backingUp: false,
     isSyncing: false,
     lastSynced: null,
