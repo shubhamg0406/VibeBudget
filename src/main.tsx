@@ -31,11 +31,8 @@ if (shouldRegisterServiceWorker && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     const wb = new Workbox("/sw.js");
     wb.addEventListener("waiting", () => {
-      const shouldReload = window.confirm("An update is available. Reload now?");
-      if (shouldReload) {
-        wb.addEventListener("controlling", () => window.location.reload());
-        void wb.messageSkipWaiting();
-      }
+      wb.addEventListener("controlling", () => window.location.reload());
+      void wb.messageSkipWaiting();
     });
     void wb.register();
   });
