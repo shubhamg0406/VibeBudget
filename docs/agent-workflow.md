@@ -1,18 +1,6 @@
-# Agent PR Workflow (Codex/Cline/Claude/Deepseek)
+# Agent PR Workflow
 
-This repository uses a single GitHub account for opening PRs, but each agent has its own git commit identity.
-
-## Agent identities
-
-| Agent key | Commit name | Commit email |
-| --- | --- | --- |
-| `codex` | `Shubham-Codex` | `63102408+shubhamg0406+codex@users.noreply.github.com` |
-| `cline` | `Shubham-Cline` | `63102408+shubhamg0406+cline@users.noreply.github.com` |
-| `claude` | `Shubham-Claude` | `63102408+shubhamg0406+claude@users.noreply.github.com` |
-| `deepseek` | `Shubham-Deepseek` | `63102408+shubhamg0406+deepseek@users.noreply.github.com` |
-
-If GitHub rejects the plus-alias noreply emails, switch to the fallback email:
-`63102408+shubhamg0406@users.noreply.github.com`
+Agents implement changes, push branches, and open PRs. Agents **do not merge their own PRs** and **stop after PR delivery**. Codex validates; the maintainer merges.
 
 ## Branch and commit conventions
 
@@ -20,94 +8,59 @@ If GitHub rejects the plus-alias noreply emails, switch to the fallback email:
 - Commit format: `[<agent>] <message>`
 - PR title format: `[<agent>] <task summary>`
 
-## Approval gate
+## Workflow
 
-Do not create a PR until explicit owner approval.
+1. Agent creates branch from `main` and implements changes.
+2. Agent runs the smallest relevant validation (tests, lint).
+3. Agent commits and pushes.
+4. Agent opens a PR (no self-merge; stop after PR delivery).
+5. Agent fills the PR template completely (see handoff checklist below).
+6. Agent stops. Wait for Codex review.
+7. Codex validates and returns a merge decision.
+8. Maintainer merges.
 
-1. Agent implements and pushes branch.
-2. Agent stops and reports branch, commits, changed files, tests, manual test notes, local browser test instructions, risks, rollback notes, and confirmation that production data was not used.
-3. Owner replies with approval.
-4. Agent creates PR.
+## Required PR handoff checklist
 
-After a PR exists, the owner asks Codex to validate it before merge. Codex acts as the release-control center: it reviews the diff, prepares or runs local validation, supports local browser testing, checks staging where needed, and returns a merge recommendation. See [Testing And Release Workflow](testing-release-workflow.md).
+Every agent PR must document all of the following in the PR description:
 
-## Required handoff report
+| Item | Required for |
+|---|---|
+| **Branch name** | Always |
+| **PR link** | Always |
+| **Files changed** | Always |
+| **Change type** | Always — pick one: `docs`, `frontend`, `backend/API`, `integration`, `data model`, `deployment`, `mixed` |
+| **Tests run + results** | Always — include exact command output or summary |
+| **Tests not run and why** | Always — if something was skipped, say why |
+| **Local browser test steps** | UI, auth, data, integration, or behavior changes |
+| **Staging/sandbox data confirmation** | Always — confirm `prod` namespace was not used |
+| **Screenshots or visual notes** | UI changes only |
+| **Known risks** | Always — be honest about what could go wrong |
+| **Rollback suggestion** | Always — how to undo if this PR causes issues |
+| **Confirmation: no production data or credentials used** | Always |
 
-Every agent must stop after implementation and provide:
+If the PR is **docs-only**, the agent should mark "Docs only" in the change type and may skip local browser testing and screenshots. All other items still apply.
 
-- Branch name.
-- PR URL, if already opened after approval.
-- Commit list.
-- Files changed.
-- Change type: docs, frontend, backend/API, integration, data model, deployment, or mixed.
-- Tests run and exact results.
-- Manual test notes.
-- Local browser test instructions for the owner/Codex.
-- Known risks and edge cases.
-- Rollback suggestion.
-- Confirmation that production data was not used for testing.
-- Confirmation that preview/staging uses `staging`, `preview`, or safe local data instead of the `prod` namespace.
+## What agents must NOT do
 
-If something could not be tested, say so directly and explain what remains for Codex/owner validation.
+- Do not merge your own PR.
+- Do not deploy to production.
+- Do not use production credentials or data for testing.
+- Do not commit secrets, API keys, or personal data.
+- Do not bypass the handoff checklist.
+
+## After PR delivery
+
+Stop. The PR is now in the review queue. Codex or the maintainer will pick it up. Do not take further action unless asked.
 
 ## Commands
 
-Start work for an agent:
-
 ```bash
+# Start work
 npm run agent:start -- <agent> <task-slug>
-```
 
-Check active identity/branch:
-
-```bash
+# Check current identity/branch
 npm run agent:whoami
-```
 
-Create PR after approval:
-
-```bash
+# Create PR (only deliver, never merge)
 npm run agent:pr -- <agent> "<pr title>" main --approved
-```
-
-## Agent prompt template
-
-Use this starter prompt for Codex/Cline/Claude/Deepseek:
-
-```text
-You are working in /Users/shubham/Downloads/Downloads/vibebudget.
-
-Follow this exact workflow:
-1) Run: npm run agent:start -- <agent> <task-slug>
-2) Implement only the requested feature/fix.
-3) Run relevant tests/lint for changed areas.
-4) Commit using: [<agent>] <short message>
-5) Push branch to origin.
-6) STOP and report:
-   - branch name
-   - commits made
-   - files changed
-   - change type: docs, frontend, backend/API, integration, data model, deployment, or mixed
-   - tests run + results
-   - manual test notes
-   - local browser test instructions
-   - known risks and edge cases
-   - rollback suggestion
-   - confirmation that production data was not used for testing
-   - confirmation that preview/staging uses staging, preview, or safe local data instead of prod namespace
-Do NOT create a PR yet.
-
-Only after I reply with "approved", run:
-npm run agent:pr -- <agent> "<pr title>" main --approved
-Then share the PR URL.
-
-After the PR is open, wait for the owner to ask Codex to validate it. Do not merge or deploy.
-```
-
-## Operational prerequisite
-
-Authenticate GitHub CLI once before using PR creation:
-
-```bash
-gh auth login -h github.com
 ```
