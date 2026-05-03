@@ -82,6 +82,8 @@ Run the smallest useful test set first. Use `npm run verify` for broad or risky 
 
 If a command fails, Codex decides whether it is a known baseline issue or a blocker. Unknown failures are blockers by default.
 
+> **Baseline reference**: See [baseline-validation-status.md](./baseline-validation-status.md) for the current catalog of pre-existing `npm run lint` failures. Use this to distinguish baseline issues from PR regressions.
+
 ## Local Browser Validation
 
 Local browser validation is required before merge for UI, auth, data, integration, and behavior changes.
