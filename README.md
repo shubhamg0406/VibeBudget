@@ -45,6 +45,20 @@ Tips:
 - Local-first feel with cloud safety nets.
 - User-controlled data movement through Drive/Sheets integrations.
 
+For the product direction, hosted/self-hosted strategy, and engineering baselines, see [VibeBudget North Star + Strategy](docs/north-star-strategy.md). For execution sequencing, see [VibeBudget Roadmap](docs/roadmap.md).
+
+## Guides & Documentation
+
+| Guide | Description |
+|---|---|
+| [Self-Hosting Guide](docs/self-hosting.md) | Full self-hosting setup: Firebase, Vercel, namespaces, security |
+| [BYOK Provider Setup](docs/byok-provider-setup.md) | Setup for AI, Google Workspace, Plaid, and Teller providers |
+| [Troubleshooting Guide](docs/troubleshooting.md) | Common issues: auth, Firestore, deploy, providers |
+| [North Star Strategy](docs/north-star-strategy.md) | Product vision, positioning, and engineering baselines |
+| [Roadmap](docs/roadmap.md) | Execution phases and priorities |
+| [Agent PR Workflow](docs/agent-workflow.md) | Branch, commit, approval, and agent handoff rules |
+| [Testing & Release Workflow](docs/testing-release-workflow.md) | Codex validation, local browser testing, staging, and prod release gates |
+
 ## Feature Walkthrough
 
 ### 1) Dashboard (Home)
@@ -86,23 +100,14 @@ Tips:
 
 ## Run Locally
 
-### Prerequisites
-- Node.js 20+
+See the [Self-Hosting Guide](docs/self-hosting.md) for the complete setup walkthrough.
 
-### Setup
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Create local env file:
-   ```bash
-   cp .env.example .env.local
-   ```
-3. Fill Firebase values in `.env.local` and set `GEMINI_API_KEY` (server-side only).
-4. Start app:
-   ```bash
-   npm run dev
-   ```
+### Quick start
+```bash
+npm install
+cp .env.example .env.local   # Fill Firebase + Gemini values
+npm run dev                    # Express API on :3000 + Vite on :8888
+```
 
 ### Environment separation (important)
 - Use `VITE_FIREBASE_DATA_NAMESPACE="local-dev"` in local development.
@@ -139,6 +144,8 @@ npx playwright install chromium
 
 ## Deploying To Vercel
 
+See the [Self-Hosting Guide](docs/self-hosting.md) for the full deployment walkthrough, including Firebase setup, namespace configuration, and verification checks.
+
 Set these env vars in the Vercel project:
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
@@ -156,9 +163,7 @@ Set these env vars in the Vercel project:
 - `GEMINI_API_KEY` (server-side only, used by `/api/chat`)
 - `GEMINI_MODEL` (optional; defaults to `gemini-2.5-flash`)
 
-AI chat deployment note:
-- Add `GEMINI_API_KEY` in your hosting dashboard environment settings (Vercel, Railway, etc.) with the same key name used locally.
-- Keep `.env.local` uncommitted (`.env*` is gitignored in this repo).
+For provider-specific setup (AI, Plaid, Teller, Google APIs), see [BYOK Provider Setup](docs/byok-provider-setup.md).
 
 Deploy command:
 ```bash

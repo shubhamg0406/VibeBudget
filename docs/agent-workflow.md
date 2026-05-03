@@ -25,9 +25,30 @@ If GitHub rejects the plus-alias noreply emails, switch to the fallback email:
 Do not create a PR until explicit owner approval.
 
 1. Agent implements and pushes branch.
-2. Agent stops and reports branch, commits, tests, and risks.
+2. Agent stops and reports branch, commits, changed files, tests, manual test notes, local browser test instructions, risks, rollback notes, and confirmation that production data was not used.
 3. Owner replies with approval.
 4. Agent creates PR.
+
+After a PR exists, the owner asks Codex to validate it before merge. Codex acts as the release-control center: it reviews the diff, prepares or runs local validation, supports local browser testing, checks staging where needed, and returns a merge recommendation. See [Testing And Release Workflow](testing-release-workflow.md).
+
+## Required handoff report
+
+Every agent must stop after implementation and provide:
+
+- Branch name.
+- PR URL, if already opened after approval.
+- Commit list.
+- Files changed.
+- Change type: docs, frontend, backend/API, integration, data model, deployment, or mixed.
+- Tests run and exact results.
+- Manual test notes.
+- Local browser test instructions for the owner/Codex.
+- Known risks and edge cases.
+- Rollback suggestion.
+- Confirmation that production data was not used for testing.
+- Confirmation that preview/staging uses `staging`, `preview`, or safe local data instead of the `prod` namespace.
+
+If something could not be tested, say so directly and explain what remains for Codex/owner validation.
 
 ## Commands
 
@@ -65,13 +86,22 @@ Follow this exact workflow:
 6) STOP and report:
    - branch name
    - commits made
+   - files changed
+   - change type: docs, frontend, backend/API, integration, data model, deployment, or mixed
    - tests run + results
-   - risk/rollback notes
+   - manual test notes
+   - local browser test instructions
+   - known risks and edge cases
+   - rollback suggestion
+   - confirmation that production data was not used for testing
+   - confirmation that preview/staging uses staging, preview, or safe local data instead of prod namespace
 Do NOT create a PR yet.
 
 Only after I reply with "approved", run:
 npm run agent:pr -- <agent> "<pr title>" main --approved
 Then share the PR URL.
+
+After the PR is open, wait for the owner to ask Codex to validate it. Do not merge or deploy.
 ```
 
 ## Operational prerequisite
