@@ -72,7 +72,7 @@ npm run dev                    # Starts API on :3000 + Vite on :7777
 - `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`
 - `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_FIRESTORE_DATABASE_ID` (optional)
-- `VITE_FIREBASE_DATA_NAMESPACE` (`local-dev` for dev, `prod` for production)
+- `VITE_FIREBASE_DATA_NAMESPACE` (`local-dev` for dev, `staging` for PR previews, `prod` for production)
 - `VITE_TEST_MODE` (`mock` for testing without Firebase)
 - `VITE_TEST_USER_EMAIL` (test user email)
 
@@ -84,10 +84,18 @@ npm run dev                    # Starts API on :3000 + Vite on :7777
 - `ALLOW_FIREBASE_REST_FALLBACK` — Enable REST fallback for AI chat
 - `AI_CHAT_CACHE_TTL_MS` — Cache TTL (default: 300000)
 
+**Data namespace (both client and server):**
+- `VITE_FIREBASE_DATA_NAMESPACE` — Client-side namespace. Sets Firestore path prefix.
+- `FIREBASE_DATA_NAMESPACE` — Server-side namespace for Admin SDK reads.
+- Accepted values: `local-dev` (local), `staging` (PR previews), `prod` (production), `test` (automated).
+- Never set either to `prod` in local development or preview deployments.
+- See `docs/staging-env-safety.md` for complete staging safety guidance.
+
 ### Important Notes
 - **HMR is disabled in AI Studio** via `DISABLE_HMR` env var
-- **Data namespace isolation**: `local-dev` vs `prod` prevents data pollution
+- **Data namespace isolation**: `local-dev` / `staging` / `prod` prevents data pollution
 - **Firestore rules**: Per-user access enforced via `isOwner(userId)` function
+- **PR preview safety**: Must use `staging` namespace — see `docs/staging-env-safety.md`
 - **PWA**: Service worker auto-registers in production; update prompt on new SW
 
 ## Project Structure
