@@ -113,6 +113,8 @@ Recommended local browser checks:
 - Integration work uses sandbox credentials only.
 - No destructive operation is run against real personal data.
 
+For concrete step-by-step playbooks covering each PR type (docs, frontend, backend/API, integration, auth, deployment), see [Local Browser Testing Playbooks](local-browser-testing.md).
+
 ## Staging Validation
 
 Use staging for realistic testing without risking production personal data.
