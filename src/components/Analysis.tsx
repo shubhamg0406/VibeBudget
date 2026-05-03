@@ -12,6 +12,7 @@ import {
 import { DateRangeSelector } from "./DateRangeSelector";
 import { formatDate, getTodayStr, getFirstDayOfMonth, getLastDayOfMonth, formatMonth, formatDisplayDate, getMonthKey, isDateInRange, normalizeDateString, parseDateString, resolveDateRange } from "../utils/dateUtils";
 import { useFirebase } from "../contexts/FirebaseContext";
+import { EmptyState } from "./common/EmptyState";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 
 interface AnalysisProps {
@@ -714,142 +715,169 @@ export const Analysis: React.FC<AnalysisProps> = ({
                 </div>
               </div>
             </div>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trendData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} vertical={false} />
-                  <XAxis 
-                    dataKey="month" 
-                    stroke={chartAxisStroke} 
-                    fontSize={10} 
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(val) => {
-                      const parts = val.split("-");
-                      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                      return months[parseInt(parts[1]) - 1];
-                    }}
-                  />
-                  <YAxis stroke={chartAxisStroke} fontSize={10} axisLine={false} tickLine={false} />
-                  <Tooltip 
-                    cursor={{ fill: 'var(--app-ghost)' }}
-                    contentStyle={tooltipStyle}
-                    itemStyle={{ fontSize: "12px" }}
-                    formatter={(value: number) => [`${baseSymbol}${value.toLocaleString()}`, ""]}
-                  />
-                  <ReferenceLine 
-                    y={avgIncome} 
-                    stroke="#10b981" 
-                    strokeDasharray="3 3" 
-                    label={{ position: 'right', value: `${baseSymbol}${Math.round(avgIncome).toLocaleString()}`, fill: '#10b981', fontSize: 10, fontWeight: 'bold' }} 
-                  />
-                  <ReferenceLine 
-                    y={avgSpend} 
-                    stroke="#ef4444" 
-                    strokeDasharray="3 3" 
-                    label={{ position: 'left', value: `${baseSymbol}${Math.round(avgSpend).toLocaleString()}`, fill: '#ef4444', fontSize: 10, fontWeight: 'bold' }} 
-                  />
-                  <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20}>
-                    {trendData.map((entry, index) => (
-                      <Cell key={`cell-inc-${index}`} fill={entry.isProjected ? "#10b98180" : "#10b981"} />
-                    ))}
-                  </Bar>
-                  <Bar dataKey="spend" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20}>
-                    {trendData.map((entry, index) => (
-                      <Cell key={`cell-exp-${index}`} fill={entry.isProjected ? "#ef444480" : "#ef4444"} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {trendData.some((d: { spend: number; income: number }) => d.spend > 0 || d.income > 0) ? (
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={trendData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} vertical={false} />
+                    <XAxis 
+                      dataKey="month" 
+                      stroke={chartAxisStroke} 
+                      fontSize={10} 
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(val) => {
+                        const parts = val.split("-");
+                        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                        return months[parseInt(parts[1]) - 1];
+                      }}
+                    />
+                    <YAxis stroke={chartAxisStroke} fontSize={10} axisLine={false} tickLine={false} />
+                    <Tooltip 
+                      cursor={{ fill: 'var(--app-ghost)' }}
+                      contentStyle={tooltipStyle}
+                      itemStyle={{ fontSize: "12px" }}
+                      formatter={(value: number) => [`${baseSymbol}${value.toLocaleString()}`, ""]}
+                    />
+                    <ReferenceLine 
+                      y={avgIncome} 
+                      stroke="#10b981" 
+                      strokeDasharray="3 3" 
+                      label={{ position: 'right', value: `${baseSymbol}${Math.round(avgIncome).toLocaleString()}`, fill: '#10b981', fontSize: 10, fontWeight: 'bold' }} 
+                    />
+                    <ReferenceLine 
+                      y={avgSpend} 
+                      stroke="#ef4444" 
+                      strokeDasharray="3 3" 
+                      label={{ position: 'left', value: `${baseSymbol}${Math.round(avgSpend).toLocaleString()}`, fill: '#ef4444', fontSize: 10, fontWeight: 'bold' }} 
+                    />
+                    <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} barSize={20}>
+                      {trendData.map((entry: { isProjected: boolean }, index: number) => (
+                        <Cell key={`cell-inc-${index}`} fill={entry.isProjected ? "#10b98180" : "#10b981"} />
+                      ))}
+                    </Bar>
+                    <Bar dataKey="spend" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20}>
+                      {trendData.map((entry: { isProjected: boolean }, index: number) => (
+                        <Cell key={`cell-exp-${index}`} fill={entry.isProjected ? "#ef444480" : "#ef4444"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <EmptyState
+                icon={BarChart3}
+                title="No cashflow data yet"
+                description="Add income and expenses to see your monthly cashflow trends over time."
+                compact
+              />
+            )}
           </section>
 
           {/* Distribution Grid */}
           <div className="grid grid-cols-1 2xl:grid-cols-2 gap-6">
             <section className="glass-card space-y-6 rounded-2xl border p-6" style={{ borderColor: "var(--app-border)" }}>
               <h3 className="text-sm font-bold uppercase tracking-widest text-fintech-muted">Expense Distribution</h3>
-              <div className="flex flex-col items-center">
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={85}
-                        paddingAngle={4}
-                        dataKey="value"
-                        stroke="none"
-                      >
-                        {pieData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        contentStyle={tooltipStyle}
-                        formatter={(value: number) => `${baseSymbol}${value.toLocaleString()}`}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="grid grid-cols-2 gap-x-8 gap-y-2 w-full mt-4">
-                  {pieData.map((entry, index) => (
-                    <div key={entry.name} className="flex items-center justify-between group">
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                        <span className="truncate text-[10px] font-medium text-fintech-muted transition-colors group-hover:text-[var(--app-text)]">{entry.name}</span>
+              {pieData.length > 0 ? (
+                <div className="flex flex-col items-center">
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={85}
+                          paddingAngle={4}
+                          dataKey="value"
+                          stroke="none"
+                        >
+                          {pieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          contentStyle={tooltipStyle}
+                          formatter={(value: number) => `${baseSymbol}${value.toLocaleString()}`}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-2 w-full mt-4">
+                    {pieData.map((entry, index) => (
+                      <div key={entry.name} className="flex items-center justify-between group">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                          <span className="truncate text-[10px] font-medium text-fintech-muted transition-colors group-hover:text-[var(--app-text)]">{entry.name}</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-white ml-2">
+                          {totalSpend > 0 ? Math.round((entry.value / totalSpend) * 100) : 0}%
+                        </span>
                       </div>
-                      <span className="text-[10px] font-bold text-white ml-2">
-                        {totalSpend > 0 ? Math.round((entry.value / totalSpend) * 100) : 0}%
-                      </span>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <EmptyState
+                  icon={PieIcon}
+                  title="No expenses to distribute"
+                  description="Add expenses to see how your spending is distributed across categories."
+                  compact
+                />
+              )}
             </section>
 
             <section className="glass-card space-y-6 rounded-2xl border p-6" style={{ borderColor: "var(--app-border)" }}>
               <h3 className="text-sm font-bold uppercase tracking-widest text-fintech-muted">Income Sources</h3>
-              <div className="flex flex-col items-center">
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={incomePieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={85}
-                        paddingAngle={4}
-                        dataKey="value"
-                        stroke="none"
-                      >
-                        {incomePieData.map((entry, index) => (
-                          <Cell key={`cell-income-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        contentStyle={tooltipStyle}
-                        formatter={(value: number) => `${baseSymbol}${value.toLocaleString()}`}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="grid grid-cols-2 gap-x-8 gap-y-2 w-full mt-4">
-                  {incomePieData.map((entry, index) => (
-                    <div key={entry.name} className="flex items-center justify-between group">
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[(index + 3) % COLORS.length] }} />
-                        <span className="truncate text-[10px] font-medium text-fintech-muted transition-colors group-hover:text-[var(--app-text)]">{entry.name}</span>
+              {incomePieData.length > 0 ? (
+                <div className="flex flex-col items-center">
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={incomePieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={85}
+                          paddingAngle={4}
+                          dataKey="value"
+                          stroke="none"
+                        >
+                          {incomePieData.map((entry, index) => (
+                            <Cell key={`cell-income-${index}`} fill={COLORS[(index + 3) % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          contentStyle={tooltipStyle}
+                          formatter={(value: number) => `${baseSymbol}${value.toLocaleString()}`}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-2 w-full mt-4">
+                    {incomePieData.map((entry, index) => (
+                      <div key={entry.name} className="flex items-center justify-between group">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[(index + 3) % COLORS.length] }} />
+                          <span className="truncate text-[10px] font-medium text-fintech-muted transition-colors group-hover:text-[var(--app-text)]">{entry.name}</span>
+                        </div>
+                        <span className="text-[10px] font-bold text-white ml-2">
+                          {totalIncome > 0 ? Math.round((entry.value / totalIncome) * 100) : 0}%
+                        </span>
                       </div>
-                      <span className="text-[10px] font-bold text-white ml-2">
-                        {totalIncome > 0 ? Math.round((entry.value / totalIncome) * 100) : 0}%
-                      </span>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <EmptyState
+                  icon={TrendingUp}
+                  title="No income sources yet"
+                  description="Add income records to see your income sources breakdown."
+                  compact
+                />
+              )}
             </section>
           </div>
         </>
@@ -912,6 +940,8 @@ export const Analysis: React.FC<AnalysisProps> = ({
           </div>
 
           {/* Comparison Chart */}
+          {comparisonData.length > 0 ? (
+            <>
           <section className="glass-card space-y-6 rounded-2xl border p-6" style={{ borderColor: "var(--app-border)" }}>
             <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <h3 className="text-sm font-bold uppercase tracking-widest text-fintech-muted">Historical Comparison</h3>
@@ -1002,6 +1032,15 @@ export const Analysis: React.FC<AnalysisProps> = ({
               </table>
             </div>
           </section>
+            </>
+          ) : (
+            <EmptyState
+              icon={BarChart3}
+              title="No comparison data"
+              description="Add transactions to both periods to see how your spending compares over time."
+              compact
+            />
+          )}
         </div>
       ) : (
         <div className="space-y-8">

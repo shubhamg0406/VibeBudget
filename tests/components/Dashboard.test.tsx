@@ -1,5 +1,5 @@
 import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
 import { renderWithProviders } from "../utils/renderWithProviders";
 import { makeExpenseCategory, makeIncome, makeIncomeCategory, makeTransaction } from "../utils/fixtures";
@@ -30,15 +30,24 @@ describe("Dashboard", () => {
   });
 
   it("shows the empty-state guidance when there is no activity", () => {
+    const onViewHistory = vi.fn();
     renderWithProviders(
       <Dashboard
         expenseCategories={[]}
         incomeCategories={[]}
         transactions={[]}
         income={[]}
+        onViewHistory={onViewHistory}
       />,
     );
 
     expect(screen.getByText(/No activity yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No expense categories yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No income targets set/i)).toBeInTheDocument();
+
+    const goBtn = screen.getByRole("button", { name: /Go to Transactions/i });
+    expect(goBtn).toBeInTheDocument();
+    goBtn.click();
+    expect(onViewHistory).toHaveBeenCalledTimes(1);
   });
 });

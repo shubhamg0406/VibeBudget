@@ -8,12 +8,14 @@ import {
   Check,
   Edit2,
   PiggyBank,
+  Receipt,
   Sparkles,
   Wallet,
   X
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useFirebase } from "../contexts/FirebaseContext";
+import { EmptyState } from "./common/EmptyState";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 import { getCategoryDropdownNames } from "../utils/categoryOptions";
 import { DashboardInsightTile, generateDashboardInsights, InsightTone } from "../utils/insights";
@@ -42,6 +44,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   previousIncome = [],
   allTransactions = [],
   allIncome = [],
+  onViewHistory,
   onUpdateTarget,
   monthMultiplier = 1
 }) => {
@@ -461,18 +464,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {isEmptyState ? (
-            <div className="mt-4 rounded-xl border border-dashed bg-[var(--app-panel-muted)] p-3" style={{ borderColor: "var(--app-border)" }}>
-              <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--app-panel-strong)] text-fintech-accent">
-                  <Sparkles size={15} />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-[var(--app-text)]">No activity yet</div>
-                  <p className="mt-1 text-xs leading-5 text-fintech-muted">
-                    Add your first income or expense to unlock forecasts, savings signals, and cashflow insights.
-                  </p>
-                </div>
-              </div>
+            <div className="mt-4 space-y-3">
+              <EmptyState
+                icon={Receipt}
+                title="No activity yet"
+                description="Add your first transaction to unlock forecasts, savings signals, and cashflow insights on this dashboard."
+                action={onViewHistory ? { label: "Go to Transactions", onClick: onViewHistory } : undefined}
+                compact
+              />
             </div>
           ) : (
             <div className="mt-5 grid gap-2.5 xl:grid-cols-2">
@@ -517,21 +516,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             {visibleExpenseTargets.length === 0 ? (
-              <div className="mt-6 text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-[var(--app-border-strong)] bg-[var(--app-panel-strong)] text-[#6fbdf5]">
-                  <Sparkles size={22} />
-                </div>
-                <div className="mt-3 text-base font-bold">No budget targets set.</div>
-                <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-fintech-muted">
-                  Go to Settings to import your transactions or set custom targets manually.
-                </p>
-                <button className="mt-4 text-sm font-semibold text-fintech-accent">Navigate to Settings</button>
-                <div className="mt-3 rounded-xl border border-[#58d8ff] bg-[var(--app-info-soft)] p-3 text-left">
-                  <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[#74d5ff]">Quick Tip</div>
-                  <p className="mt-1.5 text-xs leading-5 text-fintech-muted">
-                    Setting targets can help you save up to 15% more annually by visualizing your limits.
-                  </p>
-                </div>
+              <div className="mt-6">
+                <EmptyState
+                  icon={Sparkles}
+                  title="No expense categories yet"
+                  description="Expense categories appear once you add transactions or import data. Go to Settings to set up custom budget targets and track your spending limits."
+                  compact
+                />
               </div>
             ) : (
               <div className="mt-4 space-y-3">
@@ -616,8 +607,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             {activeIncomeTargets.length === 0 ? (
-              <div className="mt-4 rounded-xl border border-dashed bg-[var(--app-panel-muted)] p-3 text-sm text-fintech-muted" style={{ borderColor: "var(--app-border)" }}>
-                Add income category targets in Settings to track where money comes from.
+              <div className="mt-4">
+                <EmptyState
+                  icon={Sparkles}
+                  title="No income targets set"
+                  description="Set income category targets in Settings to track and visualize where your money comes from."
+                  compact
+                />
               </div>
             ) : (
               <div className="mt-4 space-y-2">

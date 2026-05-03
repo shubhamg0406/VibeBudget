@@ -20,6 +20,7 @@ import { TransactionEntry } from "./TransactionEntry";
 import { TransactionIcon } from "./TransactionIcon";
 import { compareDateStrings, formatDisplayDate, getMonthYearLabel, isDateInRange } from "../utils/dateUtils";
 import { useFirebase } from "../contexts/FirebaseContext";
+import { EmptyState } from "./common/EmptyState";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 import { getCategoryDropdownNames } from "../utils/categoryOptions";
 import {
@@ -329,7 +330,12 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             </div>
 
             {upcoming.length === 0 ? (
-              <div className="text-xs text-fintech-muted">No recurring entries in the next 30 days.</div>
+              <EmptyState
+                icon={Repeat}
+                title="No recurring entries in the next 30 days"
+                description="Recurring rules predict future expenses and income. Set up a recurring transaction to see projections here."
+                compact
+              />
             ) : (
               <div className="max-h-72 space-y-2 overflow-auto pr-1">
                 {upcoming.map((item) => (
