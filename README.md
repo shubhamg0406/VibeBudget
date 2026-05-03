@@ -58,6 +58,7 @@ For the product direction, hosted/self-hosted strategy, and engineering baseline
 | [Roadmap](docs/roadmap.md) | Execution phases and priorities |
 | [Agent PR Workflow](docs/agent-workflow.md) | Branch, commit, approval, and agent handoff rules |
 | [Testing & Release Workflow](docs/testing-release-workflow.md) | Codex validation, local browser testing, staging, and prod release gates |
+| [Staging Env Safety](docs/staging-env-safety.md) | Staging-safe environment setup, namespace isolation, and preview deployment safety |
 
 ## Feature Walkthrough
 
@@ -111,8 +112,10 @@ npm run dev                    # Express API on :3000 + Vite on :8888
 
 ### Environment separation (important)
 - Use `VITE_FIREBASE_DATA_NAMESPACE="local-dev"` in local development.
-- Use `VITE_FIREBASE_DATA_NAMESPACE="prod"` in production.
-- This keeps local/dev data isolated from live production data, even in the same Firebase project.
+- Use `VITE_FIREBASE_DATA_NAMESPACE="staging"` in PR previews.
+- Use `VITE_FIREBASE_DATA_NAMESPACE="prod"` only in production.
+- This keeps local/staging data isolated from live production data, even in the same Firebase project.
+- See [Staging Env Safety](docs/staging-env-safety.md) for detailed setup instructions.
 
 ### Local mock identity for tests
 - `VITE_TEST_USER_EMAIL` sets the default user email when running `VITE_TEST_MODE=mock`.
@@ -164,6 +167,10 @@ Set these env vars in the Vercel project:
 - `GEMINI_MODEL` (optional; defaults to `gemini-2.5-flash`)
 
 For provider-specific setup (AI, Plaid, Teller, Google APIs), see [BYOK Provider Setup](docs/byok-provider-setup.md).
+
+### Preview deployments
+PR branches automatically deploy to a unique Vercel preview URL. The preview environment
+**must** use the `staging` data namespace. See [Staging Env Safety](docs/staging-env-safety.md#vercel-preview-deployment-setup) for configuration.
 
 Deploy command:
 ```bash

@@ -35,3 +35,15 @@
 9. **Testing:** Run `npm run test:unit` for utility changes, `npm run test:component` for component changes, `npm run test:api` for API changes. Run full `npm run verify` before significant deployments.
 
 10. **No secrets in code:** API keys, service account JSON, and tokens must only come from environment variables or .env files.
+
+## Staging & Production Safety Rules
+
+11. **Never test against production data.** Set `VITE_FIREBASE_DATA_NAMESPACE` and `FIREBASE_DATA_NAMESPACE` to `staging` (or `local-dev`) in every PR branch. Never use `prod` namespace locally or in preview deployments.
+
+12. **Use sandbox/development credentials for all integration testing.** Never use production Plaid, Teller, Gemini, or Firebase credentials in staging or local environments.
+
+13. **Verify namespace on every preview deployment.** Before marking a PR as ready, confirm the preview deployment uses `staging` namespace (check browser console: `import.meta.env.VITE_FIREBASE_DATA_NAMESPACE`).
+
+14. **Document staging safety gaps immediately** but do not fix unrelated problems in the same PR. File issues separately.
+
+15. **See `docs/staging-env-safety.md`** for the full staging environment setup guide.

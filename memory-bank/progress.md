@@ -62,6 +62,10 @@
 
 ## ✅ Recently Completed
 
+- [x] **Staging environment safety documentation** — Added `docs/staging-env-safety.md`, `.env.staging.example`, and updated `.env.example`, `README.md`, `memory-bank/techContext.md`, and `.clinerules` with staging-safe namespace guidance for PR/preview testing
+
+## ✅ Recently Completed
+
 - [x] **Memory Bank initialization** — established documentation-first development workflow
 - [x] **DataHub wired into Layout header** — Upload button in header opens full DataHub modal (Excel import, Google Sheet auto-sync, new data detection, data stats) from any page
 - [x] **Plaid Integration (BYOK)** — Full bank feed integration with:
