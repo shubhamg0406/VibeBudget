@@ -234,6 +234,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
     googleSheetsAccessToken,
 
     // Plaid
+    user,
     plaidConnected,
     plaidConnection,
     plaidSyncing,
@@ -1529,6 +1530,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
   // Plaid Link integration
   const generateLinkToken = useCallback(async () => {
     if (!plaidCredentials) return;
+    if (!user?.uid) {
+      setSectionStatus("finance_feeds", "error", "Sign in with Google first to connect a bank.");
+      return;
+    }
     setGeneratingLinkToken(true);
     try {
       const response = await fetch("/api/plaid/create_link_token", {
@@ -1538,6 +1543,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
           clientId: plaidCredentials.clientId,
           secret: plaidCredentials.secret,
           environment: plaidCredentials.environment,
+          userId: user.uid,
         }),
       });
       if (!response.ok) {
