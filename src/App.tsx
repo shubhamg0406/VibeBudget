@@ -11,6 +11,7 @@ import { AiChat } from "./components/AiChat";
 import { formatDate, getMonthCountForDateRangeOption, getPresetDateRange, isDateInRange, parseDateString, resolveDateRange } from "./utils/dateUtils";
 import { View, DateRange, Theme } from "./types";
 import { useFirebase } from "./contexts/FirebaseContext";
+import type { SettingsTab } from "./components/Settings";
 
 export default function App() {
   const {
@@ -26,11 +27,19 @@ export default function App() {
     updateExpenseCategoryTarget,
   } = useFirebase();
   const [view, setView] = useState<View>("dashboard");
+  const [settingsSection, setSettingsSection] = useState<SettingsTab>("data");
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
     const savedTheme = window.localStorage.getItem("vibebudget-theme");
     return savedTheme === "light" || savedTheme === "dark" ? savedTheme : "dark";
   });
+
+  const onNavigate = (targetView: View, targetSection?: SettingsTab) => {
+    setView(targetView);
+    if (targetSection && targetView === "settings") {
+      setSettingsSection(targetSection);
+    }
+  };
 
   // Default date range: This Month
   const [dateRange, setDateRange] = useState<DateRange>(() => getPresetDateRange("this-month"));
@@ -133,7 +142,8 @@ export default function App() {
               previousIncome={previousIncome}
               allTransactions={transactions}
               allIncome={income}
-              onViewHistory={() => setView("transactions")}
+              onViewHistory={() => onNavigate("transactions")}
+              onNavigate={(view, section) => onNavigate(view, section)}
               onUpdateTarget={updateExpenseCategoryTarget}
               monthMultiplier={monthMultiplier}
             />
@@ -175,7 +185,7 @@ export default function App() {
           </div>
         );
       case "settings":
-        return <Settings onRefresh={() => {}} />;
+        return <Settings onRefresh={() => {}} initialTab={settingsSection} />;
       default:
         return <Dashboard expenseCategories={expenseCategories} incomeCategories={incomeCategories} transactions={filteredTransactions} income={filteredIncome} />;
     }

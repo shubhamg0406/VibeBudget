@@ -72,7 +72,7 @@ describe("App", () => {
 
     expect(screen.getAllByText("Dashboard")[0]).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
-    expect(screen.getAllByText("Data Hub").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /1\. Data Hub/i })).toBeInTheDocument();
   });
 
   it("shows a loading spinner before data is ready", () => {

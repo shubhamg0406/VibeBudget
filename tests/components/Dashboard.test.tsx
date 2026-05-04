@@ -50,4 +50,37 @@ describe("Dashboard", () => {
     goBtn.click();
     expect(onViewHistory).toHaveBeenCalledTimes(1);
   });
+
+  it("shows the getting-started checklist in empty state when onNavigate is provided", () => {
+    const onNavigate = vi.fn();
+    renderWithProviders(
+      <Dashboard
+        expenseCategories={[]}
+        incomeCategories={[]}
+        transactions={[]}
+        income={[]}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    expect(screen.getByText("View Setup Guide")).toBeInTheDocument();
+    expect(screen.getByText("Set Up Integrations")).toBeInTheDocument();
+    expect(screen.getByText("Import Your Data")).toBeInTheDocument();
+
+    screen.getByText("Set Up Integrations").click();
+    expect(onNavigate).toHaveBeenCalledWith("settings", "finance_feeds");
+  });
+
+  it("does not show checklist when onNavigate is not provided", () => {
+    renderWithProviders(
+      <Dashboard
+        expenseCategories={[]}
+        incomeCategories={[]}
+        transactions={[]}
+        income={[]}
+      />,
+    );
+
+    expect(screen.queryByText("View Setup Guide")).not.toBeInTheDocument();
+  });
 });

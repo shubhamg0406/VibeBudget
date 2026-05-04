@@ -16,10 +16,13 @@ import {
 import { motion } from "motion/react";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { EmptyState } from "./common/EmptyState";
+import { GettingStartedChecklist } from "./GettingStartedChecklist";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 import { getCategoryDropdownNames } from "../utils/categoryOptions";
 import { DashboardInsightTile, generateDashboardInsights, InsightTone } from "../utils/insights";
 import { formatDate, isDateInRange } from "../utils/dateUtils";
+
+import type { SettingsTab } from "./Settings";
 
 interface DashboardProps {
   expenseCategories: ExpenseCategory[];
@@ -31,6 +34,7 @@ interface DashboardProps {
   allTransactions?: Transaction[];
   allIncome?: Income[];
   onViewHistory?: () => void;
+  onNavigate?: (view: "settings", section: SettingsTab) => void;
   onUpdateTarget?: (id: string, target: number) => void;
   monthMultiplier?: number;
 }
@@ -45,6 +49,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   allTransactions = [],
   allIncome = [],
   onViewHistory,
+  onNavigate,
   onUpdateTarget,
   monthMultiplier = 1
 }) => {
@@ -464,7 +469,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {isEmptyState ? (
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-4">
               <EmptyState
                 icon={Receipt}
                 title="No activity yet"
@@ -472,6 +477,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 action={onViewHistory ? { label: "Go to Transactions", onClick: onViewHistory } : undefined}
                 compact
               />
+              {onNavigate && <GettingStartedChecklist onNavigate={onNavigate} />}
             </div>
           ) : (
             <div className="mt-5 grid gap-2.5 xl:grid-cols-2">
