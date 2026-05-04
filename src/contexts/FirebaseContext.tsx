@@ -42,6 +42,7 @@ import {
   PlaidEnv,
   Preferences,
   RecurringRule,
+  SheetRangeDraft,
   TellerCategoryMapping,
   TellerConnection,
   TellerCredentials,
@@ -1555,13 +1556,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let incomeComplete = true;
 
     for (const field of reqExpFields) {
-      if (!(config.expenseMapping as Record<string, string>)[field]?.trim()) {
+      if (!(config.expenseMapping as unknown as Record<string, string>)[field]?.trim()) {
         missing.push(`expenses.${field}`);
         expenseComplete = false;
       }
     }
     for (const field of reqIncFields) {
-      if (!(config.incomeMapping as Record<string, string>)[field]?.trim()) {
+      if (!(config.incomeMapping as unknown as Record<string, string>)[field]?.trim()) {
         missing.push(`income.${field}`);
         incomeComplete = false;
       }
