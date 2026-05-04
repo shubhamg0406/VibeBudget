@@ -56,7 +56,7 @@ describe("App", () => {
       },
     });
 
-    expect(screen.getByText(/Budgeting that feels clear/i)).toBeInTheDocument();
+    expect(screen.getByText(/Your money. Your data. Your rules./i)).toBeInTheDocument();
     expect(screen.getAllByText(/Sign in with Google/i)[0]).toBeInTheDocument();
   });
 
