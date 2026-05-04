@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createLinkToken } from "../../src/server/plaid";
-import type { PlaidEnv } from "../../src/types";
+import { createLinkToken } from "../../src/server/plaid.js";
+import type { PlaidEnv } from "../../src/types.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {

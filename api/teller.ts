@@ -4,8 +4,8 @@ import {
   getTransactions,
   getAccountDetails,
   getAccountBalances,
-} from "../src/server/teller";
-import type { TellerEnv } from "../src/types";
+} from "../src/server/teller.js";
+import type { TellerEnv } from "../src/types.js";
 
 /**
  * Vercel serverless handler for Teller API routes.

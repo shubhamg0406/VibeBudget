@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { AiClientError, callAiOcr } from "../../src/server/aiClient";
-import type { AiProviderConfig, ExtractTransactionsResponse } from "../../src/types";
+import { AiClientError, callAiOcr } from "../../src/server/aiClient.js";
+import type { AiProviderConfig, ExtractTransactionsResponse } from "../../src/types.js";
 
 const INITIAL_CATEGORIES = [
   "Housing",
