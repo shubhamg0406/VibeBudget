@@ -1,7 +1,12 @@
 import React from "react";
 import {
   ArrowRight,
+  Book,
   Cloud,
+  FileText,
+  Github,
+  Globe,
+  KeyRound,
   LineChart,
   Moon,
   ShieldCheck,
@@ -16,6 +21,7 @@ import { useFirebase } from "../contexts/FirebaseContext";
 interface LoggedOutHomeProps {
   theme: Theme;
   onToggleTheme: () => void;
+  onOpenDocs?: () => void;
 }
 
 const featureCards = [
@@ -42,7 +48,11 @@ const proofPoints = [
   "Built for private personal finance tracking",
 ];
 
-export const LoggedOutHome: React.FC<LoggedOutHomeProps> = ({ theme, onToggleTheme }) => {
+export const LoggedOutHome: React.FC<LoggedOutHomeProps> = ({
+  theme,
+  onToggleTheme,
+  onOpenDocs,
+}) => {
   const { signIn } = useFirebase();
   const isLight = theme === "light";
 
@@ -76,6 +86,15 @@ export const LoggedOutHome: React.FC<LoggedOutHomeProps> = ({ theme, onToggleThe
               {isLight ? <Moon size={15} /> : <SunMedium size={15} />}
               <span>{isLight ? "Dark" : "Light"}</span>
             </button>
+            {onOpenDocs && (
+              <button
+                onClick={onOpenDocs}
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-panel-muted)] px-3 py-2 text-[12px] font-semibold text-[var(--app-text-muted)] transition-colors hover:border-fintech-accent/40 hover:text-fintech-accent"
+              >
+                <FileText size={14} />
+                <span>Docs</span>
+              </button>
+            )}
             <button
               onClick={() => void signIn()}
               className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(135deg,_#69f6b8_0%,_#06b77f_100%)] px-4 py-2 text-[12px] font-semibold text-[#032a1a] shadow-[0_14px_30px_rgba(6,183,127,0.3)] transition-transform hover:-translate-y-0.5"
@@ -195,6 +214,71 @@ export const LoggedOutHome: React.FC<LoggedOutHomeProps> = ({ theme, onToggleThe
             </div>
           </motion.section>
         </div>
+
+
+        {/* Hosted / Self-host / Docs option cards */}
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.2 }}
+          className="mt-8 grid gap-4 pb-10 sm:grid-cols-3"
+        >
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[color:var(--app-panel)]/70 p-5 backdrop-blur-xl">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--app-panel-strong)] text-fintech-accent">
+              <Cloud size={18} />
+            </div>
+            <h3 className="mt-4 text-sm font-semibold">Hosted app</h3>
+            <p className="mt-1 text-xs leading-5 text-[var(--app-text-muted)]">
+              Use the hosted version at vibebudget.app. No setup, no
+              infrastructure. Google sign-in included.
+            </p>
+            <button
+              onClick={() => void signIn()}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-fintech-accent px-4 py-2 text-xs font-semibold text-[#022616] transition-transform hover:-translate-y-0.5"
+            >
+              <span>Sign in to hosted app</span>
+              <ArrowRight size={13} />
+            </button>
+          </div>
+
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[color:var(--app-panel)]/70 p-5 backdrop-blur-xl">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--app-panel-strong)] text-fintech-accent">
+              <Github size={18} />
+            </div>
+            <h3 className="mt-4 text-sm font-semibold">Self-host on GitHub</h3>
+            <p className="mt-1 text-xs leading-5 text-[var(--app-text-muted)]">
+              Deploy on your own infrastructure. Full control over your data,
+              Firebase, and providers.
+            </p>
+            <a
+              href="https://github.com/th0mk4k4/vibebudget"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-muted)] px-4 py-2 text-xs font-semibold text-[var(--app-text)] transition-colors hover:bg-[var(--app-hover)]"
+            >
+              <Github size={13} />
+              <span>View on GitHub</span>
+            </a>
+          </div>
+
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[color:var(--app-panel)]/70 p-5 backdrop-blur-xl">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--app-panel-strong)] text-fintech-accent">
+              <Book size={18} />
+            </div>
+            <h3 className="mt-4 text-sm font-semibold">Docs &amp; guides</h3>
+            <p className="mt-1 text-xs leading-5 text-[var(--app-text-muted)]">
+              Self-hosting guide, BYOK provider setup, troubleshooting, and
+              roadmap.
+            </p>
+            <button
+              onClick={onOpenDocs}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-muted)] px-4 py-2 text-xs font-semibold text-[var(--app-text)] transition-colors hover:bg-[var(--app-hover)]"
+            >
+              <Book size={13} />
+              <span>Read docs</span>
+            </button>
+          </div>
+        </motion.section>
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./components/Dashboard";
 import { Analysis } from "./components/Analysis";
@@ -8,6 +8,7 @@ import { DateRangeSelector } from "./components/DateRangeSelector";
 import { TransactionsView } from "./components/TransactionsView";
 import { LoggedOutHome } from "./components/LoggedOutHome";
 import { AiChat } from "./components/AiChat";
+import { Docs } from "./components/Docs";
 import { formatDate, getMonthCountForDateRangeOption, getPresetDateRange, isDateInRange, parseDateString, resolveDateRange } from "./utils/dateUtils";
 import { View, DateRange, Theme } from "./types";
 import { useFirebase } from "./contexts/FirebaseContext";
@@ -25,7 +26,13 @@ export default function App() {
     income,
     updateExpenseCategoryTarget,
   } = useFirebase();
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setView] = useState<View>(() => {
+    if (typeof window !== "undefined" && window.location.pathname.startsWith("/docs")) {
+      return "docs";
+    }
+    return "dashboard";
+  });
+  const prevViewRef = useRef<View>("dashboard");
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
     const savedTheme = window.localStorage.getItem("vibebudget-theme");
@@ -35,6 +42,29 @@ export default function App() {
   // Default date range: This Month
   const [dateRange, setDateRange] = useState<DateRange>(() => getPresetDateRange("this-month"));
   const effectiveDateRange = resolveDateRange(dateRange);
+
+  const navigateToDocs = useCallback(() => {
+    prevViewRef.current = view;
+    setView("docs");
+    window.history.pushState({ view: "docs" }, "", "/docs");
+  }, [view]);
+
+  const navigateFromDocs = useCallback(() => {
+    setView(prevViewRef.current);
+    window.history.pushState({ view: prevViewRef.current }, "", "/");
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (window.location.pathname.startsWith("/docs")) {
+        setView("docs");
+      } else {
+        setView("dashboard");
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -189,11 +219,22 @@ export default function App() {
     );
   }
 
+  if (view === "docs") {
+    return (
+      <Docs
+        theme={theme}
+        onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+        onBack={navigateFromDocs}
+      />
+    );
+  }
+
   if (!user) {
     return (
       <LoggedOutHome
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+        onOpenDocs={navigateToDocs}
       />
     );
   }
@@ -234,6 +275,7 @@ export default function App() {
         setView={setView}
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+        onOpenDocs={navigateToDocs}
       >
         {renderView()}
       </Layout>

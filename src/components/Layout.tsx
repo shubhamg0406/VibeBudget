@@ -29,6 +29,7 @@ interface LayoutProps {
   setView: (view: View) => void;
   theme: Theme;
   onToggleTheme: () => void;
+  onOpenDocs?: () => void;
 }
 
 const PAGE_META: Record<View, { title: string; searchPlaceholder: string }> = {
@@ -37,9 +38,10 @@ const PAGE_META: Record<View, { title: string; searchPlaceholder: string }> = {
   analysis: { title: "Stats", searchPlaceholder: "Search insights..." },
   "monthly-analysis": { title: "Monthly Analysis", searchPlaceholder: "Search categories..." },
   settings: { title: "Settings", searchPlaceholder: "Search settings..." },
+  docs: { title: "Docs", searchPlaceholder: "Search docs..." },
 };
 
-export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, theme, onToggleTheme }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, theme, onToggleTheme, onOpenDocs }) => {
   const { user, signIn, logout } = useFirebase();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showDataHub, setShowDataHub] = useState(false);
@@ -102,9 +104,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
             </nav>
 
             <div className="mt-auto space-y-2">
-              <button className="flex w-full items-center gap-3 px-5 py-2.5 text-[var(--app-text-muted)] transition-colors duration-200 hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]">
+              <button
+                onClick={onOpenDocs}
+                className="flex w-full items-center gap-3 px-5 py-2.5 text-[var(--app-text-muted)] transition-colors duration-200 hover:bg-[var(--app-hover)] hover:text-[var(--app-text)]"
+              >
                 <CircleHelp size={18} />
-                <span className="text-[13px] font-medium tracking-tight">Help</span>
+                <span className="text-[13px] font-medium tracking-tight">Docs</span>
               </button>
               <button
                 onClick={() => logout()}
