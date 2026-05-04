@@ -1,10 +1,14 @@
 ## Summary
 
-- 
+<!-- One-line summary of what this PR does. -->
+
+-
 
 ## Change Type
 
-- [ ] Docs only
+<!-- Select exactly one. If this PR has runtime code changes, it is not docs-only. -->
+
+- [ ] Docs only (no runtime code changes)
 - [ ] Frontend/UI
 - [ ] Backend/API
 - [ ] Integration/provider
@@ -14,49 +18,40 @@
 
 ## Agent Handoff
 
-- Agent:
-- Branch:
-- Related task/context:
-- Files changed:
+<!-- Required for all agent PRs. -->
 
-## Validation
+- **Agent:**
+- **Branch:**
+- **PR link:**
+- **Files changed:**
+- **Tests run + results:**
+- **Tests not run and why:**
+- **Local browser test steps** (if UI, auth, data, integration, or behavior change):
+- **Staging/sandbox data confirmation:**
+- **Screenshots / visual notes** (if UI changed):
+- **Known risks:**
+- **Rollback suggestion:**
+- **Confirmation:** No production data or credentials were used in testing.
 
-- [ ] Relevant automated tests run
-- [ ] Typecheck/lint run if applicable
-- [ ] Local browser testing completed where applicable
-- [ ] Staging namespace or safe local data used
+## Validation Checklist
+
+- [ ] Relevant automated tests pass
+- [ ] Typecheck/lint passes (if applicable)
+- [ ] Local browser testing completed (if UI/auth/data/integration change)
+- [ ] Staging or safe local namespace used (not `prod`)
 - [ ] No production personal data used for testing
 - [ ] No secrets, API keys, or real credentials committed
+- [ ] I did not merge this PR — I am stopping after delivery
 
-Commands/results:
+## For Codex / Maintainer
 
-```text
+<!-- Codex or the maintainer fills this section during review. -->
 
-```
+- [ ] Diff scope matches the request
+- [ ] No unrelated files included
+- [ ] Secrets/credentials check passed
+- [ ] Local browser testing verified (if applicable)
+- [ ] Rollback is straightforward
 
-## Local Browser Test Notes
+**Merge decision:**
 
-Required for UI, auth, data, integration, and behavior changes.
-
-- Local URL tested:
-- Env/namespace used:
-- Flows tested:
-- Browser console checked:
-- Screenshots/visual notes, if UI changed:
-
-## Staging / Preview Notes
-
-- Preview URL:
-- Namespace used:
-- Provider mode used, if applicable:
-- Vercel/log checks:
-
-## Risk And Rollback
-
-Known risks:
-
-- 
-
-Rollback plan:
-
-- 
