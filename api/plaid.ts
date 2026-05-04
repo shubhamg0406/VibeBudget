@@ -5,8 +5,8 @@ import {
   getAccounts,
   encryptAccessToken,
   decryptAccessToken,
-} from "../src/server/plaid";
-import type { PlaidEnv } from "../src/types";
+} from "../src/server/plaid.js";
+import type { PlaidEnv } from "../src/types.js";
 
 /**
  * Vercel serverless handler for Plaid API routes.
