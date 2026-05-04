@@ -58,6 +58,7 @@ For the product direction, hosted/self-hosted strategy, and engineering baseline
 | [Roadmap](docs/roadmap.md) | Execution phases and priorities |
 | [Agent PR Workflow](docs/agent-workflow.md) | Branch, commit, approval, and agent handoff rules |
 | [Testing & Release Workflow](docs/testing-release-workflow.md) | Codex validation, local browser testing, staging, and prod release gates |
+| [Local Browser Testing Playbooks](docs/local-browser-testing.md) | Concrete PR-type playbooks: docs, frontend, backend/API, integration, auth, deployment |
 
 ## Feature Walkthrough
 
