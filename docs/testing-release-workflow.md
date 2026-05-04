@@ -57,6 +57,8 @@ Codex checks each PR against:
 
 ## Local browser validation
 
+> **Baseline reference**: See [baseline-validation-status.md](./baseline-validation-status.md) for the current catalog of pre-existing `npm run lint` failures. Use this to distinguish baseline issues from PR regressions.
+
 Required before merge for UI, auth, data, integration, and behavior changes.
 
 1. Checkout the agent branch.
