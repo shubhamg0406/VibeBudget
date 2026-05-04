@@ -67,9 +67,22 @@ Required before merge for UI, auth, data, integration, and behavior changes.
 6. Validate the changed flow, check browser console for errors, check server terminal for errors.
 7. Record what was tested and the result.
 
+For concrete step-by-step playbooks covering each PR type (docs, frontend, backend/API, integration, auth, deployment), see [Local Browser Testing Playbooks](local-browser-testing.md).
+
 ## Staging validation
 
-Default staging namespace: `staging`
+Use staging for realistic testing without risking production personal data.
+
+Default staging namespace:
+
+```env
+VITE_FIREBASE_DATA_NAMESPACE="staging"
+FIREBASE_DATA_NAMESPACE="staging"
+```
+
+Staging can use the same Firebase project with a separate namespace, or a separate Firebase project later if needed.
+
+Staging checks:
 
 - Google sign-in works on the preview/staging URL.
 - Firestore reads/writes go under `/environments/staging/users/{uid}/...`.
