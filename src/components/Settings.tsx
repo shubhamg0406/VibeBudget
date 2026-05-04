@@ -24,6 +24,7 @@ import {
   ExpenseCategory,
   ExpenseSheetMapping,
   GooglePullSummary,
+  GoogleSheetsInspectionResult,
   GoogleSheetsSyncConfig,
   GoogleSheetsSyncDirection,
   GoogleSheetsSyncMode,
@@ -1006,17 +1007,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
       if (!parsedSpreadsheetId) {
         throw new Error("Invalid spreadsheet URL.");
       }
-      let inspection: {
-        spreadsheetId: string;
-        spreadsheetTitle: string;
-        sheetTitles: string[];
-        expenseHeaders: string[];
-        incomeHeaders: string[];
-        expenseCategoryHeaders: string[];
-        incomeCategoryHeaders: string[];
-        suggestedExpenseMapping: ExpenseSheetMapping;
-        suggestedIncomeMapping: IncomeSheetMapping;
-      };
+      let inspection: GoogleSheetsInspectionResult;
       if (hasLiveGoogleAuth) {
         try {
           inspection = await inspectGoogleSheetsSpreadsheet(

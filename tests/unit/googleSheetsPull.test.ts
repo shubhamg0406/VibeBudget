@@ -236,12 +236,12 @@ describe("Mapping validation logic", () => {
     const reqIncFields = ["date", "source", "amount", "category"];
 
     for (const field of reqExpFields) {
-      if (!(config.expenseMapping as Record<string, string>)?.[field]?.trim()) {
+      if (!(config.expenseMapping as unknown as Record<string, string>)?.[field]?.trim()) {
         missing.push(`expenses.${field}`);
       }
     }
     for (const field of reqIncFields) {
-      if (!(config.incomeMapping as Record<string, string>)?.[field]?.trim()) {
+      if (!(config.incomeMapping as unknown as Record<string, string>)?.[field]?.trim()) {
         missing.push(`income.${field}`);
       }
     }
