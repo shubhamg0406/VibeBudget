@@ -13,7 +13,8 @@ import {
   RotateCcw,
   SearchX,
   RefreshCw,
-  Upload
+  Upload,
+  Copy
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { TransactionEntry } from "./TransactionEntry";
@@ -29,6 +30,7 @@ import {
 import { BottomSheet } from "./common/BottomSheet";
 import { FAB } from "./common/FAB";
 import { BulkAddModal } from "./BulkAddModal";
+import { DuplicateDetectionPanel } from "./DuplicateDetectionPanel";
 import { useBreakpoint } from "../hooks/useBreakpoint";
 
 interface TransactionsViewProps {
@@ -65,6 +67,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkAdd, setShowBulkAdd] = useState(false);
+  const [showDuplicatePanel, setShowDuplicatePanel] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<UnifiedTransaction | null>(null);
   const [filterType, setFilterType] = useState<"all" | "expense" | "income">("all");
   const [showFilters, setShowFilters] = useState(false);
@@ -74,6 +77,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     recurringRules,
     updateRecurringRule,
     deleteRecurringRule,
+    deleteTransaction,
     googleSheetsConfig,
     googleSheetsConnected,
     googleSheetsSyncing,
@@ -268,6 +272,21 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <span>Bulk Add</span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => setShowDuplicatePanel((prev) => !prev)}
+            className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+              showDuplicatePanel
+                ? "border-fintech-accent bg-fintech-accent/10 text-fintech-accent"
+                : "bg-[var(--app-panel)] text-fintech-accent hover:bg-fintech-accent/10"
+            }`}
+            style={!showDuplicatePanel ? { borderColor: "var(--app-border)" } : undefined}
+            aria-label="Find duplicate transactions"
+          >
+            <Copy size={15} />
+            <span>Duplicates</span>
+          </button>
+
           {canRefreshFromSheets && (
             <button
               type="button"
@@ -296,6 +315,15 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         >
           {sheetRefreshStatus?.message || googleSheetsError}
         </div>
+      )}
+
+      {showDuplicatePanel && (
+        <DuplicateDetectionPanel
+          transactions={transactions}
+          onDeleteTransaction={deleteTransaction}
+          onClose={() => setShowDuplicatePanel(false)}
+          onRefresh={onRefresh}
+        />
       )}
 
       <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
