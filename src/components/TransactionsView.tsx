@@ -72,6 +72,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [filterType, setFilterType] = useState<"all" | "expense" | "income">("all");
   const [showFilters, setShowFilters] = useState(false);
   const {
+    user,
     preferences,
     getUpcomingRecurring,
     recurringRules,
@@ -323,6 +324,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           onDeleteTransaction={deleteTransaction}
           onClose={() => setShowDuplicatePanel(false)}
           onRefresh={onRefresh}
+          getAuthToken={() => user?.getIdToken() ?? Promise.resolve(null)}
         />
       )}
 
