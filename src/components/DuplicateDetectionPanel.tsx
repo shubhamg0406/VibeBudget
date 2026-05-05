@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Transaction } from "../types";
 import { SearchX, Trash2, AlertTriangle, Loader2, Copy, Check, X } from "lucide-react";
-import { detectDuplicateGroups } from "../utils/duplicateDetection";
 import { TransactionIcon } from "./TransactionIcon";
 
 interface DuplicateDetectionPanelProps {
@@ -9,6 +8,7 @@ interface DuplicateDetectionPanelProps {
   onDeleteTransaction: (id: string) => Promise<void>;
   onClose: () => void;
   onRefresh: () => void;
+  getAuthToken?: () => Promise<string | null>;
 }
 
 type PanelState =
@@ -25,14 +25,38 @@ export const DuplicateDetectionPanel: React.FC<DuplicateDetectionPanelProps> = (
   onDeleteTransaction,
   onClose,
   onRefresh,
+  getAuthToken,
 }) => {
   const [state, setState] = useState<PanelState>({ status: "idle" });
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
-  const handleDetect = () => {
+  const getAuthHeaders = async () => {
+    const token = await getAuthToken?.();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  const postJson = async <T,>(url: string, body: unknown): Promise<T> => {
+    const headers = await getAuthHeaders();
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || `Request failed (${response.status})`);
+    }
+    return payload as T;
+  };
+
+  const handleDetect = async () => {
     setState({ status: "detecting" });
     try {
-      const groups = detectDuplicateGroups(transactions);
+      const result = await postJson<{ groups: Transaction[][] }>("/api/transactions/detect-duplicates", { transactions });
+      const groups = result.groups || [];
       if (groups.length === 0) {
         setState({ status: "no-duplicates" });
       } else {
@@ -51,6 +75,7 @@ export const DuplicateDetectionPanel: React.FC<DuplicateDetectionPanelProps> = (
     if (prev.status !== "results") return;
     setState({ status: "deleting" });
     try {
+      await postJson<{ success: boolean; deleted: number }>("/api/transactions/delete-batch", { ids: [id] });
       await onDeleteTransaction(id);
       const updated = prev.groups
         .map((group) => group.filter((tx) => tx.id !== id))
@@ -76,17 +101,14 @@ export const DuplicateDetectionPanel: React.FC<DuplicateDetectionPanelProps> = (
     if (prev.status !== "results") return;
     setState({ status: "deleting" });
     try {
-      let totalDeleted = 0;
-      for (const group of prev.groups) {
-        const [keep, ...extras] = group;
-        for (const extra of extras) {
-          await onDeleteTransaction(extra.id);
-          totalDeleted++;
-        }
+      const idsToDelete = prev.groups.flatMap((group) => group.slice(1).map((tx) => tx.id));
+      const result = await postJson<{ success: boolean; deleted: number }>("/api/transactions/delete-batch", { ids: idsToDelete });
+      for (const id of idsToDelete) {
+        await onDeleteTransaction(id);
       }
       setState({
         status: "success",
-        message: `Deleted ${totalDeleted} duplicate transaction${totalDeleted !== 1 ? "s" : ""}. Kept 1 per group.`,
+        message: `Deleted ${result.deleted} duplicate transaction${result.deleted !== 1 ? "s" : ""}. Kept 1 per group.`,
       });
       setConfirmDeleteAll(false);
     } catch (err) {

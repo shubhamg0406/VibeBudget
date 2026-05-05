@@ -11,6 +11,8 @@ import { registerTellerRoutes } from "./src/server/teller.js";
 import { callAiOcr, AiClientError } from "./src/server/aiClient.js";
 import { computeUpcoming, materializeRule } from "./src/utils/recurring.js";
 import { getTodayStr } from "./src/utils/dateUtils.js";
+import { detectDuplicateGroups } from "./src/utils/duplicateDetection.js";
+import type { Transaction } from "./src/types.js";
 
 const moduleUrl = typeof import.meta !== "undefined" ? import.meta.url : undefined;
 const __dirname = moduleUrl ? path.dirname(fileURLToPath(moduleUrl)) : process.cwd();
@@ -307,7 +309,12 @@ export const createApp = async ({
     res.json({ success: true });
   });
 
-  app.post("/api/transactions/detect-duplicates", (_req, res) => {
+  app.post("/api/transactions/detect-duplicates", (req, res) => {
+    if (Array.isArray(req.body?.transactions)) {
+      const duplicateGroups = detectDuplicateGroups(req.body.transactions as Transaction[]);
+      return res.json({ groups: duplicateGroups, totalGroups: duplicateGroups.length });
+    }
+
     const rows = db.prepare(`
       SELECT t.*, c.name as category_name
       FROM transactions t
