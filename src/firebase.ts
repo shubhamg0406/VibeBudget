@@ -67,10 +67,6 @@ export function getEnvFirebaseConfig(): FirebaseWebConfig | null {
   };
 }
 
-export const googleDriveProvider = new GoogleAuthProvider();
-googleDriveProvider.setCustomParameters({ prompt: "consent" });
-googleDriveProvider.addScope("https://www.googleapis.com/auth/drive.file");
-
 export function getStoredFirebaseConfig(): FirebaseWebConfig | null {
   try {
     const raw = typeof window !== "undefined" ? localStorage.getItem(SELF_HOST_CONFIG_KEY) : null;
