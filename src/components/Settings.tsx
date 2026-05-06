@@ -54,9 +54,10 @@ import { AI_PROVIDER_MODELS, AI_PROVIDER_LABELS, AI_PROVIDER_DEFAULT_MODEL } fro
 
 interface SettingsProps {
   onRefresh: () => void;
+  initialTab?: SettingsTab;
 }
 
-type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai";
+export type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai";
 type RangeDraft = SheetRangeDraft;
 type MappingTab = "expenses" | "income" | "expense_categories" | "income_categories" | "sync";
 type StatusLevel = "success" | "info" | "warning" | "error";
@@ -215,7 +216,7 @@ const writeJson = (key: string, value: unknown) => {
   getSettingsStorage().setItem(key, JSON.stringify(value));
 };
 
-export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
+export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => {
   const {
     wipeData,
     backupToDrive,
@@ -290,7 +291,14 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh }) => {
 
   const connectedGoogleEmail = user?.email || googleSheetsConfig?.connectedBy || null;
 
-  const [activeTab, setActiveTab] = useState<SettingsTab>("data");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => initialTab || "data");
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
   const [showGoogleWorkspaceInDataHub, setShowGoogleWorkspaceInDataHub] = useState(false);
   const [googleWorkspaceModalTab, setGoogleWorkspaceModalTab] = useState<"sheets" | "drive">("sheets");
   const [aiProvider, setAiProvider] = useState<AiProvider>(aiConfig?.provider || "gemini");

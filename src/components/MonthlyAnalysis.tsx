@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useFirebase } from "../contexts/FirebaseContext";
+import { EmptyState } from "./common/EmptyState";
 import { convertToBaseCurrency, getCurrencySymbol } from "../utils/currencyUtils";
 import { formatDate, getLastDayOfMonth, isDateInRange } from "../utils/dateUtils";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
@@ -225,15 +226,11 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
       </div>
 
       {isEmptyState ? (
-        <div className="rounded-xl border border-dashed bg-[var(--app-panel)] p-8 text-center" style={{ borderColor: "var(--app-border)" }}>
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--app-panel-muted)] text-fintech-muted">
-            <CalendarCheck size={24} />
-          </div>
-          <div className="mt-3 text-base font-bold">No activity this month</div>
-          <p className="mx-auto mt-2 max-w-md text-xs text-fintech-muted">
-            Add transactions for {monthName} to see your monthly breakdown, category analysis, and budget health.
-          </p>
-        </div>
+        <EmptyState
+          icon={CalendarCheck}
+          title="No activity this month"
+          description={`Add transactions for ${monthName} to see your monthly breakdown, category analysis, and budget health.`}
+        />
       ) : (
         <>
           <section className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -286,9 +283,12 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
                   </span>
                 </div>
                 {categorySpending.length === 0 ? (
-                  <div className="rounded-lg bg-[var(--app-panel-muted)] p-4 text-center text-sm text-fintech-muted">
-                    No expenses recorded this month
-                  </div>
+                  <EmptyState
+                    icon={CalendarCheck}
+                    title="No expenses recorded this month"
+                    description="Add expenses to see your category spending breakdown."
+                    compact
+                  />
                 ) : (
                   <div className="space-y-2">
                     {categorySpending.map((cat, index) => (
@@ -357,9 +357,12 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
               <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
                 <h3 className="text-[1.1rem] font-bold mb-3">Budget Health</h3>
                 {activeTargets.length === 0 ? (
-                  <div className="rounded-lg bg-[var(--app-panel-muted)] p-4 text-center text-sm text-fintech-muted">
-                    Set category targets in Settings to track budget health
-                  </div>
+                  <EmptyState
+                    icon={PiggyBank}
+                    title="No budget targets set"
+                    description="Set category targets in Settings to track your budget health."
+                    compact
+                  />
                 ) : (
                   <>
                     <div className="grid grid-cols-2 gap-2 mb-3">
@@ -428,9 +431,12 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
               <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
                 <h3 className="text-[1.1rem] font-bold mb-3">Spending Distribution</h3>
                 {pieData.length === 0 ? (
-                  <div className="rounded-lg bg-[var(--app-panel-muted)] p-4 text-center text-sm text-fintech-muted">
-                    No spending data yet
-                  </div>
+                  <EmptyState
+                    icon={TrendingUp}
+                    title="No spending data yet"
+                    description="Add expenses to see your spending distribution chart."
+                    compact
+                  />
                 ) : (
                   <>
                     <div className="h-56 w-full">
@@ -477,9 +483,12 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
               <section className="rounded-xl border bg-[var(--app-panel)] p-4" style={{ borderColor: "var(--app-border)" }}>
                 <h3 className="text-[1.1rem] font-bold mb-3">Income Sources</h3>
                 {incomeSources.length === 0 ? (
-                  <div className="rounded-lg bg-[var(--app-panel-muted)] p-4 text-center text-sm text-fintech-muted">
-                    No income recorded this month
-                  </div>
+                  <EmptyState
+                    icon={ArrowDownRight}
+                    title="No income recorded this month"
+                    description="Add income records to see your income sources breakdown."
+                    compact
+                  />
                 ) : (
                   <div className="space-y-2">
                     {incomeSources.map((src) => (

@@ -1,5 +1,5 @@
 import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Dashboard } from "../../src/components/Dashboard";
 import { renderWithProviders } from "../utils/renderWithProviders";
 import { makeExpenseCategory, makeIncome, makeIncomeCategory, makeTransaction } from "../utils/fixtures";
@@ -30,6 +30,48 @@ describe("Dashboard", () => {
   });
 
   it("shows the empty-state guidance when there is no activity", () => {
+    const onViewHistory = vi.fn();
+    renderWithProviders(
+      <Dashboard
+        expenseCategories={[]}
+        incomeCategories={[]}
+        transactions={[]}
+        income={[]}
+        onViewHistory={onViewHistory}
+      />,
+    );
+
+    expect(screen.getByText(/No activity yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No expense categories yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No income targets set/i)).toBeInTheDocument();
+
+    const goBtn = screen.getByRole("button", { name: /Go to Transactions/i });
+    expect(goBtn).toBeInTheDocument();
+    goBtn.click();
+    expect(onViewHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the getting-started checklist in empty state when onNavigate is provided", () => {
+    const onNavigate = vi.fn();
+    renderWithProviders(
+      <Dashboard
+        expenseCategories={[]}
+        incomeCategories={[]}
+        transactions={[]}
+        income={[]}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    expect(screen.getByText("View Setup Guide")).toBeInTheDocument();
+    expect(screen.getByText("Set Up Integrations")).toBeInTheDocument();
+    expect(screen.getByText("Import Your Data")).toBeInTheDocument();
+
+    screen.getByText("Set Up Integrations").click();
+    expect(onNavigate).toHaveBeenCalledWith("settings", "finance_feeds");
+  });
+
+  it("does not show checklist when onNavigate is not provided", () => {
     renderWithProviders(
       <Dashboard
         expenseCategories={[]}
@@ -39,6 +81,6 @@ describe("Dashboard", () => {
       />,
     );
 
-    expect(screen.getByText(/No activity yet/i)).toBeInTheDocument();
+    expect(screen.queryByText("View Setup Guide")).not.toBeInTheDocument();
   });
 });
