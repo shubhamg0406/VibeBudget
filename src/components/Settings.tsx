@@ -7,6 +7,7 @@ import {
   CloudDownload,
   Database,
   Download,
+  FolderOpen,
   Globe,
   History,
   Link2,
@@ -46,6 +47,7 @@ import {
   trimValuesAtEmptyRun,
 } from "../utils/googleSheetsSync";
 import { getSavedTransactionSheetRowsForType } from "../utils/publicSheetImport";
+import { openGoogleSheetPicker } from "../utils/googlePicker";
 import { GoogleSheetImporter } from "./GoogleSheetImporter";
 import { ImpExCenter } from "./ImpExCenter";
 import { usePlaidLink } from "react-plaid-link";
@@ -991,6 +993,25 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     }
   };
 
+  const inspectWithUrl = async (url: string) => {
+    const result = await inspectGoogleSheetsSpreadsheet(
+      url,
+      expensesSheetName,
+      incomeSheetName,
+      expenseCategoriesSheetName.trim() || undefined,
+      incomeCategoriesSheetName.trim() || undefined
+    );
+    setSheetTitle(result.spreadsheetTitle);
+    setAvailableSheetTabs(result.sheetTitles || []);
+    setExpenseHeaders(ensureMappingOption(result.expenseHeaders, "VibeBudget ID"));
+    setIncomeHeaders(ensureMappingOption(result.incomeHeaders, "VibeBudget ID"));
+    setExpenseCategoryHeaders(result.expenseCategoryHeaders || []);
+    setIncomeCategoryHeaders(result.incomeCategoryHeaders || []);
+    setExpenseMapping(result.suggestedExpenseMapping);
+    setIncomeMapping(result.suggestedIncomeMapping);
+    setSectionStatus("google_workspace", "success", "Connection verified: sheet tabs and suggested mappings loaded.");
+  };
+
   const handleInspectGoogleSheet = async () => {
     const allowed = await ensureSheetAuthorization();
     if (!allowed) return;
@@ -1000,25 +1021,31 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     }
     setLoadingSheetConfig(true);
     try {
-      const result = await inspectGoogleSheetsSpreadsheet(
-        sheetUrl,
-        expensesSheetName,
-        incomeSheetName,
-        expenseCategoriesSheetName.trim() || undefined,
-        incomeCategoriesSheetName.trim() || undefined
-      );
-      setSheetTitle(result.spreadsheetTitle);
-      setAvailableSheetTabs(result.sheetTitles || []);
-      setExpenseHeaders(ensureMappingOption(result.expenseHeaders, "VibeBudget ID"));
-      setIncomeHeaders(ensureMappingOption(result.incomeHeaders, "VibeBudget ID"));
-      setExpenseCategoryHeaders(result.expenseCategoryHeaders || []);
-      setIncomeCategoryHeaders(result.incomeCategoryHeaders || []);
-      setExpenseMapping(result.suggestedExpenseMapping);
-      setIncomeMapping(result.suggestedIncomeMapping);
-      setSectionStatus("google_workspace", "success", "Connection verified: sheet tabs and suggested mappings loaded.");
+      await inspectWithUrl(sheetUrl);
     } catch (error) {
       const message = getGoogleSheetsAccessErrorMessage(error);
       setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
+    } finally {
+      setLoadingSheetConfig(false);
+    }
+  };
+
+  const handlePickGoogleSheet = async () => {
+    if (!googleSheetsAccessToken) {
+      setSectionStatus("google_workspace", "error", "Connect Google first.");
+      return;
+    }
+    setLoadingSheetConfig(true);
+    try {
+      const picked = await openGoogleSheetPicker(
+        googleSheetsAccessToken,
+        import.meta.env.VITE_FIREBASE_API_KEY as string
+      );
+      if (!picked) return;
+      setSheetUrl(picked.url);
+      await inspectWithUrl(picked.url);
+    } catch {
+      setSectionStatus("google_workspace", "error", "Failed to open Google Sheets picker.");
     } finally {
       setLoadingSheetConfig(false);
     }
@@ -2322,27 +2349,40 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
               {/* Sheet URL + Verify */}
               <div className="space-y-3">
-                <label className="block space-y-1">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Spreadsheet URL</span>
-                  <div className="flex gap-2">
-                    <input
-                      value={sheetUrl}
-                      onChange={(e) => setSheetUrl(e.target.value)}
-                      placeholder="https://docs.google.com/spreadsheets/d/..."
-                      className="flex-1 rounded-lg border bg-[var(--app-panel-strong)] px-4 py-2 text-sm"
-                      style={{ borderColor: "var(--app-border)" }}
-                    />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Spreadsheet</span>
+
+                {!sheetUrl ? (
+                  <button
+                    onClick={() => void handlePickGoogleSheet()}
+                    disabled={loadingSheetConfig || !googleSheetsConnected}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-fintech-accent/40 bg-fintech-accent/5 px-4 py-3 text-sm font-semibold text-fintech-accent hover:bg-fintech-accent/10 disabled:opacity-50 transition-colors"
+                  >
+                    <FolderOpen size={16} />
+                    {loadingSheetConfig ? "Opening picker..." : "Select Sheet from Google Drive"}
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 truncate rounded-lg border bg-[var(--app-panel-strong)] px-4 py-2 text-sm text-fintech-muted" style={{ borderColor: "var(--app-border)" }}>
+                      {sheetUrl}
+                    </span>
+                    <button
+                      onClick={() => void handlePickGoogleSheet()}
+                      disabled={loadingSheetConfig || !googleSheetsConnected}
+                      className="shrink-0 rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-xs font-bold hover:bg-[var(--app-border)] disabled:opacity-50 transition-colors"
+                    >
+                      Change Sheet
+                    </button>
                     {googleSheetsConnected && (
                       <button
                         onClick={() => void handleInspectGoogleSheet()}
                         disabled={loadingSheetConfig}
-                        className="rounded-lg bg-fintech-accent/10 px-4 py-2 text-xs font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors"
+                        className="shrink-0 rounded-lg bg-fintech-accent/10 px-3 py-2 text-xs font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors"
                       >
                         {loadingSheetConfig ? "Verifying..." : "Verify"}
                       </button>
                     )}
                   </div>
-                </label>
+                )}
 
                 {sheetTitle && (
                   <div className="rounded-lg bg-fintech-accent/5 px-3 py-2 text-xs text-fintech-accent">
@@ -2361,13 +2401,13 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
                 {!sheetUrl && (
                   <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-[11px] text-fintech-muted">
-                    Paste the Google Sheets URL you want VibeBudget to use. Verification checks only that sheet for the connected account.
+                    Select a Google Sheet from your Drive. VibeBudget only accesses the file you pick.
                   </div>
                 )}
 
                 {sheetUrl && !sheetTitle && (
                   <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-[11px] text-fintech-muted">
-                    This pasted sheet is not verified yet. Click Verify so VibeBudget can confirm this exact sheet works with {connectedGoogleEmail || "your connected Google account"}.
+                    This sheet is not verified yet. Click Verify so VibeBudget can confirm this exact sheet works with {connectedGoogleEmail || "your connected Google account"}.
                   </div>
                 )}
               </div>
