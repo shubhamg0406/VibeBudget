@@ -1,24 +1,62 @@
-import {StrictMode} from 'react';
+import {StrictMode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { SelfHostSetup } from './components/SelfHostSetup';
 import { Workbox } from "workbox-window";
+import { getEnvFirebaseConfig, getStoredFirebaseConfig, initFirebase } from './firebase';
 
 async function bootstrap() {
-  const providerModule = import.meta.env.VITE_TEST_MODE === "mock"
-    ? await import("./testing/mockFirebase")
-    : await import("./contexts/FirebaseContext");
+  let FirebaseProviderImport: React.FC<{ children: React.ReactNode }> | null = null;
 
-  const { FirebaseProvider } = providerModule;
+  if (import.meta.env.VITE_TEST_MODE === "mock") {
+    const providerModule = await import("./testing/mockFirebase");
+    FirebaseProviderImport = providerModule.FirebaseProvider;
+  } else {
+    const providerModule = await import("./contexts/FirebaseContext");
+    FirebaseProviderImport = providerModule.FirebaseProvider;
+  }
+
+  const FireProvider = FirebaseProviderImport!;
+
+  const envConfig = getEnvFirebaseConfig();
+  const storedConfig = getStoredFirebaseConfig();
+
+  function AppShell() {
+    const [mode, setMode] = useState<"setup" | "app">(() => {
+      if (envConfig || storedConfig) return "app";
+      return "setup";
+    });
+
+    if (mode === "setup") {
+      return (
+        <ErrorBoundary>
+          <SelfHostSetup
+            onComplete={() => setMode("app")}
+          />
+        </ErrorBoundary>
+      );
+    }
+
+    return (
+      <ErrorBoundary>
+        <FireProvider>
+          <App />
+        </FireProvider>
+      </ErrorBoundary>
+    );
+  }
+
+  if (envConfig) {
+    initFirebase(envConfig);
+  } else if (storedConfig) {
+    initFirebase(storedConfig);
+  }
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <ErrorBoundary>
-        <FirebaseProvider>
-          <App />
-        </FirebaseProvider>
-      </ErrorBoundary>
+      <AppShell />
     </StrictMode>,
   );
 }

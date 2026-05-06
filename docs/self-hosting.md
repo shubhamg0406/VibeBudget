@@ -30,12 +30,14 @@ npm install
 cp .env.example .env.local
 ```
 
-### 3a. Fill Firebase values in `.env.local`
+### 3a. Fill Firebase values in `.env.local` (optional in browser setup)
 
 Create a Firebase project at [Firebase Console](https://console.firebase.google.com). Enable:
 
 - **Authentication** → Sign-in method → Google provider
 - **Firestore Database** → Create database (start in test mode, update rules later)
+
+You can either set Firebase values as env vars (recommended for production) or enter them in the in-browser setup form that appears the first time you open the app. The browser setup stores the config in `localStorage`.
 
 From Project Settings → General → Your apps → Web app, copy the config values:
 
@@ -47,6 +49,8 @@ From Project Settings → General → Your apps → Web app, copy the config val
 | `VITE_FIREBASE_STORAGE_BUCKET` | `{project_id}.firebasestorage.app` |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Firebase Web App Config → `messagingSenderId` |
 | `VITE_FIREBASE_APP_ID` | Firebase Web App Config → `appId` |
+
+**New: No env vars required to render.** If the six `VITE_FIREBASE_*` vars are missing, the app shows a setup form in the browser. Enter the config once, and it is saved to `localStorage` for subsequent visits. You can reset it from the setup UI.
 
 ### 3b. Set the data namespace
 
@@ -239,6 +243,48 @@ After deploying:
 | Cost | Free (your infra) | Free (your infra) | Subscription (future) |
 
 ---
+
+## Dynamic Browser Setup Flow
+
+VibeBudget supports a fully in-browser self-hosting setup flow that does not require environment variables to be set before the app can render.
+
+### How It Works
+
+1. **No Firebase env vars configured?** The app shows a compact setup form instead of crashing. Enter your Firebase web app config (apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId, optional firestoreDatabaseId, and dataNamespace).
+
+2. **Config is saved to `localStorage`** and used to initialize Firebase dynamically. The config can be reset from the setup UI.
+
+3. **If `VITE_FIREBASE_*` env vars are present**, they are used as the default config and the browser setup form is skipped. Existing behavior is unchanged.
+
+4. **Sign in with Google** after Firebase is initialized. Google Auth provider and Firestore must be enabled in your Firebase project.
+
+5. **First signed-in user claims owner status** via `POST /api/self-host/claim-owner`. This only succeeds if no owner has been claimed yet.
+
+6. **Owner can configure server-only secrets** through the setup UI:
+   - `FIREBASE_ADMIN_CREDENTIALS_JSON` — Firebase Admin service account JSON
+   - `GEMINI_API_KEY` — Gemini API key for AI features
+   - `GEMINI_MODEL` — Gemini model name (default: `gemini-2.5-flash`)
+
+7. **Non-owners** can see setup status but cannot view or edit server secrets.
+
+### Security Notes for Dynamic Setup
+
+- Firebase web config (apiKey, authDomain, etc.) is stored in `localStorage`. These values are public-facing by design (they are bundled into the frontend in env-var mode) and only restrict access through Firebase App Check and API key restrictions.
+- Server-only secrets (`FIREBASE_ADMIN_CREDENTIALS_JSON`, `GEMINI_API_KEY`, `GEMINI_MODEL`) are stored in SQLite on the server via the self-host API. They are never returned to the client after saving.
+- Service account JSON must never be pasted into the browser Firebase config form. It belongs in the server secrets section after owner claim.
+- Owner verification uses Firebase Admin SDK when credentials are available. During initial setup (before Admin credentials are configured), the owner claim fallback decodes the Firebase JWT token payload (without cryptographic verification) to extract a stable `uid` and `email`. This unverified bootstrap mode is clearly separated from verified flows and is only used when no Admin credentials exist.
+- **Server features (AI chat, OCR) resolve config from `process.env` first, then from SQLite `self_host_config` as fallback.** This means secrets configured through the browser setup UI are used by the running Express server automatically.
+- **Vercel serverless limitation:** The Vercel serverless functions (`api/chat.ts` and Vervel deployment modules) cannot read the Express server's SQLite database. For Vercel deployments, server-only secrets must be set as Vercel environment variables. The in-browser setup flow is designed for self-hosters running the Express server locally or on a persistent Node.js host.
+- **Env var mode is recommended for production.** If you can set `VITE_FIREBASE_*` env vars at build time and `GEMINI_API_KEY`, `FIREBASE_ADMIN_CREDENTIALS_JSON` as server env vars, the app will use them directly without requiring the in-browser setup UI. This is the most reliable path.
+
+### API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/self-host/status` | Returns owner exists, owner email (if authorized), secrets configured status, env config exists |
+| POST | `/api/self-host/claim-owner` | Claims owner for the first signed-in user (requires Firebase ID token) |
+| POST | `/api/self-host/secrets` | Saves server-only secrets (owner only) |
+| GET | `/api/self-host/secrets/status` | Returns redacted booleans for each secret (owner only) |
 
 ## Troubleshooting
 

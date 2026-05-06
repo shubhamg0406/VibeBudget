@@ -110,6 +110,12 @@ export const initializeDatabase = (db: Database.Database) => {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS self_host_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,
       applied_at TEXT NOT NULL
@@ -250,7 +256,214 @@ export const createApp = async ({
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });
-  registerAiChatRoute(app, aiChatDeps);
+
+  const resolveSelfHostSecret = (key: string): string | undefined => {
+    const envVal = process.env[key];
+    if (envVal) return envVal;
+    const row = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get(`secrets:${key}`) as { value: string } | undefined;
+    return row?.value || undefined;
+  };
+
+  const initFirebaseAdminSdk = async () => {
+    try {
+      const adminAppModule = await import("firebase-admin/app");
+      const adminAuthModule = await import("firebase-admin/auth");
+      const { getApps, initializeApp, cert, applicationDefault } = adminAppModule;
+      if (getApps().length === 0) {
+        const serviceAccountJson = resolveSelfHostSecret("FIREBASE_ADMIN_CREDENTIALS_JSON")
+          || process.env.FIREBASE_ADMIN_CREDENTIALS_JSON;
+        const serviceAccountPath = process.env.FIREBASE_ADMIN_CREDENTIALS_PATH;
+        if (serviceAccountJson) {
+          const parsed = JSON.parse(serviceAccountJson);
+          initializeApp({ credential: cert(parsed) });
+        } else if (serviceAccountPath) {
+          const fsMod = await import("fs");
+          const fileContents = fsMod.readFileSync(serviceAccountPath, "utf8");
+          initializeApp({ credential: cert(JSON.parse(fileContents)) });
+        } else {
+          initializeApp({ credential: applicationDefault() });
+        }
+      }
+      return { auth: adminAuthModule.getAuth() };
+    } catch {
+      return null;
+    }
+  };
+
+  const decodeJwtPayload = (token: string): { uid: string; email: string | null } | null => {
+    try {
+      const parts = token.split(".");
+      if (parts.length !== 3) return null;
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+      const uid = payload.user_id || payload.sub || null;
+      const email = payload.email || null;
+      if (!uid) return null;
+      return { uid, email };
+    } catch {
+      return null;
+    }
+  };
+
+  const verifyFirebaseToken = async (token: string): Promise<{ uid: string; email: string | null } | null> => {
+    try {
+      const admin = await initFirebaseAdminSdk();
+      if (admin) {
+        const decoded = await admin.auth.verifyIdToken(token);
+        return { uid: decoded.uid, email: decoded.email || null };
+      }
+    } catch {
+      // Fall through to unverified
+    }
+    return null;
+  };
+
+  const resolveTokenIdentity = async (token: string): Promise<{ uid: string; email: string | null; verified: boolean } | null> => {
+    const verified = await verifyFirebaseToken(token);
+    if (verified) return { ...verified, verified: true };
+    const decoded = decodeJwtPayload(token);
+    if (decoded) return { ...decoded, verified: false };
+    return null;
+  };
+
+  const getOwnerUid = () => {
+    const row = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("owner_uid") as { value: string } | undefined;
+    return row?.value || null;
+  };
+
+  const isCurrentUserOwner = async (token: string): Promise<{ isOwner: boolean; uid: string | null; verified: boolean }> => {
+    const ownerUid = getOwnerUid();
+    if (!ownerUid) return { isOwner: false, uid: null, verified: false };
+    const identity = await resolveTokenIdentity(token);
+    if (!identity) return { isOwner: false, uid: null, verified: false };
+    return { isOwner: identity.uid === ownerUid, uid: identity.uid, verified: identity.verified };
+  };
+
+  app.get("/api/self-host/status", async (req, res) => {
+    const ownerUidVal = getOwnerUid();
+    const ownerEmail = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("owner_email") as { value: string } | undefined;
+    const adminJson = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:FIREBASE_ADMIN_CREDENTIALS_JSON") as { value: string } | undefined;
+    const geminiKey = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:GEMINI_API_KEY") as { value: string } | undefined;
+    const envConfigExists = !!(process.env.VITE_FIREBASE_API_KEY && process.env.VITE_FIREBASE_AUTH_DOMAIN);
+
+    const authHeader = req.header("authorization");
+    let isOwner = false;
+    let ownerEmailSafe: string | null = null;
+    if (authHeader?.startsWith("Bearer ") && ownerUidVal) {
+      const token = authHeader.slice("Bearer ".length).trim();
+      const result = await isCurrentUserOwner(token);
+      isOwner = result.isOwner;
+      if (isOwner) {
+        ownerEmailSafe = ownerEmail?.value || null;
+      }
+    }
+
+    res.json({
+      ownerExists: !!ownerUidVal,
+      isOwner,
+      ownerEmail: ownerEmailSafe,
+      secretsConfigured: !!(adminJson || geminiKey || resolveSelfHostSecret("FIREBASE_ADMIN_CREDENTIALS_JSON") || resolveSelfHostSecret("GEMINI_API_KEY")),
+      envConfigExists,
+    });
+  });
+
+  app.post("/api/self-host/claim-owner", async (req, res) => {
+    const existingOwner = getOwnerUid();
+    if (existingOwner) {
+      res.status(403).json({ error: "Owner already exists" });
+      return;
+    }
+    const authHeader = req.header("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing authorization" });
+      return;
+    }
+    const token = authHeader.slice("Bearer ".length).trim();
+    const identity = await resolveTokenIdentity(token);
+    if (!identity) {
+      res.status(401).json({ error: "Could not resolve token identity" });
+      return;
+    }
+    const { uid, email, verified } = identity;
+
+    const now = new Date().toISOString();
+    db.prepare("INSERT OR REPLACE INTO self_host_config (key, value, updated_at) VALUES (?, ?, ?)").run("owner_uid", uid, now);
+    if (email) {
+      db.prepare("INSERT OR REPLACE INTO self_host_config (key, value, updated_at) VALUES (?, ?, ?)").run("owner_email", email, now);
+    }
+    if (!verified) {
+      db.prepare("INSERT OR REPLACE INTO self_host_config (key, value, updated_at) VALUES (?, ?, ?)").run("bootstrap_mode", "1", now);
+    }
+    res.json({ success: true, ownerEmail: email, bootstrapMode: !verified });
+  });
+
+  app.post("/api/self-host/secrets", async (req, res) => {
+    if (!getOwnerUid()) {
+      res.status(400).json({ error: "No owner configured. Claim owner first." });
+      return;
+    }
+    const authHeader = req.header("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing authorization" });
+      return;
+    }
+    const token = authHeader.slice("Bearer ".length).trim();
+    const { isOwner } = await isCurrentUserOwner(token);
+    if (!isOwner) {
+      res.status(403).json({ error: "Only the instance owner can configure secrets" });
+      return;
+    }
+    const { FIREBASE_ADMIN_CREDENTIALS_JSON, GEMINI_API_KEY, GEMINI_MODEL } = req.body || {};
+    const now = new Date().toISOString();
+    if (FIREBASE_ADMIN_CREDENTIALS_JSON) {
+      db.prepare("INSERT OR REPLACE INTO self_host_config (key, value, updated_at) VALUES (?, ?, ?)").run("secrets:FIREBASE_ADMIN_CREDENTIALS_JSON", FIREBASE_ADMIN_CREDENTIALS_JSON, now);
+    }
+    if (GEMINI_API_KEY) {
+      db.prepare("INSERT OR REPLACE INTO self_host_config (key, value, updated_at) VALUES (?, ?, ?)").run("secrets:GEMINI_API_KEY", GEMINI_API_KEY, now);
+    }
+    if (GEMINI_MODEL) {
+      db.prepare("INSERT OR REPLACE INTO self_host_config (key, value, updated_at) VALUES (?, ?, ?)").run("secrets:GEMINI_MODEL", GEMINI_MODEL, now);
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/self-host/secrets/status", async (req, res) => {
+    if (!getOwnerUid()) {
+      res.status(400).json({ error: "No owner configured" });
+      return;
+    }
+    const authHeader = req.header("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing authorization" });
+      return;
+    }
+    const token = authHeader.slice("Bearer ".length).trim();
+    const { isOwner } = await isCurrentUserOwner(token);
+    if (!isOwner) {
+      res.status(403).json({ error: "Only the instance owner can check secret status" });
+      return;
+    }
+    const adminJson = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:FIREBASE_ADMIN_CREDENTIALS_JSON") as { value: string } | undefined;
+    const geminiKey = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:GEMINI_API_KEY") as { value: string } | undefined;
+    const geminiModel = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:GEMINI_MODEL") as { value: string } | undefined;
+    res.json({
+      FIREBASE_ADMIN_CREDENTIALS_JSON: !!(adminJson || process.env.FIREBASE_ADMIN_CREDENTIALS_JSON),
+      GEMINI_API_KEY: !!(geminiKey || process.env.GEMINI_API_KEY),
+      GEMINI_MODEL: !!(geminiModel || process.env.GEMINI_MODEL),
+    });
+  });
+
+  const resolveAiConfig = () => {
+    const provider = "gemini" as const;
+    const envKey = process.env.GEMINI_API_KEY;
+    const dbKey = resolveSelfHostSecret("GEMINI_API_KEY");
+    const apiKey = envKey || dbKey || "";
+    const envModel = process.env.GEMINI_MODEL;
+    const dbModel = resolveSelfHostSecret("GEMINI_MODEL");
+    const model = envModel || dbModel || "gemini-2.5-flash";
+    return { provider, model, apiKey };
+  };
+
+  registerAiChatRoute(app, { ...aiChatDeps, resolveAiConfig });
   registerPlaidRoutes(app);
   registerTellerRoutes(app);
 
@@ -598,16 +811,18 @@ export const createApp = async ({
       ? rawAiConfig as { provider: "gemini" | "deepseek"; model: string; apiKey: string }
       : null;
 
-    if (!aiConfig && !process.env.GEMINI_API_KEY) {
+    if (!aiConfig && !process.env.GEMINI_API_KEY && !resolveSelfHostSecret("GEMINI_API_KEY")) {
       return res.status(500).json({ error: "Missing AI configuration. Configure an AI provider in Settings or set GEMINI_API_KEY server env." });
     }
 
     const resolveAiConfig = () => {
       if (aiConfig) return aiConfig;
+      const apiKey = process.env.GEMINI_API_KEY || resolveSelfHostSecret("GEMINI_API_KEY") || "";
+      const model = process.env.GEMINI_MODEL || resolveSelfHostSecret("GEMINI_MODEL") || "gemini-2.5-flash";
       return {
         provider: "gemini" as const,
-        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-        apiKey: process.env.GEMINI_API_KEY!,
+        model,
+        apiKey,
       };
     };
 
