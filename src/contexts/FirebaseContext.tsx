@@ -2313,12 +2313,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       saveTransactionsCache(auth.currentUser.uid, nextTransactions);
     }
 
-    void persistImport.catch((error) => {
+    try {
+      await persistImport;
+    } catch (error) {
       console.error("Failed to persist imported data", error);
       setAuthError(error instanceof Error ? error.message : "Failed to persist imported data.");
-    }).finally(() => {
+      throw error;
+    } finally {
       pendingImportRef.current = null;
-    });
+    }
 
     return {
       imported: records.length,
