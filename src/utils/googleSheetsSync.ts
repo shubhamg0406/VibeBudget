@@ -333,7 +333,7 @@ export const getGoogleSheetsAccessErrorMessage = (error: unknown) => {
     candidate.statusCode === 401 ||
     candidate.googleStatus === "UNAUTHENTICATED"
   ) {
-    return "Your Google Sheets session expired. Reconnect Google and try again.";
+    return "Your Google Sheets session expired. Reconnect Google, then verify this sheet again.";
   }
 
   if (
@@ -342,7 +342,7 @@ export const getGoogleSheetsAccessErrorMessage = (error: unknown) => {
     normalizedMessage.includes("caller does not have permission") ||
     candidate.googleStatus === "PERMISSION_DENIED"
   ) {
-    return "The signed-in Google account does not have access to this sheet. Share the sheet with that same email or paste a different sheet link.";
+    return "This Google account is connected, but VibeBudget does not have permission for this specific sheet. Verify the sheet with Google, or share it with the connected account and try again.";
   }
 
   if (
@@ -350,7 +350,7 @@ export const getGoogleSheetsAccessErrorMessage = (error: unknown) => {
     normalizedMessage.includes("requested entity was not found") ||
     candidate.googleStatus === "NOT_FOUND"
   ) {
-    return "This Google Sheet could not be found for the signed-in Google account. Check the link, or make sure that same Google email can access it.";
+    return "This Google Sheet was not found for the connected Google account. Check the link and make sure that same email can open the sheet.";
   }
 
   return message || fallback;

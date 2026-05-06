@@ -520,10 +520,10 @@ firebase deploy --only firestore:rules</code></pre>
       <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4">
         <h3 className="text-sm font-bold">Google Sheets — Two-Way Sync</h3>
         <p className="mt-2 text-xs text-fintech-muted">
-          Pull data from a Google Sheet or push app data to a sheet. Deduplication is built-in.
+          Pull data from the Google Sheet URL verified in Settings or push app data to that sheet. Deduplication is built-in.
         </p>
         <p className="mt-2 text-xs text-fintech-muted">
-          Scopes: <code className="bg-[var(--app-ghost)] px-1 rounded">https://www.googleapis.com/auth/spreadsheets</code>, <code className="bg-[var(--app-ghost)] px-1 rounded">https://www.googleapis.com/auth/drive.file</code>
+          Scope: <code className="bg-[var(--app-ghost)] px-1 rounded">https://www.googleapis.com/auth/drive.file</code>
         </p>
         <p className="mt-2 text-xs text-fintech-muted">
           Configured in: Settings → Cloud Sync → Google Sheets
@@ -545,7 +545,7 @@ firebase deploy --only firestore:rules</code></pre>
         </p>
         <ul className="mt-3 list-inside list-disc space-y-1 text-xs text-fintech-muted">
           <li>Choose "External" user type</li>
-          <li>Add the scopes: <code className="bg-[var(--app-ghost)] px-1 rounded">../auth/drive.file</code>, <code className="bg-[var(--app-ghost)] px-1 rounded">../auth/spreadsheets</code></li>
+          <li>Add the scope: <code className="bg-[var(--app-ghost)] px-1 rounded">../auth/drive.file</code></li>
           <li>Add test users (your email)</li>
           <li>Publish when going to production</li>
         </ul>
