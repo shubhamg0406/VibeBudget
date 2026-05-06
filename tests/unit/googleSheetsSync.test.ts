@@ -48,7 +48,7 @@ describe("googleSheetsSync helpers", () => {
     const permissionError = Object.assign(new Error("caller does not have permission"), { statusCode: 403 });
 
     expect(getGoogleSheetsAccessErrorMessage(authError)).toContain("session expired");
-    expect(getGoogleSheetsAccessErrorMessage(permissionError)).toContain("does not have access");
+    expect(getGoogleSheetsAccessErrorMessage(permissionError)).toContain("specific sheet");
   });
 
   it("stops open-ended imports after five consecutive empty rows", () => {

@@ -73,6 +73,8 @@ import { getTodayStr } from "../utils/dateUtils";
 import { previewImportBatch } from "../utils/importPipeline";
 
 const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
+const GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY = "vibebudgetGoogleAccessTokenExpiresAt";
+const GOOGLE_ACCESS_TOKEN_TTL_MS = 50 * 60 * 1000;
 const LOCAL_STATE_KEY = "vibebudgetLocalState";
 const TRANSACTIONS_CACHE_KEY_PREFIX = "vb_transactions_cache";
 const DEFAULT_BUDGET_FILE_NAME = "budget.json";
@@ -137,6 +139,24 @@ const stripUndefinedFields = <T,>(value: T): T => {
 };
 
 const getIsoNow = () => new Date().toISOString();
+
+const readStoredGoogleAccessToken = () => {
+  const token = sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY) || localStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY);
+  if (!token) return null;
+
+  const expiresAtRaw = sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY)
+    || localStorage.getItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY);
+  const expiresAt = expiresAtRaw ? Number.parseInt(expiresAtRaw, 10) : 0;
+  if (!expiresAt || expiresAt <= Date.now()) {
+    localStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
+    sessionStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
+    localStorage.removeItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY);
+    sessionStorage.removeItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY);
+    return null;
+  }
+
+  return token;
+};
 
 const renameLegacyCategory = (name: string) => LEGACY_CATEGORY_RENAMES[name] || name;
 const normalizeCategoryName = (name: string) => renameLegacyCategory(name).trim().replace(/\s+/g, " ");
@@ -524,9 +544,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [googleSheetsConfig, setGoogleSheetsConfig] = useState<GoogleSheetsSyncConfig | null>(null);
   const [driveConnection, setDriveConnection] = useState<DriveConnection | null>(null);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
-  const [googleSheetsAccessToken, setGoogleSheetsAccessToken] = useState<string | null>(
-    localStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY) || sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY)
-  );
+  const [googleSheetsAccessToken, setGoogleSheetsAccessToken] = useState<string | null>(() => readStoredGoogleAccessToken());
   const [googleSheetsSyncing, setGoogleSheetsSyncing] = useState(false);
   const [googlePullSummary, setGooglePullSummary] = useState<GooglePullSummary | null>(null);
   const [aiConfig, setAiConfig] = useState<AiProviderConfig | null>(null);
@@ -665,11 +683,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const storeAccessToken = (token: string | null) => {
     setGoogleSheetsAccessToken(token);
     if (token) {
+      const expiresAt = String(Date.now() + GOOGLE_ACCESS_TOKEN_TTL_MS);
       localStorage.setItem(GOOGLE_ACCESS_TOKEN_KEY, token);
       sessionStorage.setItem(GOOGLE_ACCESS_TOKEN_KEY, token);
+      localStorage.setItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY, expiresAt);
+      sessionStorage.setItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY, expiresAt);
     } else {
       localStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
       sessionStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
+      localStorage.removeItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY);
+      sessionStorage.removeItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY);
     }
   };
 
