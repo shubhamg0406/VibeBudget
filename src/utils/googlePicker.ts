@@ -33,7 +33,7 @@ function loadPickerApi(): Promise<void> {
 
 export async function openGoogleSheetPicker(
   accessToken: string,
-  apiKey: string
+  apiKey?: string
 ): Promise<PickedSheet | null> {
   await loadGapiScript();
   await loadPickerApi();
@@ -53,12 +53,13 @@ export async function openGoogleSheetPicker(
       }
     };
 
-    new window.google.picker.PickerBuilder()
+    let builder = new window.google.picker.PickerBuilder()
       .addView(new window.google.picker.DocsView(window.google.picker.ViewId.SPREADSHEETS))
       .setOAuthToken(accessToken)
-      .setDeveloperKey(apiKey)
-      .setCallback(cb)
-      .build()
-      .setVisible(true);
+      .setCallback(cb);
+
+    if (apiKey) builder = builder.setDeveloperKey(apiKey);
+
+    builder.build().setVisible(true);
   });
 }

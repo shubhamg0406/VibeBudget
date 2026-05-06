@@ -1037,10 +1037,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     }
     setLoadingSheetConfig(true);
     try {
-      const picked = await openGoogleSheetPicker(
-        googleSheetsAccessToken,
-        import.meta.env.VITE_FIREBASE_API_KEY as string
-      );
+      const pickerApiKey = import.meta.env.VITE_GOOGLE_PICKER_API_KEY as string | undefined;
+      const picked = await openGoogleSheetPicker(googleSheetsAccessToken, pickerApiKey);
       if (!picked) return;
       setSheetUrl(picked.url);
       await inspectWithUrl(picked.url);
