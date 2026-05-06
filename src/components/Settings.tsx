@@ -2342,7 +2342,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
               </div>
 
               <div className="mb-4 rounded-lg border border-fintech-accent/20 bg-fintech-accent/5 px-3 py-2 text-[11px] text-fintech-muted">
-                VibeBudget uses the sheet URL you paste here for Sheets sync. It does not browse your Drive or import other files from your account. Drive backup is separate and uses only the VibeBudget backup folder you connect below.
+                VibeBudget only accesses the single sheet you select from the picker. It does not browse your Drive or import other files. Drive backup is separate and uses only the VibeBudget backup folder you connect below.
               </div>
 
               {/* Sheet URL + Verify */}
