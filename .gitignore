@@ -11,3 +11,5 @@ playwright-report/
 *.db
 -n
 .vercel
+.server-dist/
+.claude/worktrees/

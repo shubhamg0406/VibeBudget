@@ -216,7 +216,7 @@ FIREBASE_DATA_NAMESPACE="local-dev"</code></pre>
 
         <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4">
           <h3 className="text-sm font-bold">Required Environment Variables</h3>
-          <p className="mt-1 text-xs text-fintech-muted">All six are required and validated at startup in <code className="bg-[var(--app-ghost)] px-1 rounded">src/firebase.ts</code>:</p>
+          <p className="mt-1 text-xs text-fintech-muted">If all six are set at build time, they are used automatically. If not, the app shows an in-browser setup form to collect Firebase web config — no env vars required to render.</p>
           <table className="mt-3 w-full text-left text-xs">
             <thead>
               <tr className="border-b border-[var(--app-border)]">
@@ -328,8 +328,9 @@ firebase deploy --only firestore:rules</code></pre>
             </tr>
           </thead>
           <tbody className="text-fintech-muted">
-            <tr><td className="py-1.5 pr-4 font-medium text-[var(--app-text)]">Inline JSON</td><td className="py-1.5 pr-4 font-mono">FIREBASE_ADMIN_CREDENTIALS_JSON</td><td className="py-1.5">Best for Vercel</td></tr>
+            <tr><td className="py-1.5 pr-4 font-medium text-[var(--app-text)]">Inline JSON</td><td className="py-1.5 pr-4 font-mono">FIREBASE_ADMIN_CREDENTIALS_JSON</td><td className="py-1.5">Best for Vercel, or paste via browser setup UI</td></tr>
             <tr><td className="py-1.5 pr-4 font-medium text-[var(--app-text)]">File path</td><td className="py-1.5 pr-4 font-mono">FIREBASE_ADMIN_CREDENTIALS_PATH</td><td className="py-1.5">Best for local dev</td></tr>
+            <tr><td className="py-1.5 pr-4 font-medium text-[var(--app-text)]">Browser setup</td><td className="py-1.5 pr-4 font-mono">(via /api/self-host/secrets)</td><td className="py-1.5">Stored server-side in SQLite. Only for Express server; Vercel serverless cannot access.</td></tr>
             <tr><td className="py-1.5 pr-4 font-medium text-[var(--app-text)]">Application default</td><td className="py-1.5 pr-4 font-mono">(none)</td><td className="py-1.5">Works on GCP/GCE</td></tr>
           </tbody>
         </table>
@@ -342,8 +343,15 @@ firebase deploy --only firestore:rules</code></pre>
           <li>Click "Generate new private key"</li>
           <li>Save the downloaded JSON file</li>
           <li>For Vercel: paste the full JSON as <code className="bg-[var(--app-ghost)] px-1 rounded">FIREBASE_ADMIN_CREDENTIALS_JSON</code> (single line, escaped)</li>
-          <li>For local dev: set <code className="bg-[var(--app-ghost)] px-1 rounded">FIREBASE_ADMIN_CREDENTIALS_PATH</code> to the file path</li>
+          <li>For local dev: set <code className="bg-[var(--app-ghost)] px-1 rounded">FIREBASE_ADMIN_CREDENTIALS_PATH</code> to the file path <strong>or</strong> paste the JSON via the browser setup UI after claiming owner</li>
         </ol>
+      </div>
+
+      <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4">
+        <h3 className="text-sm font-bold">Vercel Serverless Limitation</h3>
+        <p className="mt-1 text-xs text-fintech-muted">
+          The browser setup UI stores secrets in the Express server&apos;s SQLite database. Vercel serverless functions (<code className="bg-[var(--app-ghost)] px-1 rounded">api/chat.ts</code>) run in separate containers and cannot read the Express server&apos;s SQLite. For Vercel deployments, always set server secrets as <strong>Vercel environment variables</strong>. The in-browser setup is designed for self-hosters running the Express server on persistent infrastructure.
+        </p>
       </div>
     </div>
   ),
@@ -407,7 +415,7 @@ firebase deploy --only firestore:rules</code></pre>
 
       <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4">
         <h3 className="text-sm font-bold">Firebase (Client — <code className="bg-[var(--app-ghost)] px-1 rounded">VITE_</code> prefix)</h3>
-        <p className="mt-1 text-xs text-fintech-muted">Required. Bundled into the frontend.</p>
+        <p className="mt-1 text-xs text-fintech-muted">Can be set as build-time env vars (recommended for production) or entered via the browser setup UI at first run. If all six are set, the app uses them automatically. If missing, the app shows an in-browser setup form.</p>
         <table className="mt-3 w-full text-left text-xs">
           <thead>
             <tr className="border-b border-[var(--app-border)]"><th className="pb-2 font-bold">Variable</th><th className="pb-2 font-bold">Description</th></tr>
@@ -430,7 +438,7 @@ firebase deploy --only firestore:rules</code></pre>
 
       <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-panel)] p-4">
         <h3 className="text-sm font-bold">Server-Side (no <code className="bg-[var(--app-ghost)] px-1 rounded">VITE_</code> prefix)</h3>
-        <p className="mt-1 text-xs text-fintech-muted">Stay on the server. Never exposed to the client.</p>
+        <p className="mt-1 text-xs text-fintech-muted">Stay on the server. Never exposed to the client. Can be set as env vars or, for self-hosted Express servers, configured via the browser setup UI after claiming owner. <strong>Vercel serverless cannot use browser-configured secrets</strong> — env vars are required there.</p>
         <table className="mt-3 w-full text-left text-xs">
           <thead>
             <tr className="border-b border-[var(--app-border)]"><th className="pb-2 font-bold">Variable</th><th className="pb-2 font-bold">Description</th></tr>

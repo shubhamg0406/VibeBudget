@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { ExpenseCategory, Income, IncomeCategory, Transaction } from "../types";
 import {
   AlertTriangle,
@@ -24,6 +24,20 @@ interface MonthlyAnalysisProps {
 }
 
 const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+const getMonthInputValue = (date: Date) => formatDate(date).slice(0, 7);
+
+const parseMonthInputValue = (month: string, fallback: Date) => {
+  if (!/^\d{4}-\d{2}$/.test(month)) return fallback;
+
+  const [yearStr, monthStr] = month.split("-");
+  const year = Number.parseInt(yearStr, 10);
+  const monthIndex = Number.parseInt(monthStr, 10) - 1;
+  if (!Number.isFinite(year) || monthIndex < 0 || monthIndex > 11) return fallback;
+
+  return new Date(year, monthIndex, 1);
+};
 
 export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
   expenseCategories,
@@ -35,14 +49,19 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
   const baseSymbol = getCurrencySymbol(preferences?.baseCurrency);
 
   const now = new Date();
-  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  const monthName = monthNames[now.getMonth()];
-  const year = now.getFullYear();
+  const currentMonth = getMonthInputValue(now);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const selectedMonthDate = parseMonthInputValue(selectedMonth, now);
+  const selectedMonthKey = getMonthInputValue(selectedMonthDate);
+  const monthName = MONTH_NAMES[selectedMonthDate.getMonth()];
+  const year = selectedMonthDate.getFullYear();
+  const isCurrentMonth = selectedMonthKey === currentMonth;
 
-  const monthStart = formatDate(new Date(now.getFullYear(), now.getMonth(), 1));
-  const monthEnd = getLastDayOfMonth(now);
-  const prevMonthStart = formatDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
-  const prevMonthEnd = getLastDayOfMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  const monthStart = formatDate(selectedMonthDate);
+  const monthEnd = getLastDayOfMonth(selectedMonthDate);
+  const prevMonthDate = new Date(year, selectedMonthDate.getMonth() - 1, 1);
+  const prevMonthStart = formatDate(prevMonthDate);
+  const prevMonthEnd = getLastDayOfMonth(prevMonthDate);
 
   const monthTransactions = useMemo(
     () => allTransactions.filter((t) => isDateInRange(t.date, monthStart, monthEnd)),
@@ -71,10 +90,10 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
   );
 
   const balance = totalIncome - totalSpend;
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const currentDay = now.getDate();
-  const dailyBurn = currentDay > 0 ? totalSpend / currentDay : 0;
-  const projectedSpend = dailyBurn * daysInMonth;
+  const daysInMonth = new Date(year, selectedMonthDate.getMonth() + 1, 0).getDate();
+  const elapsedDays = isCurrentMonth ? Math.min(now.getDate(), daysInMonth) : daysInMonth;
+  const dailyBurn = elapsedDays > 0 ? totalSpend / elapsedDays : 0;
+  const projectedSpend = isCurrentMonth ? dailyBurn * daysInMonth : totalSpend;
   const savingsRate = totalIncome > 0 ? ((totalIncome - totalSpend) / totalIncome) * 100 : 0;
 
   const normalizeKey = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase();
@@ -212,16 +231,34 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
 
   return (
     <div className="space-y-4 pb-24">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Monthly Analysis</h1>
           <p className="mt-1 text-xs text-fintech-muted">
             {monthName} {year} &mdash; Quick Check
           </p>
         </div>
-        <div className="hidden sm:flex items-center gap-2 rounded-xl border bg-[var(--app-panel)] px-4 py-2" style={{ borderColor: "var(--app-border)" }}>
-          <CalendarCheck size={16} className="text-fintech-accent" />
-          <span className="text-xs font-semibold text-fintech-muted">{monthName.slice(0, 3)} {currentDay}/{daysInMonth}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <label
+            className="flex items-center gap-2 rounded-xl border bg-[var(--app-panel)] px-3 py-2"
+            style={{ borderColor: "var(--app-border)" }}
+          >
+            <CalendarCheck size={16} className="text-fintech-accent" />
+            <span className="sr-only">Select analysis month</span>
+            <input
+              aria-label="Select analysis month"
+              type="month"
+              value={selectedMonthKey}
+              onChange={(event) => setSelectedMonth(event.target.value)}
+              className="bg-transparent text-xs font-semibold text-[var(--app-text)] outline-none [color-scheme:dark]"
+            />
+          </label>
+          <div className="hidden sm:flex items-center gap-2 rounded-xl border bg-[var(--app-panel)] px-4 py-2" style={{ borderColor: "var(--app-border)" }}>
+            <CalendarCheck size={16} className="text-fintech-accent" />
+            <span className="text-xs font-semibold text-fintech-muted">
+              {isCurrentMonth ? `${monthName.slice(0, 3)} ${elapsedDays}/${daysInMonth}` : `${monthName.slice(0, 3)} ${year}`}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -265,7 +302,7 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
                   </div>
                   {item.label === "Daily Burn" && (
                     <div className="mt-1 text-[10px] text-fintech-muted">
-                      Proj. {formatCurrency(projectedSpend)} by EOM
+                      {isCurrentMonth ? `Proj. ${formatCurrency(projectedSpend)} by EOM` : `${formatCurrency(totalSpend)} total`}
                     </div>
                   )}
                 </div>
@@ -414,12 +451,12 @@ export const MonthlyAnalysis: React.FC<MonthlyAnalysisProps> = ({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <PiggyBank size={14} className="text-[#78d8ff]" />
-                          <span className="text-xs font-semibold">Projected EOM Spend</span>
+                          <span className="text-xs font-semibold">{isCurrentMonth ? "Projected EOM Spend" : "Month Spend"}</span>
                         </div>
                         <span className="text-sm font-bold">{formatCurrency(projectedSpend)}</span>
                       </div>
                       <div className="mt-1 text-[10px] text-fintech-muted">
-                        Based on {formatCurrency(dailyBurn)}/day average
+                        {isCurrentMonth ? `Based on ${formatCurrency(dailyBurn)}/day average` : `Average ${formatCurrency(dailyBurn)}/day`}
                       </div>
                     </div>
                   </>
