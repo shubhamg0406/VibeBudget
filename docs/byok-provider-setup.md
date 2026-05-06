@@ -116,14 +116,15 @@ Used for backup and restore of `budget.json`.
 Used for two-way sync of transactions and income between VibeBudget and a Google Sheet.
 
 **Required API scopes** (requested at sign-in):
-- `https://www.googleapis.com/auth/spreadsheets` — Read/write sheets
-- `https://www.googleapis.com/auth/drive.file` — Find linked spreadsheet
+- `https://www.googleapis.com/auth/drive.file` — Read/write only the Google files the user explicitly uses with VibeBudget
 
 **What the app does:**
+- Uses the exact Google Sheet URL pasted and verified in Settings
 - Pulls data from a sheet into VibeBudget (with deduplication)
 - Pushes VibeBudget data to a sheet (full reconcile or incremental)
 - Supports custom column mapping for expenses, income, and categories
 - Supports auto-sync on a configurable interval
+- Does **not** browse Drive or import other spreadsheets from the account
 
 **Configured in:** Settings → Cloud Sync → Google Sheets
 
@@ -137,6 +138,7 @@ Used for two-way sync of transactions and income between VibeBudget and a Google
 |---|---|---|
 | `Sheets API not enabled` | Google Sheets API not enabled in GCP | Enable in GCP Console |
 | Sheet not found | Spreadsheet URL is invalid or deleted | Double-check the spreadsheet ID in the URL |
+| Permission denied | The connected Google account cannot open the pasted sheet, or the sheet was not verified with VibeBudget | Share the sheet with the connected Google email, reconnect Google, then verify the pasted sheet |
 | Sync pulls 0 rows | No data in the configured sheet tabs, or cursor at end | Check sheet tabs and column mapping; use "Full Reconcile" mode |
 | Mapping errors | Column headers don't match configured mapping | Inspect sheet headers and update the mapping in Settings |
 | Quota errors | Sheets API read/write quota exceeded | Reduce sync frequency; wait for quota reset |

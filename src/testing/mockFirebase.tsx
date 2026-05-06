@@ -90,6 +90,7 @@ const defaultPreferences: Preferences = {
 const defaultInspection: GoogleSheetsInspectionResult = {
   spreadsheetId: "mock-sheet",
   spreadsheetTitle: "Mock Budget Sheet",
+  sheetTitles: ["Expenses", "Income", "Expense Categories", "Income Categories"],
   expenseHeaders: ["Date", "Vendor", "Amount", "Category", "Notes", "VibeBudget ID", "Updated At"],
   incomeHeaders: ["Date", "Source", "Amount", "Category", "Notes", "VibeBudget ID", "Updated At"],
   suggestedExpenseMapping: {
@@ -185,6 +186,11 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     connectGoogleSheets: noop,
     disconnectGoogleSheets: () => {},
     inspectGoogleSheetsSpreadsheet: async () => defaultInspection,
+    previewGoogleSheetColumn: async () => ({
+      headerValue: "Date",
+      samples: [],
+      last: null,
+    }),
     saveGoogleSheetsConfig: noop,
     syncGoogleSheets: async (_direction?: string, _options?: GoogleSheetsSyncOptions) => ({
       fetched: 10,

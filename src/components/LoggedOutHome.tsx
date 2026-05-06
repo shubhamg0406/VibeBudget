@@ -3,6 +3,7 @@ import {
   ArrowRight,
   Book,
   Cloud,
+  FileText,
   Github,
   Globe,
   KeyRound,
@@ -21,6 +22,7 @@ import { useFirebase } from "../contexts/FirebaseContext";
 interface LoggedOutHomeProps {
   theme: Theme;
   onToggleTheme: () => void;
+  onOpenDocs?: () => void;
 }
 
 const featureCards = [
@@ -69,6 +71,7 @@ const proofPoints = [
 export const LoggedOutHome: React.FC<LoggedOutHomeProps> = ({
   theme,
   onToggleTheme,
+  onOpenDocs,
 }) => {
   const { signIn } = useFirebase();
   const isLight = theme === "light";
@@ -105,6 +108,15 @@ export const LoggedOutHome: React.FC<LoggedOutHomeProps> = ({
               {isLight ? <Moon size={15} /> : <SunMedium size={15} />}
               <span>{isLight ? "Dark" : "Light"}</span>
             </button>
+            {onOpenDocs && (
+              <button
+                onClick={onOpenDocs}
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-panel-muted)] px-3 py-2 text-[12px] font-semibold text-[var(--app-text-muted)] transition-colors hover:border-fintech-accent/40 hover:text-fintech-accent"
+              >
+                <FileText size={14} />
+                <span>Docs</span>
+              </button>
+            )}
             <button
               onClick={() => void signIn()}
               className="inline-flex items-center gap-2 rounded-full bg-[linear-gradient(135deg,_#69f6b8_0%,_#06b77f_100%)] px-4 py-2 text-[12px] font-semibold text-[#032a1a] shadow-[0_14px_30px_rgba(6,183,127,0.3)] transition-transform hover:-translate-y-0.5"
@@ -285,6 +297,8 @@ export const LoggedOutHome: React.FC<LoggedOutHomeProps> = ({
           </motion.section>
         </div>
 
+
+
         {/* Hosted / Self-host / Docs option cards */}
         <motion.section
           initial={{ opacity: 0, y: 20 }}
@@ -339,15 +353,13 @@ export const LoggedOutHome: React.FC<LoggedOutHomeProps> = ({
               Self-hosting guide, BYOK provider setup, troubleshooting, and
               roadmap.
             </p>
-            <a
-              href="https://github.com/th0mk4k4/vibebudget"
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={onOpenDocs}
               className="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-panel-muted)] px-4 py-2 text-xs font-semibold text-[var(--app-text)] transition-colors hover:bg-[var(--app-hover)]"
             >
               <Book size={13} />
               <span>Read docs</span>
-            </a>
+            </button>
           </div>
         </motion.section>
       </div>

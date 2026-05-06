@@ -37,13 +37,16 @@ const makeCompleteConfig = (): GoogleSheetsSyncConfig => ({
 });
 
 const getPullDataHeading = () => screen.queryByRole("heading", { name: /Pull Data/i });
+const openGoogleWorkspace = () => {
+  fireEvent.click(screen.getByRole("button", { name: /Get Started|Manage/i }));
+};
 
 describe("Google Sheets Pull gating", () => {
 
   it("renders the Google Workspace tab with mapping-first description", () => {
     renderWithProviders(<Settings onRefresh={() => {}} />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
 
     expect(screen.getByText(/Mapping-first pull flow/i)).toBeInTheDocument();
     expect(screen.getByText(/Connect Google Sheets/i)).toBeInTheDocument();
@@ -57,7 +60,7 @@ describe("Google Sheets Pull gating", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
 
     // Step 3 Pull Data heading appears because mappingSavedAt is set in config
     expect(getPullDataHeading()).toBeInTheDocument();
@@ -74,7 +77,7 @@ describe("Google Sheets Pull gating", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
 
     expect(getPullDataHeading()).not.toBeInTheDocument();
   });
@@ -89,7 +92,7 @@ describe("Google Sheets Pull gating", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
 
     const pullButton = screen.getByRole("button", { name: /Pull Now/i });
     expect(pullButton).not.toBeDisabled();
@@ -104,7 +107,7 @@ describe("Google Sheets Pull gating", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
 
     const pullButton = screen.getByRole("button", { name: /Pulling Data/i });
     expect(pullButton).toBeDisabled();
@@ -126,7 +129,7 @@ describe("Google Sheets Pull gating", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
 
     expect(screen.getByText(/Pull Complete/i)).toBeInTheDocument();
   });
@@ -139,7 +142,7 @@ describe("Google Sheets Pull gating", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
 
     expect(screen.getByText(/Disconnected/i)).toBeInTheDocument();
   });
@@ -152,7 +155,7 @@ describe("Google Sheets Pull gating", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
 
     expect(screen.getByText(/Connect Google Sheets/i)).toBeInTheDocument();
     expect(getPullDataHeading()).not.toBeInTheDocument();

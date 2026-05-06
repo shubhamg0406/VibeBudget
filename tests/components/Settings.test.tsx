@@ -36,13 +36,21 @@ const makeGoogleSheetsConfig = (): GoogleSheetsSyncConfig => ({
   mappingVersion: 1,
 });
 
+const openGoogleWorkspace = () => {
+  fireEvent.click(screen.getByRole("button", { name: /Get Started|Manage/i }));
+};
+
 describe("Settings", () => {
   it("switches to the google workspace tab and shows drive actions", () => {
     renderWithProviders(<Settings onRefresh={() => {}} />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
-    expect(screen.getByRole("button", { name: /^Connect Drive$/i })).toBeInTheDocument();
+    openGoogleWorkspace();
     expect(screen.getByText(/Mapping-first pull flow/i)).toBeInTheDocument();
+    expect(screen.getByText(/basic profile only/i)).toBeInTheDocument();
+    expect(screen.getByText(/uses the sheet URL you paste here/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Google Drive$/i }));
+    expect(screen.getByRole("button", { name: /^Connect Drive$/i })).toBeInTheDocument();
+    expect(screen.getByText(/uses one VibeBudget folder/i)).toBeInTheDocument();
   });
 
   it("loads spreadsheet columns through the mocked context", async () => {
@@ -67,7 +75,7 @@ describe("Settings", () => {
       },
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Google Workspace/i })[0]);
+    openGoogleWorkspace();
     fireEvent.change(screen.getByPlaceholderText("https://docs.google.com/spreadsheets/d/..."), {
       target: { value: "https://docs.google.com/spreadsheets/d/sheet-1/edit" },
     });
