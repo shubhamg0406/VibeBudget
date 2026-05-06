@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "main": true
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/((?!api/|assets/|manifest.webmanifest|sw.js|workbox-.*\\.js|favicon.ico).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

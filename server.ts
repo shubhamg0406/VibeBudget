@@ -11,6 +11,8 @@ import { registerTellerRoutes } from "./src/server/teller.js";
 import { callAiOcr, AiClientError } from "./src/server/aiClient.js";
 import { computeUpcoming, materializeRule } from "./src/utils/recurring.js";
 import { getTodayStr } from "./src/utils/dateUtils.js";
+import { detectDuplicateGroups } from "./src/utils/duplicateDetection.js";
+import type { Transaction } from "./src/types.js";
 
 const moduleUrl = typeof import.meta !== "undefined" ? import.meta.url : undefined;
 const __dirname = moduleUrl ? path.dirname(fileURLToPath(moduleUrl)) : process.cwd();
@@ -305,6 +307,82 @@ export const createApp = async ({
   app.delete("/api/transactions/:id", (req, res) => {
     db.prepare("DELETE FROM transactions WHERE id = ?").run(req.params.id);
     res.json({ success: true });
+  });
+
+  app.post("/api/transactions/detect-duplicates", (req, res) => {
+    if (Array.isArray(req.body?.transactions)) {
+      const duplicateGroups = detectDuplicateGroups(req.body.transactions as Transaction[]);
+      return res.json({ groups: duplicateGroups, totalGroups: duplicateGroups.length });
+    }
+
+    const rows = db.prepare(`
+      SELECT t.*, c.name as category_name
+      FROM transactions t
+      LEFT JOIN categories c ON t.category_id = c.id
+      ORDER BY date DESC
+    `).all() as Array<Record<string, unknown>>;
+
+    const groups = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of rows) {
+      const parts = [
+        row.date,
+        row.vendor,
+        String(row.amount),
+        row.category_id !== null ? String(row.category_id) : "",
+        row.notes !== null ? String(row.notes) : "",
+        row.recurring_rule_id !== null ? String(row.recurring_rule_id) : "",
+        row.is_recurring_instance !== null ? String(row.is_recurring_instance) : "",
+      ];
+      const fp = parts.map((v) => String(v).trim().toLowerCase()).join("||");
+      const group = groups.get(fp);
+      if (group) {
+        group.push(row);
+      } else {
+        groups.set(fp, [row]);
+      }
+    }
+
+    const duplicateGroups: Array<Array<Record<string, unknown>>> = [];
+    for (const group of groups.values()) {
+      if (group.length > 1) {
+        duplicateGroups.push(group);
+      }
+    }
+    res.json({ groups: duplicateGroups, totalGroups: duplicateGroups.length });
+  });
+
+  app.post("/api/transactions/delete-batch", (req, res) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "ids must be a non-empty array" });
+    }
+    const deleteStmt = db.prepare("DELETE FROM transactions WHERE id = ?");
+    const run = db.transaction((txIds: number[]) => {
+      for (const id of txIds) {
+        deleteStmt.run(id);
+      }
+    });
+    run(ids.map(Number));
+    res.json({ success: true, deleted: ids.length });
+  });
+
+  app.post("/api/transactions/delete-duplicate-extras", (req, res) => {
+    const { keepId, deleteIds } = req.body;
+    if (!keepId || !Array.isArray(deleteIds) || deleteIds.length === 0) {
+      return res.status(400).json({ error: "keepId and deleteIds are required" });
+    }
+    const toDelete = deleteIds.filter((id: unknown) => String(id) !== String(keepId));
+    if (toDelete.length === 0) {
+      return res.json({ success: true, deleted: 0 });
+    }
+    const deleteStmt = db.prepare("DELETE FROM transactions WHERE id = ?");
+    const run = db.transaction((ids: number[]) => {
+      for (const id of ids) {
+        deleteStmt.run(id);
+      }
+    });
+    run(toDelete.map(Number));
+    res.json({ success: true, deleted: toDelete.length });
   });
 
   app.get("/api/income", (_req, res) => {

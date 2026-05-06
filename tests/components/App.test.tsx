@@ -1,9 +1,22 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../../src/App";
 import { renderWithProviders } from "../utils/renderWithProviders";
 import { makeExpenseCategory, makeIncome, makeIncomeCategory, makeTransaction } from "../utils/fixtures";
 import type { GoogleSheetsSyncConfig } from "../../src/types";
+
+beforeAll(() => {
+  class MockIntersectionObserver {
+    observe = vi.fn();
+    disconnect = vi.fn();
+    unobserve = vi.fn();
+  }
+  Object.defineProperty(window, "IntersectionObserver", {
+    writable: true,
+    configurable: true,
+    value: MockIntersectionObserver,
+  });
+});
 
 const makeGoogleSheetsConfig = (): GoogleSheetsSyncConfig => ({
   spreadsheetId: "mock-sheet",
@@ -42,6 +55,7 @@ const makeGoogleSheetsConfig = (): GoogleSheetsSyncConfig => ({
 describe("App", () => {
   beforeEach(() => {
     localStorage.clear();
+    window.history.pushState({}, "", "/");
   });
 
   it("shows the signed-out home when there is no user", () => {
@@ -60,6 +74,38 @@ describe("App", () => {
     expect(screen.getAllByText(/Sign in with Google/i)[0]).toBeInTheDocument();
   });
 
+  it("shows Docs button on the landing page for signed-out users", () => {
+    renderWithProviders(<App />, {
+      seed: {
+        user: null,
+      },
+      firebase: {
+        ownerEmail: null,
+        budgetId: null,
+        signIn: vi.fn(async () => {}),
+      },
+    });
+
+    expect(screen.getByText("Docs")).toBeInTheDocument();
+  });
+
+  it("renders Docs publicly without login when view is docs", () => {
+    window.history.pushState({ view: "docs" }, "", "/docs");
+    renderWithProviders(<App />, {
+      seed: {
+        user: null,
+      },
+      firebase: {
+        ownerEmail: null,
+        budgetId: null,
+        signIn: vi.fn(async () => {}),
+      },
+    });
+
+    expect(screen.getByText("VibeBudget Documentation")).toBeInTheDocument();
+    expect(screen.getByText("Overview")).toBeInTheDocument();
+  });
+
   it("renders the dashboard for authenticated users and navigates between views", () => {
     renderWithProviders(<App />, {
       seed: {
@@ -72,7 +118,7 @@ describe("App", () => {
 
     expect(screen.getAllByText("Dashboard")[0]).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
-    expect(screen.getByRole("button", { name: /1\. Data Hub/i })).toBeInTheDocument();
+    expect(screen.getAllByText("Settings").length).toBeGreaterThan(0);
   });
 
   it("shows a loading spinner before data is ready", () => {

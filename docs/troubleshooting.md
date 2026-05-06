@@ -177,7 +177,7 @@ Common issues when running or deploying VibeBudget.
 1. Go to GCP Console → APIs & Services → OAuth consent screen
 2. Choose "External" user type
 3. Fill in app name, support email, and authorized domains
-4. Add the scopes: `../auth/drive.file`, `../auth/spreadsheets`
+4. Add the scope: `../auth/drive.file`
 5. Add your email as a test user
 6. Save and publish (if going to production)
 
@@ -189,7 +189,7 @@ Common issues when running or deploying VibeBudget.
 
 **Fix:**
 - In Settings → Cloud Sync, disconnect and reconnect the service
-- The re-authentication will request the full set of scopes
+- The re-authentication will request the file-scoped Google access VibeBudget needs
 - Check `src/firebase.ts:73-76` for the scopes configured
 
 ### Drive backup shows "folder not found"

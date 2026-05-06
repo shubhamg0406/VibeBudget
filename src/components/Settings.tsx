@@ -24,6 +24,7 @@ import {
   ExpenseCategory,
   ExpenseSheetMapping,
   GooglePullSummary,
+  GoogleSheetsInspectionResult,
   GoogleSheetsSyncConfig,
   GoogleSheetsSyncDirection,
   GoogleSheetsSyncMode,
@@ -167,23 +168,43 @@ const statusClassByLevel: Record<StatusLevel, string> = {
   error: "border-fintech-danger/30 bg-fintech-danger/10 text-fintech-danger",
 };
 
-const getCloudActionableError = (raw: string) => {
+const getCloudActionableError = (raw: string, connectedEmail?: string | null) => {
   const message = raw.toLowerCase();
   if (message.includes("has not been used in project") || message.includes("sheets.googleapis.com")) {
     return "Google Sheets API is disabled for your Firebase project. Enable Sheets API (and Drive API), wait a few minutes, then reconnect Google.";
   }
-  if (message.includes("permission") || message.includes("access")) {
-    return "Google account is connected, but permission is missing for this sheet. Reconnect Google and verify sheet access for this account.";
+  if (message.includes("session expired") || message.includes("unauthenticated") || message.includes("token") || message.includes("401")) {
+    return "Your Google session for Sheets expired. Reconnect Google, then verify this sheet again.";
+  }
+  if (message.includes("not found") || message.includes("404")) {
+    return `This sheet was not found for ${connectedEmail || "the connected Google account"}. Check the link and make sure that same account can open it.`;
+  }
+  if (message.includes("permission") || message.includes("access") || message.includes("403")) {
+    return `This Google account is connected${connectedEmail ? ` as ${connectedEmail}` : ""}, but VibeBudget does not have permission for this specific sheet. Verify this pasted sheet with Google, or share it with the connected account and try again.`;
   }
   if (message.includes("redirecting to google")) {
-    return "Google needs re-authorization. Finish the Google sign-in flow and retry.";
+    return "Google needs authorization for this sheet. Finish the Google flow, then return here to verify the pasted sheet.";
   }
   return raw;
 };
 
+const memoryStorage = new Map<string, string>();
+
+const getSettingsStorage = () => {
+  const storage = typeof window !== "undefined" ? window.localStorage : undefined;
+  if (storage && typeof storage.getItem === "function") {
+    return storage;
+  }
+  return {
+    getItem: (key: string) => memoryStorage.get(key) || null,
+    setItem: (key: string, value: string) => { memoryStorage.set(key, value); },
+    removeItem: (key: string) => { memoryStorage.delete(key); },
+  };
+};
+
 const readJson = <T,>(key: string, fallback: T): T => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = getSettingsStorage().getItem(key);
     if (!raw) return fallback;
     return JSON.parse(raw) as T;
   } catch {
@@ -192,7 +213,7 @@ const readJson = <T,>(key: string, fallback: T): T => {
 };
 
 const writeJson = (key: string, value: unknown) => {
-  localStorage.setItem(key, JSON.stringify(value));
+  getSettingsStorage().setItem(key, JSON.stringify(value));
 };
 
 export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => {
@@ -235,6 +256,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     googleSheetsAccessToken,
 
     // Plaid
+    user,
     plaidConnected,
     plaidConnection,
     plaidSyncing,
@@ -267,6 +289,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     saveAiConfig,
   } = useFirebase();
 
+  const connectedGoogleEmail = user?.email || googleSheetsConfig?.connectedBy || null;
 
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => initialTab || "data");
 
@@ -302,7 +325,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   const [showGoogleSheetImporter, setShowGoogleSheetImporter] = useState(false);
   const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(() => readJson<ImportHistoryEntry[]>(IMPORT_HISTORY_KEY, []));
   const [sheetMappingMeta, setSheetMappingMeta] = useState<Record<string, string>>(() => readJson<Record<string, string>>(SHEET_MAPPING_META_KEY, {}));
-  const [lastSheetValidatedAt, setLastSheetValidatedAt] = useState<string | null>(() => localStorage.getItem(SHEET_VALIDATION_KEY));
+  const [lastSheetValidatedAt, setLastSheetValidatedAt] = useState<string | null>(() => getSettingsStorage().getItem(SHEET_VALIDATION_KEY));
   const [sheetMappingCursors, setSheetMappingCursors] = useState<Record<string, SheetMappingRefreshCursor>>(() => readJson<Record<string, SheetMappingRefreshCursor>>(SHEET_MAPPING_CURSOR_KEY, {}));
   const [refreshingMappingType, setRefreshingMappingType] = useState<string | null>(null);
 
@@ -370,7 +393,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   const [activeMappingTab, setActiveMappingTab] = useState<MappingTab>("expenses");
   const [columnPreviewByKey, setColumnPreviewByKey] = useState<Record<string, string>>({});
   const [lowQuotaMode, setLowQuotaMode] = useState<boolean>(() => {
-    const raw = localStorage.getItem(GOOGLE_SHEETS_LOW_QUOTA_MODE_KEY);
+    const raw = getSettingsStorage().getItem(GOOGLE_SHEETS_LOW_QUOTA_MODE_KEY);
     if (raw === null) return true;
     return raw === "1";
   });
@@ -422,12 +445,12 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
   useEffect(() => {
     if (lastSheetValidatedAt) {
-      localStorage.setItem(SHEET_VALIDATION_KEY, lastSheetValidatedAt);
+      getSettingsStorage().setItem(SHEET_VALIDATION_KEY, lastSheetValidatedAt);
     }
   }, [lastSheetValidatedAt]);
 
   useEffect(() => {
-    localStorage.setItem(GOOGLE_SHEETS_LOW_QUOTA_MODE_KEY, lowQuotaMode ? "1" : "0");
+    getSettingsStorage().setItem(GOOGLE_SHEETS_LOW_QUOTA_MODE_KEY, lowQuotaMode ? "1" : "0");
   }, [lowQuotaMode]);
 
   useEffect(() => {
@@ -468,16 +491,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
   useEffect(() => {
     if (googleSheetsConfig?.spreadsheetUrl) return;
-    const draftUrl = localStorage.getItem(GOOGLE_SHEETS_DRAFT_URL_KEY);
+    const draftUrl = getSettingsStorage().getItem(GOOGLE_SHEETS_DRAFT_URL_KEY);
     if (draftUrl) setSheetUrl(draftUrl);
   }, [googleSheetsConfig?.spreadsheetUrl]);
 
   useEffect(() => {
     const trimmed = sheetUrl.trim();
     if (trimmed) {
-      localStorage.setItem(GOOGLE_SHEETS_DRAFT_URL_KEY, trimmed);
+      getSettingsStorage().setItem(GOOGLE_SHEETS_DRAFT_URL_KEY, trimmed);
     } else {
-      localStorage.removeItem(GOOGLE_SHEETS_DRAFT_URL_KEY);
+      getSettingsStorage().removeItem(GOOGLE_SHEETS_DRAFT_URL_KEY);
     }
   }, [sheetUrl]);
 
@@ -541,7 +564,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   const renderStatusStrip = (section: SettingsTab) => {
     const isWorkspace = section === "google_workspace";
     const isFinanceFeeds = section === "finance_feeds";
-    const workspaceError = getCloudActionableError(googleSheetsError || driveSyncError || "");
+    const workspaceError = getCloudActionableError(googleSheetsError || driveSyncError || "", connectedGoogleEmail);
     const financeError = plaidError || tellerError || "";
     const hasWorkspaceError = isWorkspace && Boolean(googleSheetsError || driveSyncError);
     const hasFinanceError = isFinanceFeeds && Boolean(financeError);
@@ -926,7 +949,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to connect Drive folder.";
       if (!message.includes("Redirecting to Google")) {
-        setSectionStatus("google_workspace", "error", getCloudActionableError(message));
+        setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
       }
     }
   };
@@ -937,21 +960,21 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       setSectionStatus("google_workspace", "info", `Restore preview: ${preview.summary.new} new, ${preview.summary.duplicate} duplicates, ${preview.summary.invalid} invalid.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to preview Drive restore.";
-      setSectionStatus("google_workspace", "error", getCloudActionableError(message));
+      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
     }
   };
 
   const handleGoogleSheetsConnect = async () => {
     try {
       await connectGoogleSheets();
-      setSectionStatus("google_workspace", "success", "Google sheet authorization granted. You can now verify access to your selected sheet.");
+      setSectionStatus("google_workspace", "success", "Google authorization refreshed. Paste the exact sheet link below and verify that sheet.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to authorize Google Sheet access.";
       if (message.toLowerCase().includes("redirecting to google")) {
-        setSectionStatus("google_workspace", "info", "Redirecting to Google to authorize sheet access...");
+        setSectionStatus("google_workspace", "info", "Redirecting to Google. After the Google flow, return here and verify the pasted sheet.");
         return;
       }
-      setSectionStatus("google_workspace", "error", getCloudActionableError(message));
+      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
     }
   };
 
@@ -963,7 +986,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       return false;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to authorize Google Sheet access.";
-      setSectionStatus("google_workspace", "error", getCloudActionableError(message));
+      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
       return false;
     }
   };
@@ -994,8 +1017,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       setIncomeMapping(result.suggestedIncomeMapping);
       setSectionStatus("google_workspace", "success", "Connection verified: sheet tabs and suggested mappings loaded.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to verify spreadsheet.";
-      setSectionStatus("google_workspace", "error", getCloudActionableError(message));
+      const message = getGoogleSheetsAccessErrorMessage(error);
+      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
     } finally {
       setLoadingSheetConfig(false);
     }
@@ -1013,17 +1036,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       if (!parsedSpreadsheetId) {
         throw new Error("Invalid spreadsheet URL.");
       }
-      let inspection: {
-        spreadsheetId: string;
-        spreadsheetTitle: string;
-        sheetTitles: string[];
-        expenseHeaders: string[];
-        incomeHeaders: string[];
-        expenseCategoryHeaders: string[];
-        incomeCategoryHeaders: string[];
-        suggestedExpenseMapping: ExpenseSheetMapping;
-        suggestedIncomeMapping: IncomeSheetMapping;
-      };
+      let inspection: GoogleSheetsInspectionResult;
       if (hasLiveGoogleAuth) {
         try {
           inspection = await inspectGoogleSheetsSpreadsheet(
@@ -1033,7 +1046,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
             expenseCategoriesSheetName.trim() || undefined,
             incomeCategoriesSheetName.trim() || undefined
           );
-        } catch {
+        } catch (error) {
+          const accessMessage = getGoogleSheetsAccessErrorMessage(error);
+          setSectionStatus("google_workspace", "warning", getCloudActionableError(accessMessage, connectedGoogleEmail));
           inspection = {
             spreadsheetId: parsedSpreadsheetId,
             spreadsheetTitle: googleSheetsConfig?.spreadsheetTitle || sheetTitle || "Unverified Sheet",
@@ -1167,7 +1182,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save CloudSync config.";
-      setSectionStatus("google_workspace", "error", getCloudActionableError(message));
+      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
     } finally {
       setSavingSheetConfig(false);
     }
@@ -1194,7 +1209,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to sync Google Sheets.";
-      setSectionStatus("google_workspace", "error", getCloudActionableError(message), "sync-now");
+      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail), "sync-now");
     }
   };
 
@@ -1202,7 +1217,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     const types = ["expenses", "income", "expenseCategories", "incomeCategories"];
     return types
       .map((type) => {
-        const raw = localStorage.getItem(`googleSheetImport_${type}`);
+        const raw = getSettingsStorage().getItem(`googleSheetImport_${type}`);
         if (!raw) return null;
         try {
           const parsed = JSON.parse(raw) as PublicSheetImportConfig;
@@ -1237,7 +1252,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       setSectionStatus("data", "success", "Saved mapping test passed. Spreadsheet is reachable and tabs are readable.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Mapping validation failed.";
-      setSectionStatus("data", "error", getCloudActionableError(message));
+      setSectionStatus("data", "error", getCloudActionableError(message, connectedGoogleEmail));
     }
   };
 
@@ -1300,7 +1315,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       return;
     }
 
-    const token = googleSheetsAccessToken || localStorage.getItem("vibebudgetGoogleAccessToken");
+    const token = googleSheetsAccessToken || getSettingsStorage().getItem("vibebudgetGoogleAccessToken");
     if (!token) {
       setSectionStatus("data", "warning", "Google session token is missing. Reconnect Google in CloudSync.");
       return;
@@ -1462,7 +1477,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   };
 
   const clearSavedMapping = (type: string) => {
-    localStorage.removeItem(`googleSheetImport_${type}`);
+    getSettingsStorage().removeItem(`googleSheetImport_${type}`);
     setSheetMappingMeta((current) => {
       const next = { ...current };
       delete next[type];
@@ -1537,6 +1552,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   // Plaid Link integration
   const generateLinkToken = useCallback(async () => {
     if (!plaidCredentials) return;
+    if (!user?.uid) {
+      setSectionStatus("finance_feeds", "error", "Sign in with Google first to connect a bank.");
+      return;
+    }
     setGeneratingLinkToken(true);
     try {
       const response = await fetch("/api/plaid/create_link_token", {
@@ -1546,6 +1565,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           clientId: plaidCredentials.clientId,
           secret: plaidCredentials.secret,
           environment: plaidCredentials.environment,
+          userId: user.uid,
         }),
       });
       if (!response.ok) {
@@ -2249,7 +2269,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
               </div>
             )}
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Cloud size={16} className="text-fintech-accent" /> Google Workspace</div>
-            <p className="text-xs text-fintech-muted">Mapping-first pull flow: connect a sheet, map your columns, then pull data.</p>
+            <p className="text-xs text-fintech-muted">Mapping-first pull flow: connect Google, paste the exact sheet you want VibeBudget to use, map your columns, then pull data.</p>
             {renderStatusStrip("google_workspace")}
 
             {/* Stage Indicator */}
@@ -2276,17 +2296,28 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
               {/* Google Account */}
               <div className="mb-4 flex items-center justify-between rounded-lg bg-[var(--app-ghost)] p-3">
-                <div>
-                  <span className="text-xs font-semibold">Google Account</span>
-                  {!googleSheetsConnected && (
-                    <p className="mt-0.5 text-[10px] text-fintech-muted">Authorize Google to read your sheets</p>
+                <div className="flex min-w-0 items-center gap-3">
+                  {user?.photoURL && (
+                    <img src={user.photoURL} alt="" className="h-8 w-8 rounded-full" />
                   )}
+                  <div className="min-w-0">
+                  <span className="text-xs font-semibold">Google Account</span>
+                    <p className="mt-0.5 truncate text-[10px] text-fintech-muted">
+                      {googleSheetsConnected
+                        ? `${connectedGoogleEmail || "Connected account"} · basic profile only until you verify a sheet`
+                        : "Sign in shares basic profile info only: name, email, and photo."}
+                    </p>
+                  </div>
                 </div>
                 {!googleSheetsConnected ? (
-                  <button onClick={handleGoogleSheetsConnect} className="rounded-lg bg-fintech-accent px-4 py-2 text-xs font-bold text-[#002919] hover:bg-fintech-accent/90 transition-colors">Authorize Google</button>
+                  <button onClick={handleGoogleSheetsConnect} className="rounded-lg bg-fintech-accent px-4 py-2 text-xs font-bold text-[#002919] hover:bg-fintech-accent/90 transition-colors">Connect Google</button>
                 ) : (
                   <button onClick={disconnectGoogleSheets} className="rounded-lg bg-[var(--app-panel)] px-4 py-2 text-xs font-bold hover:bg-[var(--app-border)] transition-colors">Disconnect</button>
                 )}
+              </div>
+
+              <div className="mb-4 rounded-lg border border-fintech-accent/20 bg-fintech-accent/5 px-3 py-2 text-[11px] text-fintech-muted">
+                VibeBudget uses the sheet URL you paste here for Sheets sync. It does not browse your Drive or import other files from your account. Drive backup is separate and uses only the VibeBudget backup folder you connect below.
               </div>
 
               {/* Sheet URL + Verify */}
@@ -2324,13 +2355,19 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
                 {googleSheetsError && (
                   <div className="rounded-lg bg-fintech-danger/10 px-3 py-2 text-xs text-fintech-danger">
-                    {getCloudActionableError(googleSheetsError)}
+                    {getCloudActionableError(googleSheetsError, connectedGoogleEmail)}
                   </div>
                 )}
 
                 {!sheetUrl && (
                   <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-[11px] text-fintech-muted">
-                    Paste a Google Sheets URL above and click Verify to check access.
+                    Paste the Google Sheets URL you want VibeBudget to use. Verification checks only that sheet for the connected account.
+                  </div>
+                )}
+
+                {sheetUrl && !sheetTitle && (
+                  <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-[11px] text-fintech-muted">
+                    This pasted sheet is not verified yet. Click Verify so VibeBudget can confirm this exact sheet works with {connectedGoogleEmail || "your connected Google account"}.
                   </div>
                 )}
               </div>
@@ -2664,7 +2701,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-fintech-accent/10 text-[10px] font-bold text-fintech-accent">B</span>
                 <h3 className="font-bold">Drive Backup Vault</h3>
               </div>
-              <p className="mb-3 text-xs text-fintech-muted">The canonical full-budget recovery mechanism. Backs up data + preferences only — no bank credentials are ever included.</p>
+              <p className="mb-3 text-xs text-fintech-muted">Optional cloud backup uses one VibeBudget folder in Google Drive. It backs up data + preferences only; bank credentials are never included.</p>
               <label className="mb-3 block space-y-1">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Optional Folder URL / ID</span>
                 <input value={folderInput} onChange={(e) => setFolderInput(e.target.value)} placeholder="Existing Drive folder URL or ID" className="w-full rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm" style={{ borderColor: "var(--app-border)" }} />

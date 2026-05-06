@@ -2,28 +2,32 @@
 
 ## Current Task
 
-**Plaid & Teller Integration Fixes — Teller Connect SDK loading + Save Credentials buttons**
+**Staging-safe environment and preview deployment documentation — namespace isolation safety for PR testing**
 
-Fixed two issues:
-1. Teller Connect SDK was not loaded (missing script tag in `index.html`)
-2. Both Plaid and Teller sections lacked explicit "Save Credentials" buttons with visual feedback
+Created `docs/staging-env-safety.md` and supporting changes to ensure all agent PRs are
+tested against isolated staging data, never production.
 
 ## Recent Changes
 
-### Teller Connect SDK
-- **`index.html`**: Added `<script src="https://cdn.teller.io/connect/connect.js" async>` to load the Teller Connect SDK on page load, fixing the "Teller Connect SDK not loaded" error
+### New files
+- **`docs/staging-env-safety.md`** — Complete staging environment safety guide covering:
+  - Data namespace env vars (`VITE_FIREBASE_DATA_NAMESPACE`, `FIREBASE_DATA_NAMESPACE`)
+  - Local staging setup (with `.env.staging.example`)
+  - Vercel preview deployment namespace configuration
+  - Production release smoke testing checklist
+  - Agent rules for safe testing
+- **`.env.staging.example`** — Staging environment template with `staging` namespace overrides
 
-### Save Credentials Buttons
-- **`src/components/Settings.tsx` (Plaid section)**: Added "Save Credentials" button with Save icon and success status message next to the existing "Clear Credentials" button
-- **`src/components/Settings.tsx` (Teller section)**: Added "Save Credentials" button with Save icon and success status message next to the existing "Clear" button
+### Updated files
+- **`.env.example`** — Added clear section headers and comments around namespace vars
+- **`README.md`** — Added Staging Env Safety to docs table, updated environment separation section, added preview deployments section
+- **`memory-bank/techContext.md`** — Added `staging` namespace documentation and links to safety guide
+- **`.clinerules`** — Added 5 new staging/production safety rules (rules 11-15)
 
 ## Next Steps
 
-1. Test the Plaid Link flow end-to-end with sandbox credentials
-2. Test the Teller Connect flow end-to-end with sandbox credentials
-3. Consider adding a Dashboard card showing Plaid/Teller connection status and last sync time
-4. Add Plaid/Teller sync to the DataHub import center for visibility
-5. Continue memory-first development workflow
+1. Verify docs render correctly when the PR preview deploys
+2. Ensure future agents follow the new staging safety rules
 
 ## Active Decisions
 
