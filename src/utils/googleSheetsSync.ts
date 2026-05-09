@@ -102,6 +102,8 @@ export const normalizeSheetName = (name: string) => {
 
 const escapeSheetName = (name: string) => {
   const normalized = normalizeSheetName(name);
+  const needsQuoting = !/^[A-Za-z0-9_]+$/.test(normalized);
+  if (!needsQuoting) return normalized;
   return `'${normalized.replace(/'/g, "''")}'`;
 };
 
