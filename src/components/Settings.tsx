@@ -176,16 +176,16 @@ const getCloudActionableError = (raw: string, connectedEmail?: string | null) =>
     return "Google Sheets API is disabled for your Firebase project. Enable Sheets API (and Drive API), wait a few minutes, then reconnect Google.";
   }
   if (message.includes("session expired") || message.includes("unauthenticated") || message.includes("token") || message.includes("401")) {
-    return "Your Google session for Sheets expired. Reconnect Google, then verify this sheet again.";
+    return "Your Google session for Sheets expired. Reconnect Google, pick your sheet again, then retry pull.";
   }
   if (message.includes("not found") || message.includes("404")) {
     return `This sheet was not found for ${connectedEmail || "the connected Google account"}. Check the link and make sure that same account can open it.`;
   }
   if (message.includes("permission") || message.includes("access") || message.includes("403")) {
-    return `This Google account is connected${connectedEmail ? ` as ${connectedEmail}` : ""}, but VibeBudget does not have permission for this specific sheet. Verify this pasted sheet with Google, or share it with the connected account and try again.`;
+    return `This Google account is connected${connectedEmail ? ` as ${connectedEmail}` : ""}, but VibeBudget does not have permission for this specific sheet. Re-pick the sheet from Google Drive, or share it with this account and try again.`;
   }
   if (message.includes("redirecting to google")) {
-    return "Google needs authorization for this sheet. Finish the Google flow, then return here to verify the pasted sheet.";
+    return "Google needs authorization for this sheet. Finish the Google flow, then return here and pick your sheet again.";
   }
   return raw;
 };
@@ -970,7 +970,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   const handleGoogleSheetsConnect = async () => {
     try {
       await connectGoogleSheets();
-      setSectionStatus("google_workspace", "success", "Google authorization refreshed. Paste the exact sheet link below and verify that sheet.");
+      setSectionStatus("google_workspace", "success", "Google authorization refreshed. Pick your sheet from Google Drive.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to authorize Google Sheet access.";
       if (message.toLowerCase().includes("redirecting to google")) {
@@ -1013,37 +1013,58 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     setSectionStatus("google_workspace", "success", "Connection verified: sheet tabs and suggested mappings loaded.");
   };
 
-  const handleInspectGoogleSheet = async () => {
-    const allowed = await ensureSheetAuthorization();
-    if (!allowed) return;
-    if (!sheetUrl) {
-      setSectionStatus("google_workspace", "error", "Add a Google Sheet URL first.");
-      return;
-    }
-    setLoadingSheetConfig(true);
-    try {
-      await inspectWithUrl(sheetUrl);
-    } catch (error) {
-      const message = getGoogleSheetsAccessErrorMessage(error);
-      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
-    } finally {
-      setLoadingSheetConfig(false);
-    }
+  const persistPickedSheetSelection = async (picked: { id: string; name: string; url: string }) => {
+    const payload: Omit<GoogleSheetsSyncConfig, "connectedAt" | "connectedBy"> = {
+      spreadsheetId: picked.id,
+      spreadsheetUrl: picked.url,
+      spreadsheetTitle: picked.name || "Google Sheet",
+      expensesSheetName,
+      incomeSheetName,
+      expenseCategoriesSheetName: expenseCategoriesSheetName.trim() || undefined,
+      incomeCategoriesSheetName: incomeCategoriesSheetName.trim() || undefined,
+      expensesDataStartRow: getRowFromCellRef(expenseRangeDrafts.date.startCell, 2),
+      incomeDataStartRow: getRowFromCellRef(incomeRangeDrafts.date.startCell, 2),
+      expenseCategoriesDataStartRow: getRowFromCellRef(expenseCategoryRangeDrafts.name.startCell, 2),
+      incomeCategoriesDataStartRow: getRowFromCellRef(incomeCategoryRangeDrafts.name.startCell, 2),
+      expenseCategoryNameColumn: expenseCategoryNameColumn || undefined,
+      expenseCategoryTargetColumn: expenseCategoryTargetColumn || undefined,
+      incomeCategoryNameColumn: incomeCategoryNameColumn || undefined,
+      incomeCategoryTargetColumn: incomeCategoryTargetColumn || undefined,
+      expenseMapping,
+      incomeMapping,
+      autoSync: sheetAutoSync,
+      syncIntervalSeconds: Math.max(15, Number.parseInt(syncIntervalSeconds, 10) || 30),
+      expenseRangeDrafts,
+      incomeRangeDrafts,
+      expenseCategoryRangeDrafts,
+      incomeCategoryRangeDrafts,
+      lastError: null,
+      lastPullAt: googleSheetsConfig?.lastPullAt || null,
+      lastPushAt: googleSheetsConfig?.lastPushAt || null,
+      lastSyncedAt: googleSheetsConfig?.lastSyncedAt || null,
+      incrementalCursor: googleSheetsConfig?.incrementalCursor || null,
+      lastPullSummary: googleSheetsConfig?.lastPullSummary || null,
+    };
+    await saveGoogleSheetsConfig(payload);
   };
 
   const handlePickGoogleSheet = async () => {
-    if (!googleSheetsAccessToken) {
-      setSectionStatus("google_workspace", "error", "Connect Google first.");
-      return;
-    }
+    const allowed = await ensureSheetAuthorization();
+    if (!allowed) return;
     setPickingSheet(true);
     try {
       const pickerApiKey = import.meta.env.VITE_GOOGLE_PICKER_API_KEY as string | undefined;
-      const picked = await openGoogleSheetPicker(googleSheetsAccessToken, pickerApiKey);
+      const token = googleSheetsAccessToken || getSettingsStorage().getItem("vibebudgetGoogleAccessToken");
+      if (!token) {
+        setSectionStatus("google_workspace", "error", "Connect Google first.");
+        return;
+      }
+      const picked = await openGoogleSheetPicker(token, pickerApiKey);
       if (!picked) return;
       setSheetUrl(picked.url);
       setSheetTitle(picked.name || "");
-      setSectionStatus("google_workspace", "success", `Selected: ${picked.name}. You can continue mapping right away.`);
+      await persistPickedSheetSelection(picked);
+      setSectionStatus("google_workspace", "success", `Selected: ${picked.name}. This sheet is now saved to your profile.`);
 
       // Best-effort background verification for tabs/mapping suggestions.
       setLoadingSheetConfig(true);
@@ -1053,7 +1074,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           new Promise((_, reject) => window.setTimeout(() => reject(new Error("Verification timed out")), 8000)),
         ]);
       } catch {
-        setSectionStatus("google_workspace", "info", "Sheet selected. Verification can be retried anytime.");
+        setSectionStatus("google_workspace", "info", "Sheet saved. You can continue mapping and pull data.");
       } finally {
         setLoadingSheetConfig(false);
       }
@@ -2309,7 +2330,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
               </div>
             )}
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Cloud size={16} className="text-fintech-accent" /> Google Workspace</div>
-            <p className="text-xs text-fintech-muted">Mapping-first pull flow: connect Google, paste the exact sheet you want VibeBudget to use, map your columns, then pull data.</p>
+            <p className="text-xs text-fintech-muted">Mapping-first pull flow: connect Google, pick your sheet from Drive, map your columns, then pull data.</p>
             {renderStatusStrip("google_workspace")}
 
             {/* Stage Indicator */}
@@ -2344,7 +2365,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                   <span className="text-xs font-semibold">Google Account</span>
                     <p className="mt-0.5 truncate text-[10px] text-fintech-muted">
                       {googleSheetsConnected
-                        ? `${connectedGoogleEmail || "Connected account"} · basic profile only until you verify a sheet`
+                        ? `${connectedGoogleEmail || "Connected account"} · picker-based sheet access`
                         : "Sign in shares basic profile info only: name, email, and photo."}
                     </p>
                   </div>
@@ -2360,7 +2381,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                 VibeBudget only accesses the single sheet you select from the picker. It does not browse your Drive or import other files. Drive backup is separate and uses only the VibeBudget backup folder you connect below.
               </div>
 
-              {/* Sheet URL + Verify */}
+              {/* Sheet Selection (Picker only) */}
               <div className="space-y-3">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Spreadsheet</span>
 
@@ -2385,21 +2406,12 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                     >
                       Change Sheet
                     </button>
-                    {googleSheetsConnected && (
-                      <button
-                        onClick={() => void handleInspectGoogleSheet()}
-                        disabled={loadingSheetConfig}
-                        className="shrink-0 rounded-lg bg-fintech-accent/10 px-3 py-2 text-xs font-bold text-fintech-accent disabled:opacity-50 hover:bg-fintech-accent/20 transition-colors"
-                      >
-                        {loadingSheetConfig ? "Verifying..." : "Verify"}
-                      </button>
-                    )}
                   </div>
                 )}
 
                 {sheetTitle && (
                   <div className="rounded-lg bg-fintech-accent/5 px-3 py-2 text-xs text-fintech-accent">
-                    Verified: <span className="font-semibold">{sheetTitle}</span>
+                    Selected: <span className="font-semibold">{sheetTitle}</span>
                     {availableSheetTabs.length > 0 && (
                       <span className="ml-2 text-fintech-muted">· {availableSheetTabs.length} tab(s) found</span>
                     )}
@@ -2418,9 +2430,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                   </div>
                 )}
 
-                {sheetUrl && !sheetTitle && (
+                {loadingSheetConfig && (
                   <div className="rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-[11px] text-fintech-muted">
-                    This sheet is not verified yet. Click Verify so VibeBudget can confirm this exact sheet works with {connectedGoogleEmail || "your connected Google account"}.
+                    Refreshing sheet metadata in the background...
                   </div>
                 )}
               </div>
