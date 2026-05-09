@@ -125,8 +125,9 @@ export function initFirebase(config: FirebaseWebConfig): boolean {
     const newGp = new GoogleAuthProvider();
     newGp.setCustomParameters({ prompt: "select_account" });
     const newGdp = new GoogleAuthProvider();
-    newGdp.setCustomParameters({ prompt: "consent" });
+    newGdp.setCustomParameters({ prompt: "consent select_account" });
     newGdp.addScope("https://www.googleapis.com/auth/drive.file");
+    newGdp.addScope("https://www.googleapis.com/auth/spreadsheets.readonly");
 
     _app = app = newApp;
     _auth = auth = newAuth;
