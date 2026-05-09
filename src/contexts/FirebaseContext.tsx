@@ -75,6 +75,7 @@ import { previewImportBatch } from "../utils/importPipeline";
 
 const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
 const GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY = "vibebudgetGoogleAccessTokenExpiresAt";
+const GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY = "vibebudgetGoogleAccessTokenOwnerEmail";
 const GOOGLE_ACCESS_TOKEN_TTL_MS = 50 * 60 * 1000;
 const LOCAL_STATE_KEY = "vibebudgetLocalState";
 const TRANSACTIONS_CACHE_KEY_PREFIX = "vb_transactions_cache";
@@ -158,6 +159,11 @@ const readStoredGoogleAccessToken = () => {
 
   return token;
 };
+
+const readStoredGoogleAccessTokenOwnerEmail = () => (
+  sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY)
+  || localStorage.getItem(GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY)
+);
 
 const renameLegacyCategory = (name: string) => LEGACY_CATEGORY_RENAMES[name] || name;
 const normalizeCategoryName = (name: string) => renameLegacyCategory(name).trim().replace(/\s+/g, " ");
@@ -681,19 +687,26 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     []
   );
 
-  const storeAccessToken = (token: string | null) => {
+  const storeAccessToken = (token: string | null, ownerEmail?: string | null) => {
     setGoogleSheetsAccessToken(token);
     if (token) {
       const expiresAt = String(Date.now() + GOOGLE_ACCESS_TOKEN_TTL_MS);
+      const normalizedOwner = (ownerEmail || user?.email || "").trim().toLowerCase();
       localStorage.setItem(GOOGLE_ACCESS_TOKEN_KEY, token);
       sessionStorage.setItem(GOOGLE_ACCESS_TOKEN_KEY, token);
       localStorage.setItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY, expiresAt);
       sessionStorage.setItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY, expiresAt);
+      if (normalizedOwner) {
+        localStorage.setItem(GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY, normalizedOwner);
+        sessionStorage.setItem(GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY, normalizedOwner);
+      }
     } else {
       localStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
       sessionStorage.removeItem(GOOGLE_ACCESS_TOKEN_KEY);
       localStorage.removeItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY);
       sessionStorage.removeItem(GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY);
+      localStorage.removeItem(GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY);
+      sessionStorage.removeItem(GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY);
     }
   };
 
@@ -885,7 +898,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!result) return;
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (withDriveScopes && credential?.accessToken) {
-        storeAccessToken(credential.accessToken);
+        storeAccessToken(credential.accessToken, auth.currentUser?.email || null);
       }
       return;
     } catch (error) {
@@ -901,7 +914,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ? GoogleAuthProvider.credentialFromResult(result)
           : null;
         if (credential?.accessToken) {
-          storeAccessToken(credential.accessToken);
+          storeAccessToken(credential.accessToken, auth.currentUser?.email || null);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Google authentication failed.";
@@ -920,6 +933,18 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return;
       }
 
+      // If a persisted Drive/Sheets token belongs to another Google account,
+      // force a clean reconnect so picker + verify + pull all use the same identity.
+      const storedOwnerEmail = readStoredGoogleAccessTokenOwnerEmail();
+      if (
+        googleSheetsAccessToken
+        && storedOwnerEmail
+        && nextUser.email
+        && storedOwnerEmail !== nextUser.email.trim().toLowerCase()
+      ) {
+        storeAccessToken(null);
+      }
+
       setBudgetId(nextUser.uid);
       setAuthError(null);
       const cachedTransactions = loadTransactionsCache(nextUser.uid);
@@ -930,7 +955,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     return unsubscribe;
-  }, [resetBudgetState]);
+  }, [googleSheetsAccessToken, resetBudgetState]);
 
   useEffect(() => {
     if (!user) {
@@ -1098,6 +1123,18 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   ]);
 
   const ensureSignedInWithDriveScopes = async () => {
+    const signedInEmail = user?.email?.trim().toLowerCase() || "";
+    const tokenOwnerEmail = readStoredGoogleAccessTokenOwnerEmail();
+
+    if (
+      googleSheetsAccessToken
+      && tokenOwnerEmail
+      && signedInEmail
+      && tokenOwnerEmail !== signedInEmail
+    ) {
+      storeAccessToken(null);
+    }
+
     if (!user || !googleSheetsAccessToken) {
       await beginGoogleAuth(true);
       throw new Error("Redirecting to Google to authorize Drive access.");
