@@ -342,6 +342,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   const [syncIntervalSeconds, setSyncIntervalSeconds] = useState("30");
   const [sheetAutoSync, setSheetAutoSync] = useState(true);
   const [loadingSheetConfig, setLoadingSheetConfig] = useState(false);
+  const [pickingSheet, setPickingSheet] = useState(false);
   const [savingSheetConfig, setSavingSheetConfig] = useState(false);
   const [pullMode, setPullMode] = useState<GoogleSheetsSyncMode>("incremental");
   const [mappingSavedAt, setMappingSavedAt] = useState<string | null>(null);
@@ -1035,17 +1036,31 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       setSectionStatus("google_workspace", "error", "Connect Google first.");
       return;
     }
-    setLoadingSheetConfig(true);
+    setPickingSheet(true);
     try {
       const pickerApiKey = import.meta.env.VITE_GOOGLE_PICKER_API_KEY as string | undefined;
       const picked = await openGoogleSheetPicker(googleSheetsAccessToken, pickerApiKey);
       if (!picked) return;
       setSheetUrl(picked.url);
-      await inspectWithUrl(picked.url);
+      setSheetTitle(picked.name || "");
+      setSectionStatus("google_workspace", "success", `Selected: ${picked.name}. You can continue mapping right away.`);
+
+      // Best-effort background verification for tabs/mapping suggestions.
+      setLoadingSheetConfig(true);
+      try {
+        await Promise.race([
+          inspectWithUrl(picked.url),
+          new Promise((_, reject) => window.setTimeout(() => reject(new Error("Verification timed out")), 8000)),
+        ]);
+      } catch {
+        setSectionStatus("google_workspace", "info", "Sheet selected. Verification can be retried anytime.");
+      } finally {
+        setLoadingSheetConfig(false);
+      }
     } catch {
       setSectionStatus("google_workspace", "error", "Failed to open Google Sheets picker.");
     } finally {
-      setLoadingSheetConfig(false);
+      setPickingSheet(false);
     }
   };
 
@@ -2352,11 +2367,11 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                 {!sheetUrl ? (
                   <button
                     onClick={() => void handlePickGoogleSheet()}
-                    disabled={loadingSheetConfig || !googleSheetsConnected}
+                    disabled={pickingSheet || !googleSheetsConnected}
                     className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-fintech-accent/40 bg-fintech-accent/5 px-4 py-3 text-sm font-semibold text-fintech-accent hover:bg-fintech-accent/10 disabled:opacity-50 transition-colors"
                   >
                     <FolderOpen size={16} />
-                    {loadingSheetConfig ? "Opening picker..." : "Select Sheet from Google Drive"}
+                    {pickingSheet ? "Opening picker..." : "Select Sheet from Google Drive"}
                   </button>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -2365,7 +2380,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                     </span>
                     <button
                       onClick={() => void handlePickGoogleSheet()}
-                      disabled={loadingSheetConfig || !googleSheetsConnected}
+                      disabled={pickingSheet || !googleSheetsConnected}
                       className="shrink-0 rounded-lg bg-[var(--app-ghost)] px-3 py-2 text-xs font-bold hover:bg-[var(--app-border)] disabled:opacity-50 transition-colors"
                     >
                       Change Sheet
