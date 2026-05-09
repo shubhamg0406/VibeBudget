@@ -54,6 +54,7 @@ import {
   getSheetColumnValuesUntilEmptyRun,
   getSheetValues,
   inspectSpreadsheet,
+  normalizeSheetName,
   parseA1CellReference,
   parseSpreadsheetId,
   syncAppDataToSheet,
@@ -1314,6 +1315,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!spreadsheetId) {
       throw new Error("Invalid spreadsheet URL.");
     }
+    const sanitizedSheetName = normalizeSheetName(sheetName);
     const start = parseA1CellReference(startCell);
     if (!start) {
       throw new Error("Invalid start cell.");
@@ -1332,13 +1334,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const col = toColumnLabel(start.columnIndex);
 
     if (noEndRange) {
-      const headerRange = `'${sheetName.replace(/'/g, "''")}'!${start.cellRef}:${start.cellRef}`;
+      const headerRange = `'${sanitizedSheetName.replace(/'/g, "''")}'!${start.cellRef}:${start.cellRef}`;
       const headerResponse = await getSheetValues(googleSheetsAccessToken, spreadsheetId, headerRange);
       const headerValue = headerResponse.values?.[0]?.[0] || "";
       const values = await getSheetColumnValuesUntilEmptyRun(
         googleSheetsAccessToken,
         spreadsheetId,
-        sheetName,
+        sanitizedSheetName,
         start.columnIndex,
         start.rowIndex + 1,
       );
@@ -1357,7 +1359,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!end) {
       return { headerValue: "", samples: [], last: null };
     }
-    const range = `'${sheetName.replace(/'/g, "''")}'!${start.cellRef}:${end.cellRef}`;
+    const range = `'${sanitizedSheetName.replace(/'/g, "''")}'!${start.cellRef}:${end.cellRef}`;
     const response = await getSheetValues(googleSheetsAccessToken, spreadsheetId, range);
     const rows = response.values || [];
     const headerValue = rows[0]?.[0] || "";
@@ -1602,6 +1604,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const {
       getSheetColumnValuesUntilEmptyRun,
       getSheetValues,
+      normalizeSheetName,
       parseA1CellReference,
     } = await import("../utils/googleSheetsSync");
 
@@ -1617,6 +1620,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       sheetName: string,
       draft: SheetRangeDraft | undefined
     ): Promise<{ values: string[]; dataStartRowNumber: number }> => {
+      const sanitizedSheetName = normalizeSheetName(sheetName);
       const startCell = draft?.startCell || "";
       const parsedStart = parseA1CellReference(startCell);
       if (!parsedStart) {
@@ -1628,19 +1632,21 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const values = await getSheetColumnValuesUntilEmptyRun(
           token,
           config.spreadsheetId,
-          sheetName,
+          sanitizedSheetName,
           parsedStart.columnIndex,
           dataStartRowNumber,
         );
         return { values, dataStartRowNumber };
       }
 
-      const range = `'${sheetName.replace(/'/g, "''")}'!${parsedStart.cellRef}:${draft.endCell}`;
+      const range = `'${sanitizedSheetName.replace(/'/g, "''")}'!${parsedStart.cellRef}:${draft.endCell}`;
       const response = await getSheetValues(token, config.spreadsheetId, range);
       const rows = response.values || [];
       const values = rows.slice(1).map((row) => (row[0] || "").trim());
       return { values, dataStartRowNumber };
     };
+
+    const readErrors: string[] = [];
 
     // Build expense rows (optional)
     if (expenseReady) {
@@ -1679,8 +1685,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             __rawDescription: [date, vendor, amount, category, notes].join(", "),
           });
         }
-      } catch {
-        // Keep pull resilient for partial mapping setups (e.g., income-only).
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown Google Sheets read error";
+        readErrors.push(`Expenses read failed (${config.expensesSheetName}): ${message}`);
       }
     }
 
@@ -1721,9 +1728,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             __rawDescription: [date, source, amount, category, notes].join(", "),
           });
         }
-      } catch {
-        // Keep pull resilient for partial mapping setups (e.g., expenses-only).
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown Google Sheets read error";
+        readErrors.push(`Income read failed (${config.incomeSheetName}): ${message}`);
       }
+    }
+
+    if (allRows.length === 0 && readErrors.length > 0) {
+      throw new Error(readErrors.join(" | "));
     }
 
     return { rows: allRows, count: totalCount };

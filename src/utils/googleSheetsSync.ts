@@ -86,7 +86,24 @@ interface SheetRecord {
 
 const normalizeHeader = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 
-const escapeSheetName = (name: string) => `'${name.replace(/'/g, "''")}'`;
+export const normalizeSheetName = (name: string) => {
+  const trimmed = name.trim();
+  if (!trimmed) return trimmed;
+
+  const withoutWrappingQuotes = (
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    || (trimmed.startsWith("\"") && trimmed.endsWith("\""))
+  )
+    ? trimmed.slice(1, -1)
+    : trimmed;
+
+  return withoutWrappingQuotes.trim();
+};
+
+const escapeSheetName = (name: string) => {
+  const normalized = normalizeSheetName(name);
+  return `'${normalized.replace(/'/g, "''")}'`;
+};
 
 const getColumnLetter = (index: number) => {
   let current = index + 1;
