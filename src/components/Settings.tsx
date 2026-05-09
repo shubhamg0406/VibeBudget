@@ -182,6 +182,9 @@ const getCloudActionableError = (raw: string, connectedEmail?: string | null) =>
     return `This sheet was not found for ${connectedEmail || "the connected Google account"}. Check the link and make sure that same account can open it.`;
   }
   if (message.includes("permission") || message.includes("access") || message.includes("403")) {
+    if (message.includes("unregistered callers") || message.includes("without established identity")) {
+      return "Google Sheets authorization is stale for API reads. Disconnect Google, reconnect, then pick your sheet again.";
+    }
     return `This Google account is connected${connectedEmail ? ` as ${connectedEmail}` : ""}, but VibeBudget does not have permission for this specific sheet. Re-pick the sheet from Google Drive, or share it with this account and try again.`;
   }
   if (message.includes("redirecting to google")) {

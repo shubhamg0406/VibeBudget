@@ -77,6 +77,10 @@ const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
 const GOOGLE_ACCESS_TOKEN_EXPIRES_AT_KEY = "vibebudgetGoogleAccessTokenExpiresAt";
 const GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY = "vibebudgetGoogleAccessTokenOwnerEmail";
 const GOOGLE_ACCESS_TOKEN_TTL_MS = 50 * 60 * 1000;
+const GOOGLE_SHEETS_REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/spreadsheets.readonly",
+];
 const LOCAL_STATE_KEY = "vibebudgetLocalState";
 const TRANSACTIONS_CACHE_KEY_PREFIX = "vb_transactions_cache";
 const DEFAULT_BUDGET_FILE_NAME = "budget.json";
@@ -164,6 +168,18 @@ const readStoredGoogleAccessTokenOwnerEmail = () => (
   sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY)
   || localStorage.getItem(GOOGLE_ACCESS_TOKEN_OWNER_EMAIL_KEY)
 );
+
+const hasRequiredSheetsScopes = async (token: string) => {
+  try {
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`);
+    if (!response.ok) return false;
+    const payload = await response.json() as { scope?: string };
+    const scopeSet = new Set(String(payload.scope || "").split(" ").filter(Boolean));
+    return GOOGLE_SHEETS_REQUIRED_SCOPES.every((scope) => scopeSet.has(scope));
+  } catch {
+    return false;
+  }
+};
 
 const renameLegacyCategory = (name: string) => LEGACY_CATEGORY_RENAMES[name] || name;
 const normalizeCategoryName = (name: string) => renameLegacyCategory(name).trim().replace(/\s+/g, " ");
@@ -1123,19 +1139,29 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   ]);
 
   const ensureSignedInWithDriveScopes = async () => {
+    let currentToken = googleSheetsAccessToken;
     const signedInEmail = user?.email?.trim().toLowerCase() || "";
     const tokenOwnerEmail = readStoredGoogleAccessTokenOwnerEmail();
 
     if (
-      googleSheetsAccessToken
+      currentToken
       && tokenOwnerEmail
       && signedInEmail
       && tokenOwnerEmail !== signedInEmail
     ) {
       storeAccessToken(null);
+      currentToken = null;
     }
 
-    if (!user || !googleSheetsAccessToken) {
+    if (currentToken) {
+      const scopeOk = await hasRequiredSheetsScopes(currentToken);
+      if (!scopeOk) {
+        storeAccessToken(null);
+        currentToken = null;
+      }
+    }
+
+    if (!user || !currentToken) {
       await beginGoogleAuth(true);
       throw new Error("Redirecting to Google to authorize Drive access.");
     }
