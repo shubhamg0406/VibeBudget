@@ -208,9 +208,13 @@ export interface UpcomingRecurringInstance {
   notes?: string;
 }
 
+export type FxRateMode = "live" | "fixed" | "historical";
+
 export interface ExchangeRate {
-  currency: string;   // e.g., "USD"
-  rateToBase: number; // e.g., 1.35 (1 USD = 1.35 Base Currency)
+  currency: string;       // e.g., "USD"
+  rateToBase: number;     // e.g., 1.35 (1 USD = 1.35 Base Currency)
+  mode?: FxRateMode;      // default "fixed" for backwards compat
+  liveRateUpdatedAt?: string; // ISO timestamp of last live fetch
 }
 
 export interface Preferences {
