@@ -431,6 +431,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   const [trackedCurrencies, setTrackedCurrencies] = useState<string[]>(() => readJson<string[]>(TRACKED_CURRENCIES_KEY, []));
   const [fxMeta, setFxMeta] = useState<Record<string, FxRateMeta>>(() => readJson<Record<string, FxRateMeta>>(FX_META_KEY, {}));
   const [fetchingLiveRates, setFetchingLiveRates] = useState<Record<string, boolean>>({});
+  const [pendingCurrencies, setPendingCurrencies] = useState<string[]>([]); // optimistic: being added
 
   useEffect(() => {
     writeJson(IMPORT_HISTORY_KEY, importHistory.slice(0, 12));
@@ -1601,20 +1602,17 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     }));
   };
 
-  // currentRates lets callers pass the already-updated array when calling
-  // immediately after updatePreferences — avoids stale closure overwriting new entries.
-  const fetchLiveRate = async (currency: string, currentRates?: ExchangeRate[]) => {
+  const fetchLiveRate = async (currency: string) => {
     setFetchingLiveRates((prev) => ({ ...prev, [currency]: true }));
     try {
       const res = await fetch(`/api/fx?from=${currency}&to=${baseCurrency}`);
       const data = await res.json() as { rate?: number; error?: string };
       if (!res.ok || !data.rate) throw new Error(data.error || "Rate unavailable");
       if (!updatePreferences) return;
-      const rates = currentRates ?? exchangeRates;
-      const next = rates.map((r) =>
+      const next = exchangeRates.map((r) =>
         r.currency === currency ? { ...r, rateToBase: data.rate!, liveRateUpdatedAt: new Date().toISOString() } : r
       );
-      await updatePreferences({ ...preferences, exchangeRates: next });
+      await updatePreferences({ exchangeRates: next });
       updateRateMeta(currency, "seeded");
     } catch (err) {
       setSectionStatus("currency", "error", `Live rate fetch failed for ${currency}: ${err instanceof Error ? err.message : "unknown"}`);
@@ -1625,25 +1623,48 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
   const handleAddCurrency = async (code: string) => {
     if (!code || !updatePreferences) return;
-    const existing = exchangeRates.find((r) => r.currency === code);
-    if (existing) return;
-    const newRate: ExchangeRate = { currency: code, rateToBase: 0, mode: "live" };
-    const updatedRates = [...exchangeRates, newRate];
-    await updatePreferences({ ...preferences, exchangeRates: updatedRates });
-    setTrackedCurrencies((cur) => Array.from(new Set([...cur, code])));
-    void fetchLiveRate(code, updatedRates);
+    if (exchangeRates.find((r) => r.currency === code)) return;
+    // Show card immediately while we fetch — single Firestore write after fetch
+    setPendingCurrencies((cur) => [...cur, code]);
+    setFetchingLiveRates((prev) => ({ ...prev, [code]: true }));
+    try {
+      let rate = 0;
+      let liveRateUpdatedAt: string | undefined;
+      try {
+        const res = await fetch(`/api/fx?from=${code}&to=${baseCurrency}`);
+        const data = await res.json() as { rate?: number; error?: string };
+        if (res.ok && data.rate) {
+          rate = data.rate;
+          liveRateUpdatedAt = new Date().toISOString();
+        }
+      } catch {
+        // network error — save with rate 0, user can refresh later
+      }
+      const newRate: ExchangeRate = { currency: code, rateToBase: rate, mode: "live", ...(liveRateUpdatedAt ? { liveRateUpdatedAt } : {}) };
+      await updatePreferences({ exchangeRates: [...exchangeRates, newRate] });
+      setTrackedCurrencies((cur) => Array.from(new Set([...cur, code])));
+      if (!liveRateUpdatedAt) {
+        setSectionStatus("currency", "warning", `Added ${code} but live rate unavailable — set a fixed rate or refresh later.`);
+      }
+      updateRateMeta(code, "seeded");
+    } catch (err) {
+      setSectionStatus("currency", "error", `Failed to add ${code}: ${err instanceof Error ? err.message : "unknown"}`);
+    } finally {
+      setPendingCurrencies((cur) => cur.filter((c) => c !== code));
+      setFetchingLiveRates((prev) => ({ ...prev, [code]: false }));
+    }
   };
 
   const handleSetRateMode = async (currency: string, mode: FxRateMode) => {
     if (!updatePreferences) return;
     const next = exchangeRates.map((r) => r.currency === currency ? { ...r, mode } : r);
-    await updatePreferences({ ...preferences, exchangeRates: next });
-    if (mode === "live") void fetchLiveRate(currency, next);
+    await updatePreferences({ exchangeRates: next });
+    if (mode === "live") void fetchLiveRate(currency);
   };
 
   const handleRemoveRate = async (currency: string) => {
     if (!updatePreferences) return;
-    await updatePreferences({ ...preferences, exchangeRates: exchangeRates.filter((r) => r.currency !== currency) });
+    await updatePreferences({ exchangeRates: exchangeRates.filter((r) => r.currency !== currency) });
     setTrackedCurrencies((cur) => cur.filter((c) => c !== currency));
   };
 
@@ -2281,9 +2302,28 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                 <span className="text-xs text-fintech-muted">{exchangeRates.length} configured</span>
               </div>
 
-              {exchangeRates.length === 0 && (
+              {exchangeRates.length === 0 && pendingCurrencies.length === 0 && (
                 <p className="text-sm text-fintech-muted">No secondary currencies added yet. Use the dropdown below to add one.</p>
               )}
+
+              {/* Optimistic pending cards shown while fetch+save is in flight */}
+              {pendingCurrencies.filter((code) => !exchangeRates.find((r) => r.currency === code)).map((code) => {
+                const currencyInfo = CURRENCIES.find((c) => c.code === code);
+                return (
+                  <div key={`pending-${code}`} className="rounded-xl border border-fintech-accent/20 bg-[var(--app-ghost)] p-4 opacity-70" style={{ borderColor: "var(--app-border)" }}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base font-bold">{code}</span>
+                        {currencyInfo && <span className="text-xs text-fintech-muted">{currencyInfo.name}</span>}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-fintech-muted">
+                        <RefreshCw size={12} className="animate-spin text-fintech-accent" />
+                        Fetching live rate…
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
 
               {exchangeRates.map((rate, index) => {
                 const mode: FxRateMode = rate.mode || "fixed";
