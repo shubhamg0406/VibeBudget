@@ -901,6 +901,66 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     saveUserProfilePatch,
   ]);
 
+  const upsertBudgetDataInFirestore = useCallback(async (payload: {
+    nextExpenseCategories: ExpenseCategory[];
+    nextIncomeCategories: IncomeCategory[];
+    nextTransactions: Transaction[];
+    nextIncome: Income[];
+    nextPreferences: Preferences;
+    nextSheetsConfig: GoogleSheetsSyncConfig | null;
+    nextDriveConnection: DriveConnection | null;
+    nextLastSynced: Date | null;
+  }) => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+
+    const uid = auth.currentUser.uid;
+    const operations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+
+    payload.nextExpenseCategories.forEach((item) => {
+      operations.push((batch) => {
+        batch.set(doc(getExpenseCategoriesCollection(uid), item.id), item);
+      });
+    });
+    payload.nextIncomeCategories.forEach((item) => {
+      operations.push((batch) => {
+        batch.set(doc(getIncomeCategoriesCollection(uid), item.id), item);
+      });
+    });
+    payload.nextTransactions.forEach((item) => {
+      operations.push((batch) => {
+        batch.set(doc(getTransactionsCollection(uid), item.id), item);
+      });
+    });
+    payload.nextIncome.forEach((item) => {
+      operations.push((batch) => {
+        batch.set(doc(getIncomeCollection(uid), item.id), item);
+      });
+    });
+
+    for (let index = 0; index < operations.length; index += FIRESTORE_BATCH_WRITE_LIMIT) {
+      const batch = writeBatch(db);
+      operations
+        .slice(index, index + FIRESTORE_BATCH_WRITE_LIMIT)
+        .forEach((runOperation) => runOperation(batch));
+      await batch.commit();
+    }
+
+    await saveUserProfilePatch({
+      preferences: normalizePreferences(payload.nextPreferences),
+      googleSheetsConfig: payload.nextSheetsConfig,
+      driveConnection: payload.nextDriveConnection,
+      lastSyncedAt: payload.nextLastSynced ? payload.nextLastSynced.toISOString() : null,
+    });
+  }, [
+    getExpenseCategoriesCollection,
+    getIncomeCategoriesCollection,
+    getIncomeCollection,
+    getTransactionsCollection,
+    saveUserProfilePatch,
+  ]);
+
   const beginGoogleAuth = async (withDriveScopes = false) => {
     const provider = withDriveScopes ? googleDriveProvider : googleProvider;
 
@@ -2275,6 +2335,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let nextIncomeCategories = migrateIncomeCategories([...incomeCategoriesRef.current]);
     let nextTransactions = [...transactionsRef.current];
     let nextIncome = [...incomeRef.current];
+    const touchedExpenseCategories = new Map<string, ExpenseCategory>();
+    const touchedIncomeCategories = new Map<string, IncomeCategory>();
+    const touchedTransactions = new Map<string, Transaction>();
+    const touchedIncomeRecords = new Map<string, Income>();
     const allowedIds = options.recordIds ? new Set(options.recordIds) : null;
     const records = batch.records.filter((record) => {
       if (allowedIds && !allowedIds.has(record.id)) return false;
@@ -2287,18 +2351,26 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const getOrCreateExpenseCategoryId = (name: string) => {
       const normalizedName = normalizeExpenseCategoryName(name);
       const existing = nextExpenseCategories.find((item) => normalizeCategoryName(item.name) === normalizedName);
-      if (existing) return existing.id;
+      if (existing) {
+        touchedExpenseCategories.set(existing.id, existing);
+        return existing.id;
+      }
       const created: ExpenseCategory = { id: crypto.randomUUID(), name: normalizedName, target_amount: 0 };
       nextExpenseCategories = [...nextExpenseCategories, created].sort((a, b) => a.name.localeCompare(b.name));
+      touchedExpenseCategories.set(created.id, created);
       return created.id;
     };
 
     const getOrCreateIncomeCategoryId = (name: string) => {
       const normalizedName = normalizeCategoryName(name);
       const existing = nextIncomeCategories.find((item) => normalizeCategoryName(item.name) === normalizedName);
-      if (existing) return existing.id;
+      if (existing) {
+        touchedIncomeCategories.set(existing.id, existing);
+        return existing.id;
+      }
       const created: IncomeCategory = { id: crypto.randomUUID(), name: normalizedName, target_amount: 0 };
       nextIncomeCategories = [...nextIncomeCategories, created].sort((a, b) => a.name.localeCompare(b.name));
+      touchedIncomeCategories.set(created.id, created);
       return created.id;
     };
 
@@ -2306,11 +2378,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (record.kind === "expenseCategory") {
         const id = getOrCreateExpenseCategoryId(record.merchant || "");
         nextExpenseCategories = nextExpenseCategories.map((item) => item.id === id ? { ...item, target_amount: record.amount || 0 } : item);
+        const updated = nextExpenseCategories.find((item) => item.id === id);
+        if (updated) touchedExpenseCategories.set(updated.id, updated);
       }
 
       if (record.kind === "incomeCategory") {
         const id = getOrCreateIncomeCategoryId(record.merchant || "");
         nextIncomeCategories = nextIncomeCategories.map((item) => item.id === id ? { ...item, target_amount: record.amount || 0 } : item);
+        const updated = nextIncomeCategories.find((item) => item.id === id);
+        if (updated) touchedIncomeCategories.set(updated.id, updated);
       }
 
       if (record.kind === "expense") {
@@ -2344,6 +2420,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         } else {
           nextTransactions.push(payload);
         }
+        touchedTransactions.set(payload.id, payload);
       }
 
       if (record.kind === "income") {
@@ -2377,6 +2454,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         } else {
           nextIncome.push(payload);
         }
+        touchedIncomeRecords.set(payload.id, payload);
       }
 
       onProgress?.(index + 1, records.length);
@@ -2389,11 +2467,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       income: nextIncome.length,
     };
 
-    const persistImport = replaceBudgetDataInFirestore({
-      nextExpenseCategories,
-      nextIncomeCategories,
-      nextTransactions,
-      nextIncome,
+    const persistImport = upsertBudgetDataInFirestore({
+      nextExpenseCategories: Array.from(touchedExpenseCategories.values()),
+      nextIncomeCategories: Array.from(touchedIncomeCategories.values()),
+      nextTransactions: Array.from(touchedTransactions.values()),
+      nextIncome: Array.from(touchedIncomeRecords.values()),
       nextPreferences: preferencesRef.current,
       nextSheetsConfig: sheetsConfigRef.current,
       nextDriveConnection: driveConnectionRef.current,
@@ -2581,7 +2659,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       income: nextIncome.length,
     };
 
-    const persistImport = replaceBudgetDataInFirestore({
+    const persistImport = upsertBudgetDataInFirestore({
       nextExpenseCategories,
       nextIncomeCategories,
       nextTransactions,

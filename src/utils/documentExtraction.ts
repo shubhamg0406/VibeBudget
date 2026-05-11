@@ -57,8 +57,9 @@ export const fileToImportRow = (
 export const buildFilePayload = (
   candidates: ExtractTransactionsResponse["candidates"]
 ): unknown[] =>
-  candidates.map((c) => ({
+  candidates.map((c, index) => ({
     __row: fileToImportRow(c),
-    __sourceId: `ocr-${c.source_file.replace(/[^a-zA-Z0-9_-]/g, "-")}-${c.date}-${c.merchant}-${c.amount}`,
+    // Include index/category/page/notes to avoid source-id collisions for multi-line receipts.
+    __sourceId: `ocr-${c.source_file.replace(/[^a-zA-Z0-9_-]/g, "-")}-${c.date}-${c.merchant}-${c.amount}-${c.category}-${c.page || 0}-${index + 1}`.replace(/[^a-zA-Z0-9_-]/g, "-"),
     __rawDescription: `source_file:${c.source_file} | ${c.notes || ""}`,
   }));

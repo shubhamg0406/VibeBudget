@@ -77,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const typeHint = targetType === "income" ? "income" : "expense";
   const receiptModeHint = targetType === "income"
     ? "Each file typically represents one income document (pay stub, invoice). Aggregate line items into one row."
-    : "For receipt/invoice images: aggregate line items into one transaction row with total amount; include key line-item details in notes.";
+    : "For receipt/invoice images: split into MULTIPLE transactions by spending category whenever line items span categories (for example groceries vs household). Include concise item details in notes per split transaction and include proportional tax in each split amount so totals reconcile.";
   const providerLabel = aiConfig.provider === "gemini" ? "Gemini" : "DeepSeek";
   const canonicalCategories = INITIAL_CATEGORIES.map((category) => `"${category}"`).join(", ");
 
