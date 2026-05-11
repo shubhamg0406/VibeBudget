@@ -55,6 +55,83 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
   const [committing, setCommitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const getSourceFileFromRawDescription = (value?: string) => {
+    if (!value?.startsWith("source_file:")) return "";
+    return value.split("|")[0].replace("source_file:", "").trim();
+  };
+
+  const mergeRecordStatus = (statuses: ImportRecordStatus[]): ImportRecordStatus => {
+    if (statuses.some((status) => status === "invalid")) return "invalid";
+    if (statuses.some((status) => status === "warning")) return "warning";
+    if (statuses.every((status) => status === "duplicate")) return "duplicate";
+    if (statuses.some((status) => status === "new")) return "new";
+    return "warning";
+  };
+
+  const consolidateByCategory = (input: ImportBatch): ImportBatch => {
+    const groups = new Map<string, ImportRecord[]>();
+    const passthrough: ImportRecord[] = [];
+
+    input.records.forEach((record) => {
+      if (record.kind !== "expense" && record.kind !== "income") {
+        passthrough.push(record);
+        return;
+      }
+
+      const sourceFile = getSourceFileFromRawDescription(record.raw_description);
+      const key = [
+        record.kind,
+        sourceFile || "",
+        record.date || "",
+        (record.merchant || "").toLowerCase(),
+        (record.category || "").toLowerCase(),
+      ].join("|");
+
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)?.push(record);
+    });
+
+    const consolidated: ImportRecord[] = [];
+    groups.forEach((records, key) => {
+      if (records.length === 1) {
+        consolidated.push(records[0]);
+        return;
+      }
+
+      const first = records[0];
+      const notes = Array.from(new Set(records.map((item) => (item.notes || "").trim()).filter(Boolean))).join("; ");
+      const warnings = Array.from(new Set(records.flatMap((item) => item.warnings)));
+      const amount = records.reduce((sum, item) => sum + (item.amount || 0), 0);
+      const status = mergeRecordStatus(records.map((item) => item.status));
+      const confidence = records.reduce((sum, item) => sum + item.confidence, 0) / records.length;
+      const sourceId = `${first.source}-group-${key.replace(/[^a-zA-Z0-9_-]/g, "-")}`.slice(0, 160);
+
+      consolidated.push({
+        ...first,
+        id: `${first.source}-consolidated-${key.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
+        source_id: sourceId,
+        amount: Number(amount.toFixed(2)),
+        notes: notes || first.notes || "",
+        warnings,
+        status,
+        confidence,
+      });
+    });
+
+    const nextRecords = [...consolidated, ...passthrough];
+    return {
+      ...input,
+      records: nextRecords,
+      summary: {
+        total: nextRecords.length,
+        new: nextRecords.filter((r) => r.status === "new").length,
+        duplicate: nextRecords.filter((r) => r.status === "duplicate").length,
+        warning: nextRecords.filter((r) => r.status === "warning").length,
+        invalid: nextRecords.filter((r) => r.status === "invalid").length,
+      },
+    };
+  };
+
   const categoryOptions = targetType === "income"
     ? incomeCategories.map((c) => c.name)
     : expenseCategories.map((c) => c.name);
@@ -104,6 +181,18 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     });
   };
 
+  const setRecordNotes = (recordId: string, notes: string) => {
+    setBatch((current) => {
+      if (!current) return current;
+      const records = current.records.map((record) => (
+        record.id === recordId
+          ? { ...record, notes }
+          : record
+      ));
+      return { ...current, records };
+    });
+  };
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files || []);
     setFiles((prev) => [...prev, ...selected]);
@@ -147,7 +236,9 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
       }
 
       const payload = buildFilePayload(result.candidates);
-      const nextBatch = previewImport("document_ocr", payload, { type: targetType });
+      const nextBatch = consolidateByCategory(
+        previewImport("document_ocr", payload, { type: targetType })
+      );
       setBatch(nextBatch);
       setSelectedIds(new Set(
         nextBatch.records
@@ -194,9 +285,13 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
         const existing = raw ? JSON.parse(raw) : [];
         localStorage.setItem("impex_history_v1", JSON.stringify([historyEntry, ...existing].slice(0, 25)));
       } catch {}
-      resetAll();
       setMessage(`${summary.imported} transaction(s) imported. ${summary.skipped} skipped.`);
-      onRefresh();
+      if (summary.imported > 0) {
+        setTimeout(() => {
+          resetAll();
+          onRefresh();
+        }, 300);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Commit failed.");
     } finally {
@@ -409,7 +504,15 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                               </div>
                             )}
                           </td>
-                          <td className="max-w-xs truncate p-3 text-fintech-muted">{record.notes || record.raw_description || "-"}</td>
+                          <td className="p-3">
+                            <input
+                              value={record.notes || ""}
+                              onChange={(e) => setRecordNotes(record.id, e.target.value)}
+                              placeholder="Add note"
+                              className="w-full min-w-[220px] rounded-md border bg-[var(--app-ghost)] px-2 py-1 text-xs text-[var(--app-text)]"
+                              style={{ borderColor: "var(--app-border)" }}
+                            />
+                          </td>
                         </tr>
                       );
                     })}
