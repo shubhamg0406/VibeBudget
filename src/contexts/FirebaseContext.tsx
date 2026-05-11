@@ -406,6 +406,31 @@ const clearTransactionsCache = (uid: string) => {
   localStorage.removeItem(getTransactionsCacheKey(uid));
 };
 
+const SESSION_CACHE_VERSION = 'v1';
+const getSessionKey = (uid: string, name: string) =>
+  `vb_session_${name}_${SESSION_CACHE_VERSION}:${uid}`;
+
+const readSessionCache = <T,>(uid: string, name: string): T[] | null => {
+  try {
+    const raw = sessionStorage.getItem(getSessionKey(uid, name));
+    return raw ? (JSON.parse(raw) as T[]) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeSessionCache = <T,>(uid: string, name: string, data: T[]): void => {
+  try {
+    sessionStorage.setItem(getSessionKey(uid, name), JSON.stringify(data));
+  } catch {
+    /* storage full — ignore */
+  }
+};
+
+const clearSessionCache = (uid: string, name: string): void => {
+  sessionStorage.removeItem(getSessionKey(uid, name));
+};
+
 interface UserProfileDocument {
   budgetId: string;
   email: string;
@@ -815,6 +840,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
 
     await batch.commit();
+    clearSessionCache(nextUser.uid, 'expenseCategories');
+    clearSessionCache(nextUser.uid, 'incomeCategories');
+    clearSessionCache(nextUser.uid, 'recurringRules');
     clearLocalState();
   }, [
     getExpenseCategoriesCollection,
@@ -895,6 +923,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         lastSyncedAt: payload.nextLastSynced ? payload.nextLastSynced.toISOString() : null,
       }),
     ]);
+    clearSessionCache(uid, 'expenseCategories');
+    clearSessionCache(uid, 'incomeCategories');
   }, [
     getExpenseCategoriesCollection,
     getIncomeCategoriesCollection,
@@ -949,6 +979,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         .forEach((runOperation) => runOperation(batch));
       await batch.commit();
     }
+    clearSessionCache(uid, 'expenseCategories');
+    clearSessionCache(uid, 'incomeCategories');
 
     await saveUserProfilePatch({
       preferences: normalizePreferences(payload.nextPreferences),
@@ -1106,39 +1138,53 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (error) => handleSnapshotError("profile", error)
     ));
 
-    unsubscribers.push(onSnapshot(
-      getExpenseCategoriesCollection(uid),
-      (snapshot) => {
-        const nextCategories = snapshot.docs.map((item) => item.data() as ExpenseCategory);
-        if (pendingImportRef.current && nextCategories.length < pendingImportRef.current.expenseCategories) {
-          loadedState.categories = true;
-          markLoaded();
-          return;
-        }
-        remotePresence.categories = nextCategories.length > 0;
-        setExpenseCategories(nextCategories.length > 0 ? migrateExpenseCategories(nextCategories) : createDefaultExpenseCategories());
+    {
+      const cached = readSessionCache<ExpenseCategory>(uid, 'expenseCategories');
+      if (cached) {
+        remotePresence.categories = cached.length > 0;
+        setExpenseCategories(cached.length > 0 ? migrateExpenseCategories(cached) : createDefaultExpenseCategories());
         loadedState.categories = true;
         markLoaded();
-      },
-      (error) => handleSnapshotError("categories", error)
-    ));
-
-    unsubscribers.push(onSnapshot(
-      getIncomeCategoriesCollection(uid),
-      (snapshot) => {
-        const nextIncomeCategories = snapshot.docs.map((item) => item.data() as IncomeCategory);
-        if (pendingImportRef.current && nextIncomeCategories.length < pendingImportRef.current.incomeCategories) {
-          loadedState.incomeCategories = true;
+      } else {
+        getDocs(getExpenseCategoriesCollection(uid)).then((snapshot) => {
+          const nextCategories = snapshot.docs.map((item) => item.data() as ExpenseCategory);
+          if (pendingImportRef.current && nextCategories.length < pendingImportRef.current.expenseCategories) {
+            loadedState.categories = true;
+            markLoaded();
+            return;
+          }
+          writeSessionCache(uid, 'expenseCategories', nextCategories);
+          remotePresence.categories = nextCategories.length > 0;
+          setExpenseCategories(nextCategories.length > 0 ? migrateExpenseCategories(nextCategories) : createDefaultExpenseCategories());
+          loadedState.categories = true;
           markLoaded();
-          return;
-        }
-        remotePresence.incomeCategories = nextIncomeCategories.length > 0;
-        setIncomeCategories(migrateIncomeCategories(nextIncomeCategories));
+        }).catch((error) => handleSnapshotError('categories', error));
+      }
+    }
+
+    {
+      const cached = readSessionCache<IncomeCategory>(uid, 'incomeCategories');
+      if (cached) {
+        remotePresence.incomeCategories = cached.length > 0;
+        setIncomeCategories(migrateIncomeCategories(cached));
         loadedState.incomeCategories = true;
         markLoaded();
-      },
-      (error) => handleSnapshotError("income categories", error)
-    ));
+      } else {
+        getDocs(getIncomeCategoriesCollection(uid)).then((snapshot) => {
+          const nextIncomeCategories = snapshot.docs.map((item) => item.data() as IncomeCategory);
+          if (pendingImportRef.current && nextIncomeCategories.length < pendingImportRef.current.incomeCategories) {
+            loadedState.incomeCategories = true;
+            markLoaded();
+            return;
+          }
+          writeSessionCache(uid, 'incomeCategories', nextIncomeCategories);
+          remotePresence.incomeCategories = nextIncomeCategories.length > 0;
+          setIncomeCategories(migrateIncomeCategories(nextIncomeCategories));
+          loadedState.incomeCategories = true;
+          markLoaded();
+        }).catch((error) => handleSnapshotError('income categories', error));
+      }
+    }
 
     unsubscribers.push(onSnapshot(
       getTransactionsCollection(uid),
@@ -1184,17 +1230,24 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (error) => handleSnapshotError("income", error)
     ));
 
-    unsubscribers.push(onSnapshot(
-      getRecurringRulesCollection(uid),
-      (snapshot) => {
-        const nextRecurringRules = snapshot.docs.map((item) => item.data() as RecurringRule);
-        remotePresence.recurringRules = nextRecurringRules.length > 0;
-        setRecurringRules(nextRecurringRules);
+    {
+      const cached = readSessionCache<RecurringRule>(uid, 'recurringRules');
+      if (cached) {
+        remotePresence.recurringRules = cached.length > 0;
+        setRecurringRules(cached);
         loadedState.recurringRules = true;
         markLoaded();
-      },
-      (error) => handleSnapshotError("recurring rules", error)
-    ));
+      } else {
+        getDocs(getRecurringRulesCollection(uid)).then((snapshot) => {
+          const nextRecurringRules = snapshot.docs.map((item) => item.data() as RecurringRule);
+          writeSessionCache(uid, 'recurringRules', nextRecurringRules);
+          remotePresence.recurringRules = nextRecurringRules.length > 0;
+          setRecurringRules(nextRecurringRules);
+          loadedState.recurringRules = true;
+          markLoaded();
+        }).catch((error) => handleSnapshotError('recurring rules', error));
+      }
+    }
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
@@ -1644,6 +1697,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       target_amount: 0,
     };
     await setDoc(doc(getExpenseCategoriesCollection(auth.currentUser.uid), nextCategory.id), nextCategory);
+    clearSessionCache(auth.currentUser.uid, 'expenseCategories');
     return nextCategory.id;
   };
 
@@ -1662,6 +1716,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       target_amount: 0,
     };
     await setDoc(doc(getIncomeCategoriesCollection(auth.currentUser.uid), nextCategory.id), nextCategory);
+    clearSessionCache(auth.currentUser.uid, 'incomeCategories');
     return nextCategory.id;
   };
 
@@ -1692,6 +1747,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...existing,
       target_amount: targetAmount,
     });
+    clearSessionCache(auth.currentUser.uid, 'expenseCategories');
   };
 
   const upsertIncomeCategoryTargetByName = async (name: string, targetAmount: number) => {
@@ -1703,6 +1759,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...existing,
       target_amount: targetAmount,
     });
+    clearSessionCache(auth.currentUser.uid, 'incomeCategories');
   };
 
   const validateGoogleSheetsMappingFn = useCallback((): { valid: boolean; missing: string[] } => {
@@ -2055,6 +2112,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     clearLocalState();
     if (uid) {
       clearTransactionsCache(uid);
+      clearSessionCache(uid, 'expenseCategories');
+      clearSessionCache(uid, 'incomeCategories');
+      clearSessionCache(uid, 'recurringRules');
     }
     storeAccessToken(null);
     await signOut(auth);
@@ -2180,6 +2240,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       updated_at: now,
     };
     await setDoc(doc(getRecurringRulesCollection(auth.currentUser.uid), id), payload);
+    clearSessionCache(auth.currentUser.uid, 'recurringRules');
     return id;
   };
 
@@ -2199,6 +2260,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       uid: auth.currentUser.uid,
       updated_at: getIsoNow(),
     });
+    clearSessionCache(auth.currentUser.uid, 'recurringRules');
   };
 
   const deleteRecurringRule = async (id: string) => {
@@ -2295,6 +2357,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     await batch.commit();
+    if (auth.currentUser) {
+      clearSessionCache(auth.currentUser.uid, 'recurringRules');
+    }
     return { generated, skipped };
   }, [getIncomeCollection, getRecurringRulesCollection, getTransactionsCollection]);
 
