@@ -616,6 +616,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     transactions: number;
     income: number;
   } | null>(null);
+  const ignoreStaleTransactionSnapshotsUntilRef = useRef<number>(0);
 
   useEffect(() => { expenseCategoriesRef.current = expenseCategories; }, [expenseCategories]);
   useEffect(() => { incomeCategoriesRef.current = incomeCategories; }, [incomeCategories]);
@@ -1142,6 +1143,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (snapshot) => {
         const nextTransactions = migrateTransactions(snapshot.docs.map((item) => item.data() as Transaction));
         if (pendingImportRef.current && nextTransactions.length < pendingImportRef.current.transactions) {
+          loadedState.transactions = true;
+          markLoaded();
+          return;
+        }
+        // Guard against stale snapshots briefly rolling back optimistic import UI.
+        if (
+          Date.now() < ignoreStaleTransactionSnapshotsUntilRef.current &&
+          nextTransactions.length < transactionsRef.current.length
+        ) {
           loadedState.transactions = true;
           markLoaded();
           return;
@@ -2466,6 +2476,8 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       transactions: nextTransactions.length,
       income: nextIncome.length,
     };
+    ignoreStaleTransactionSnapshotsUntilRef.current = Date.now() + 15000;
+    ignoreStaleTransactionSnapshotsUntilRef.current = Date.now() + 15000;
 
     const persistImport = upsertBudgetDataInFirestore({
       nextExpenseCategories: Array.from(touchedExpenseCategories.values()),
