@@ -39,6 +39,13 @@ interface OcrMeta {
   page?: number;
 }
 
+interface EditableRowValues {
+  preTaxAmount: number;
+  taxPercent: number;
+  finalAmount: number;
+  notes: string;
+}
+
 const STATUS_STYLES: Record<ImportRecordStatus, string> = {
   new: "bg-fintech-accent/10 text-fintech-accent",
   duplicate: "bg-[var(--app-ghost)] text-fintech-muted",
@@ -64,6 +71,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [committing, setCommitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [editableRows, setEditableRows] = useState<Record<string, EditableRowValues>>({});
 
   const getSourceFileFromRawDescription = (value?: string) => {
     if (!value?.startsWith("source_file:")) return "";
@@ -78,7 +86,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     return "warning";
   };
 
-  const consolidateByCategory = (input: ImportBatch): ImportBatch => {
+  const consolidateForCommit = (input: ImportBatch): ImportBatch => {
     const groups = new Map<string, ImportRecord[]>();
     const passthrough: ImportRecord[] = [];
 
@@ -125,79 +133,6 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
         warnings,
         status,
         confidence,
-      });
-    });
-
-    // Deterministic tax allocator:
-    // If receipt-level tax exists, allocate only across taxable groups.
-    const receiptGroups = new Map<string, ImportRecord[]>();
-    consolidated.forEach((record) => {
-      if (record.kind !== "expense") return;
-      const sourceFile = getSourceFileFromRawDescription(record.raw_description);
-      const receiptKey = [
-        sourceFile || "",
-        record.date || "",
-        (record.merchant || "").toLowerCase(),
-      ].join("|");
-      if (!receiptGroups.has(receiptKey)) receiptGroups.set(receiptKey, []);
-      receiptGroups.get(receiptKey)?.push(record);
-    });
-
-    receiptGroups.forEach((records) => {
-      const metas = records.map((record) => {
-        const raw = record.raw_payload && typeof record.raw_payload === "object"
-          ? record.raw_payload as { __meta?: OcrMeta }
-          : undefined;
-        return raw?.__meta;
-      });
-      const receiptTaxTotal = Math.max(
-        0,
-        ...metas.map((meta) => (typeof meta?.receipt_tax_total === "number" ? meta.receipt_tax_total : 0)),
-      );
-      if (receiptTaxTotal <= 0) return;
-
-      const preTax = new Map<string, number>();
-      const explicitTax = new Map<string, number>();
-      const taxable = new Map<string, boolean>();
-
-      records.forEach((record) => {
-        const raw = record.raw_payload && typeof record.raw_payload === "object"
-          ? record.raw_payload as { __meta?: OcrMeta }
-          : undefined;
-        const meta = raw?.__meta;
-        const preTaxAmount = typeof meta?.pre_tax_amount === "number" ? meta.pre_tax_amount : record.amount || 0;
-        const explicitTaxAmount = typeof meta?.tax_amount === "number" ? meta.tax_amount : 0;
-        preTax.set(record.id, (preTax.get(record.id) || 0) + Math.max(0, preTaxAmount));
-        explicitTax.set(record.id, (explicitTax.get(record.id) || 0) + Math.max(0, explicitTaxAmount));
-        taxable.set(record.id, meta?.taxable !== false);
-      });
-
-      const totalExplicitTax = Array.from(explicitTax.values()).reduce((sum, value) => sum + value, 0);
-      const remainingTax = Math.max(0, receiptTaxTotal - totalExplicitTax);
-      const taxableIds = records.filter((record) => taxable.get(record.id)).map((record) => record.id);
-      const taxableBase = taxableIds.reduce((sum, id) => sum + (preTax.get(id) || 0), 0);
-
-      let allocatedRunning = 0;
-      const lastTaxableId = taxableIds[taxableIds.length - 1];
-      records.forEach((record) => {
-        const basePreTax = preTax.get(record.id) || 0;
-        const baseExplicitTax = explicitTax.get(record.id) || 0;
-        let allocated = baseExplicitTax;
-        if (taxable.get(record.id) && taxableBase > 0) {
-          const share = (basePreTax / taxableBase) * remainingTax;
-          const rounded = Number(share.toFixed(2));
-          allocated += rounded;
-          allocatedRunning += rounded;
-          if (record.id === lastTaxableId) {
-            const drift = Number((remainingTax - allocatedRunning).toFixed(2));
-            allocated += drift;
-          }
-        }
-        const total = Number((basePreTax + allocated).toFixed(2));
-        record.amount = total;
-        const existingNotes = (record.notes || "").trim();
-        const taxNote = `pre-tax ${basePreTax.toFixed(2)}, tax ${allocated.toFixed(2)}`;
-        record.notes = existingNotes ? `${existingNotes}; ${taxNote}` : taxNote;
       });
     });
 
@@ -265,6 +200,17 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
   };
 
   const setRecordNotes = (recordId: string, notes: string) => {
+    setEditableRows((current) => {
+      const existing = current[recordId];
+      if (!existing) return current;
+      return {
+        ...current,
+        [recordId]: {
+          ...existing,
+          notes,
+        },
+      };
+    });
     setBatch((current) => {
       if (!current) return current;
       const records = current.records.map((record) => (
@@ -299,7 +245,29 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     setSearch("");
     setStatusFilter("all");
     setSelectedIds(new Set());
+    setEditableRows({});
     setMessage(null);
+  };
+
+  const initializeEditableRows = (records: ImportRecord[]) => {
+    const next: Record<string, EditableRowValues> = {};
+    records.forEach((record) => {
+      const raw = record.raw_payload && typeof record.raw_payload === "object"
+        ? record.raw_payload as { __meta?: OcrMeta }
+        : undefined;
+      const meta = raw?.__meta;
+      const preTaxAmount = Number((meta?.pre_tax_amount ?? record.amount ?? 0).toFixed(2));
+      const taxAmount = Number((meta?.tax_amount ?? Math.max(0, (record.amount ?? 0) - preTaxAmount)).toFixed(2));
+      const taxPercent = preTaxAmount > 0 ? Number(((taxAmount / preTaxAmount) * 100).toFixed(2)) : 0;
+      const finalAmount = Number((preTaxAmount + taxAmount).toFixed(2));
+      next[record.id] = {
+        preTaxAmount,
+        taxPercent,
+        finalAmount,
+        notes: record.notes || "",
+      };
+    });
+    setEditableRows(next);
   };
 
   const handleExtract = async () => {
@@ -319,10 +287,9 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
       }
 
       const payload = buildFilePayload(result.candidates);
-      const nextBatch = consolidateByCategory(
-        previewImport("document_ocr", payload, { type: targetType })
-      );
+      const nextBatch = previewImport("document_ocr", payload, { type: targetType });
       setBatch(nextBatch);
+      initializeEditableRows(nextBatch.records);
       setSelectedIds(new Set(
         nextBatch.records
           .filter((r) => r.status !== "invalid" && r.status !== "duplicate")
@@ -343,19 +310,56 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     }
   };
 
-  const handleCommit = async () => {
+  const setRecordTaxPercent = (recordId: string, taxPercent: number) => {
+    setEditableRows((current) => {
+      const existing = current[recordId];
+      if (!existing) return current;
+      const clamped = Number.isFinite(taxPercent) ? Math.max(0, taxPercent) : 0;
+      const taxAmount = Number((existing.preTaxAmount * (clamped / 100)).toFixed(2));
+      const finalAmount = Number((existing.preTaxAmount + taxAmount).toFixed(2));
+      return {
+        ...current,
+        [recordId]: {
+          ...existing,
+          taxPercent: clamped,
+          finalAmount,
+        },
+      };
+    });
+  };
+
+  const buildCommitBatch = (mode: "individual" | "category"): ImportBatch | null => {
+    if (!batch) return null;
+    const selected = batch.records.filter((record) => selectedCommitIds.includes(record.id));
+    const prepared = selected.map((record) => {
+      const edit = editableRows[record.id];
+      if (!edit) return record;
+      return {
+        ...record,
+        amount: edit.finalAmount,
+        notes: edit.notes,
+      } satisfies ImportRecord;
+    });
+    if (mode === "individual") {
+      return { ...batch, records: prepared };
+    }
+    return consolidateForCommit({ ...batch, records: prepared });
+  };
+
+  const handleCommit = async (mode: "individual" | "category") => {
     if (!batch) return;
+    const commitBatch = buildCommitBatch(mode);
+    if (!commitBatch) return;
     setCommitting(true);
     try {
-      const summary = await commitImport(batch, {
+      const summary = await commitImport(commitBatch, {
         includeDuplicates,
-        recordIds: selectedCommitIds,
       });
       const historyEntry = {
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
         actionType: "import_document_ocr" as const,
-        label: `OCR Import (${files.length} file(s))`,
+        label: `OCR Import (${mode === "individual" ? "individual" : "category-wise"}, ${files.length} file(s))`,
         status: "Completed" as const,
         message: `${summary.imported} rows imported. ${summary.skipped} skipped.`,
         scope: targetType,
@@ -522,7 +526,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
               </div>
 
               <div className="max-h-80 overflow-auto rounded-lg border" style={{ borderColor: "var(--app-border)" }}>
-                <table className="w-full min-w-[800px] text-left text-xs">
+                <table className="w-full min-w-[1100px] text-left text-xs">
                   <thead className="sticky top-0 bg-[var(--app-panel-strong)] text-fintech-muted">
                     <tr>
                       <th className="p-3">Use</th>
@@ -531,6 +535,8 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                       <th className="p-3">Date</th>
                       <th className="p-3">Merchant</th>
                       <th className="p-3">Amount</th>
+                      <th className="p-3">Tax %</th>
+                      <th className="p-3">Final</th>
                       <th className="p-3">Category</th>
                       <th className="p-3">Notes</th>
                     </tr>
@@ -565,7 +571,19 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                           </td>
                           <td className="p-3">{record.date || "-"}</td>
                           <td className="p-3 font-semibold">{record.merchant || "-"}</td>
-                          <td className="p-3">{record.amount?.toFixed(2) || "-"}</td>
+                          <td className="p-3">{editableRows[record.id]?.preTaxAmount.toFixed(2) || record.amount?.toFixed(2) || "-"}</td>
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={editableRows[record.id]?.taxPercent ?? 0}
+                              onChange={(e) => setRecordTaxPercent(record.id, Number(e.target.value))}
+                              className="w-24 rounded-md border bg-[var(--app-ghost)] px-2 py-1 text-xs text-[var(--app-text)]"
+                              style={{ borderColor: "var(--app-border)" }}
+                            />
+                          </td>
+                          <td className="p-3 font-semibold">{editableRows[record.id]?.finalAmount.toFixed(2) || record.amount?.toFixed(2) || "-"}</td>
                           <td className="p-3">
                             <select
                               value={record.category || ""}
@@ -621,15 +639,50 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                     {batch.summary.invalid > 0 && <span className="text-fintech-danger">{batch.summary.invalid} invalid</span>}
                   </div>
                 </div>
-                <button
-                  onClick={() => void handleCommit()}
-                  disabled={committing || selectedCommitIds.length === 0}
-                  className="inline-flex items-center gap-2 rounded-lg bg-fintech-accent px-5 py-2.5 text-sm font-bold text-[#002919] disabled:opacity-50"
-                >
-                  {committing ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                  {committing ? "Committing..." : `Commit ${selectedCommitIds.length}`}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void handleCommit("individual")}
+                    disabled={committing || selectedCommitIds.length === 0}
+                    className="inline-flex items-center gap-2 rounded-lg bg-fintech-accent px-4 py-2.5 text-sm font-bold text-[#002919] disabled:opacity-50"
+                  >
+                    {committing ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                    {committing ? "Committing..." : `Add Individual Items (${selectedCommitIds.length})`}
+                  </button>
+                  <button
+                    onClick={() => void handleCommit("category")}
+                    disabled={committing || selectedCommitIds.length === 0}
+                    className="inline-flex items-center gap-2 rounded-lg border border-fintech-accent bg-transparent px-4 py-2.5 text-sm font-bold text-fintech-accent disabled:opacity-50"
+                  >
+                    {committing ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                    {committing ? "Committing..." : "Add Category wise Items"}
+                  </button>
+                </div>
               </div>
+
+              {(() => {
+                const rows = previewRecords.filter((record) => selectedCommitIds.includes(record.id));
+                if (rows.length === 0) return null;
+                const expected = rows.reduce((sum, record) => {
+                  const raw = record.raw_payload && typeof record.raw_payload === "object"
+                    ? record.raw_payload as { __meta?: OcrMeta }
+                    : undefined;
+                  const meta = raw?.__meta;
+                  if (typeof meta?.receipt_subtotal === "number" || typeof meta?.receipt_tax_total === "number") {
+                    return sum + (meta.receipt_subtotal || 0) + (meta.receipt_tax_total || 0);
+                  }
+                  return sum;
+                }, 0);
+                const calculated = rows.reduce((sum, record) => sum + (editableRows[record.id]?.finalAmount || record.amount || 0), 0);
+                const hasExpected = expected > 0;
+                const diff = Number((calculated - expected).toFixed(2));
+                return (
+                  <div className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--app-border)" }}>
+                    <span className="font-semibold">Totals:</span>{" "}
+                    Calculated {calculated.toFixed(2)}
+                    {hasExpected ? ` | Receipt ${expected.toFixed(2)} | Diff ${diff.toFixed(2)}` : " | Receipt total not provided by OCR"}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
