@@ -29,6 +29,8 @@ export interface Transaction {
   recurring_rule_id?: string;
   is_recurring_instance?: boolean;
   updated_at?: string;
+  updatedAt?: number;
+  deleted?: boolean;
 }
 
 export interface Income {
