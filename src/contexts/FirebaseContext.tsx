@@ -14,8 +14,11 @@ import {
   doc,
   getDocs,
   onSnapshot,
+  orderBy,
+  query,
   setDoc,
   Unsubscribe,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import { auth, db, firebaseDataNamespace, googleDriveProvider, googleProvider } from "../firebase";
@@ -404,6 +407,46 @@ const saveTransactionsCache = (uid: string, items: Transaction[]) => {
 
 const clearTransactionsCache = (uid: string) => {
   localStorage.removeItem(getTransactionsCacheKey(uid));
+};
+
+const LAST_TX_SYNC_KEY_PREFIX = 'vb_tx_last_sync';
+const getLastTxSyncKey = (uid: string) => `${LAST_TX_SYNC_KEY_PREFIX}:${uid}`;
+
+const incrementalTransactionSync = async (
+  collectionRef: CollectionReference<DocumentData>,
+  uid: string,
+): Promise<Transaction[]> => {
+  const lastSyncRaw = localStorage.getItem(getLastTxSyncKey(uid));
+  const cached = loadTransactionsCache(uid);
+
+  let q: ReturnType<typeof query> | CollectionReference<DocumentData>;
+  if (lastSyncRaw && cached.length > 0) {
+    const lastSync = parseInt(lastSyncRaw, 10);
+    q = query(
+      collectionRef,
+      where('updatedAt', '>', lastSync),
+      orderBy('updatedAt'),
+    );
+  } else {
+    q = collectionRef;
+  }
+
+  const snapshot = await getDocs(q);
+  const changed = snapshot.docs.map((d) => d.data() as Transaction);
+
+  const byId = new Map(cached.map((t) => [t.id, t]));
+  for (const tx of changed) {
+    if (tx.deleted) {
+      byId.delete(tx.id);
+    } else {
+      byId.set(tx.id, tx);
+    }
+  }
+
+  const merged = migrateTransactions(Array.from(byId.values()));
+  localStorage.setItem(getLastTxSyncKey(uid), String(Date.now()));
+  saveTransactionsCache(uid, merged);
+  return merged;
 };
 
 const SESSION_CACHE_VERSION = 'v1';
@@ -830,7 +873,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       batch.set(doc(getIncomeCategoriesCollection(nextUser.uid), category.id), category);
     });
     localState.transactions.forEach((transaction) => {
-      batch.set(doc(getTransactionsCollection(nextUser.uid), transaction.id), transaction);
+      batch.set(doc(getTransactionsCollection(nextUser.uid), transaction.id), {
+        ...transaction,
+        updatedAt: Date.now(),
+      });
     });
     localState.income.forEach((item) => {
       batch.set(doc(getIncomeCollection(nextUser.uid), item.id), item);
@@ -858,11 +904,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     collectionRef: CollectionReference<DocumentData>,
     items: T[],
     existingIds: string[],
+    softDelete = false,
   ) => {
     const operations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
     existingIds.forEach((existingId) => {
       operations.push((batch) => {
-        batch.delete(doc(collectionRef, existingId));
+        if (softDelete) {
+          batch.set(doc(collectionRef, existingId), { deleted: true, updatedAt: Date.now() }, { merge: true });
+        } else {
+          batch.delete(doc(collectionRef, existingId));
+        }
       });
     });
     items.forEach((item) => {
@@ -910,6 +961,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         getTransactionsCollection(uid),
         payload.nextTransactions,
         transactionsRef.current.map((item) => item.id),
+        true,
       ),
       replaceCollection(
         getIncomeCollection(uid),
@@ -963,7 +1015,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
     payload.nextTransactions.forEach((item) => {
       operations.push((batch) => {
-        batch.set(doc(getTransactionsCollection(uid), item.id), item);
+        batch.set(doc(getTransactionsCollection(uid), item.id), {
+          ...item,
+          updatedAt: Date.now(),
+        });
       });
     });
     payload.nextIncome.forEach((item) => {
@@ -1186,32 +1241,28 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     }
 
-    unsubscribers.push(onSnapshot(
-      getTransactionsCollection(uid),
-      (snapshot) => {
-        const nextTransactions = migrateTransactions(snapshot.docs.map((item) => item.data() as Transaction));
-        if (pendingImportRef.current && nextTransactions.length < pendingImportRef.current.transactions) {
+    {
+      const cached = loadTransactionsCache(uid);
+      if (cached.length > 0) {
+        remotePresence.transactions = true;
+        setTransactions(cached);
+        transactionsRef.current = cached;
+      }
+      incrementalTransactionSync(getTransactionsCollection(uid), uid)
+        .then((merged) => {
+          if (pendingImportRef.current && merged.length < pendingImportRef.current.transactions) {
+            loadedState.transactions = true;
+            markLoaded();
+            return;
+          }
+          remotePresence.transactions = merged.length > 0;
+          setTransactions(merged);
+          transactionsRef.current = merged;
           loadedState.transactions = true;
           markLoaded();
-          return;
-        }
-        // Guard against stale snapshots briefly rolling back optimistic import UI.
-        if (
-          Date.now() < ignoreStaleTransactionSnapshotsUntilRef.current &&
-          nextTransactions.length < transactionsRef.current.length
-        ) {
-          loadedState.transactions = true;
-          markLoaded();
-          return;
-        }
-        remotePresence.transactions = nextTransactions.length > 0;
-        setTransactions(nextTransactions);
-        saveTransactionsCache(uid, nextTransactions);
-        loadedState.transactions = true;
-        markLoaded();
-      },
-      (error) => handleSnapshotError("transactions", error)
-    ));
+        })
+        .catch((error) => handleSnapshotError("transactions", error));
+    }
 
     unsubscribers.push(onSnapshot(
       getIncomeCollection(uid),
@@ -1726,7 +1777,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const finalId = id || crypto.randomUUID();
-    await setDoc(doc(getTransactionsCollection(auth.currentUser.uid), finalId), { id: finalId, ...data });
+    await setDoc(doc(getTransactionsCollection(auth.currentUser.uid), finalId), {
+      id: finalId,
+      ...data,
+      updatedAt: Date.now(),
+    });
   };
 
   const upsertIncomeFromSync = async (id: string | null, data: Omit<Income, "id">) => {
@@ -2130,6 +2185,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       id,
       ...data,
       updated_at: getIsoNow(),
+      updatedAt: Date.now(),
     });
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
       void syncGoogleSheets("push").catch(() => undefined);
@@ -2140,12 +2196,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!auth.currentUser) {
       throw new Error("Sign in with Google first.");
     }
-    const snapshot = await getDocs(getTransactionsCollection(auth.currentUser.uid));
-    const nextTransactions = migrateTransactions(snapshot.docs.map((item) => item.data() as Transaction));
-    setTransactions(nextTransactions);
-    transactionsRef.current = nextTransactions;
-    saveTransactionsCache(auth.currentUser.uid, nextTransactions);
-    return nextTransactions.length;
+    const merged = await incrementalTransactionSync(
+      getTransactionsCollection(auth.currentUser.uid),
+      auth.currentUser.uid,
+    );
+    setTransactions(merged);
+    transactionsRef.current = merged;
+    return merged.length;
   }, [getTransactionsCollection]);
 
   const updateTransaction = async (id: string, data: Partial<Transaction>) => {
@@ -2161,6 +2218,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...data,
       id,
       updated_at: getIsoNow(),
+      updatedAt: Date.now(),
     });
     if (googleSheetsAccessToken && sheetsConfigRef.current) {
       void syncGoogleSheets("push").catch(() => undefined);
@@ -2172,7 +2230,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       throw new Error("Sign in with Google first.");
     }
 
-    await deleteDoc(doc(getTransactionsCollection(auth.currentUser.uid), id));
+    await setDoc(doc(getTransactionsCollection(auth.currentUser.uid), id), {
+      deleted: true,
+      updatedAt: Date.now(),
+    }, { merge: true });
   };
 
   const addIncome = async (data: Omit<Income, "id">) => {
@@ -2318,6 +2379,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             recurring_rule_id: rule.id,
             is_recurring_instance: true,
             updated_at: getIsoNow(),
+            updatedAt: Date.now(),
           } satisfies Transaction);
           expenseKeys.add(key);
           generated += 1;
@@ -2791,6 +2853,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         getTransactionsCollection(auth.currentUser.uid),
         [],
         transactionsRef.current.map((item) => item.id),
+        true,
       );
       return;
     }

@@ -43,7 +43,7 @@ const lookupUid = async (idToken: string) => {
   return uid;
 };
 
-const deleteFirestoreTransaction = async (idToken: string, uid: string, id: string) => {
+const softDeleteFirestoreTransaction = async (idToken: string, uid: string, id: string) => {
   const projectId = getProjectId();
   if (!projectId) {
     throw new Error("Missing Firebase project ID.");
@@ -55,14 +55,23 @@ const deleteFirestoreTransaction = async (idToken: string, uid: string, id: stri
   const encodedId = encodePath(id);
   const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/environments/${namespace}/users/${encodedUid}/transactions/${encodedId}`;
   const response = await fetch(url, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${idToken}` },
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      fields: {
+        deleted: { booleanValue: true },
+        updatedAt: { integerValue: Date.now() },
+      },
+    }),
   });
 
   if (response.status === 404) return;
   if (!response.ok) {
     const payload = await response.text().catch(() => "");
-    throw new Error(`Firestore delete failed (${response.status}): ${payload || response.statusText}`);
+    throw new Error(`Firestore soft-delete failed (${response.status}): ${payload || response.statusText}`);
   }
 };
 
@@ -88,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const uid = await lookupUid(idToken);
-    await Promise.all(normalizedIds.map((id) => deleteFirestoreTransaction(idToken, uid, id)));
+    await Promise.all(normalizedIds.map((id) => softDeleteFirestoreTransaction(idToken, uid, id)));
     return res.json({ success: true, deleted: normalizedIds.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to delete duplicate transactions.";

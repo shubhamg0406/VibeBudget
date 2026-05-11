@@ -356,9 +356,11 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     if (mode === "individual") {
       return { ...batch, records: prepared };
     }
-    const consolidated = consolidateForCommit({ ...batch, records: prepared });
-    if (consolidated.records.length === 0) return null;
-    return consolidated;
+    // Category mode: send individual records; the server's toCategoryRows()
+    // handles grouping by date+merchant+category and summing amounts.
+    // Avoid client-side double-consolidation which can collapse records.
+    if (prepared.length === 0) return null;
+    return { ...batch, records: prepared };
   };
 
   const handleCommit = async (mode: "individual" | "category") => {
@@ -402,7 +404,10 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(payload?.error || `Commit OCR failed (${response.status}).`);
+        const detail = payload?.error
+          ? `${payload.error}${payload.details ? ` — ${payload.details}` : ""}`
+          : `Commit OCR failed (${response.status})`;
+        throw new Error(detail);
       }
       const summary = {
         imported: Number(payload?.imported || 0),
