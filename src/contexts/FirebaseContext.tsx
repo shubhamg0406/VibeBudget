@@ -12,6 +12,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   setDoc,
   Unsubscribe,
@@ -442,6 +443,7 @@ export interface FirebaseContextType {
   addTransaction: (data: Omit<Transaction, "id">) => Promise<void>;
   updateTransaction: (id: string, data: Partial<Transaction>) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
+  refreshTransactionsNow: () => Promise<number>;
   addIncome: (data: Omit<Income, "id">) => Promise<void>;
   updateIncome: (id: string, data: Partial<Income>) => Promise<void>;
   deleteIncome: (id: string) => Promise<void>;
@@ -2074,6 +2076,18 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const refreshTransactionsNow = useCallback(async (): Promise<number> => {
+    if (!auth.currentUser) {
+      throw new Error("Sign in with Google first.");
+    }
+    const snapshot = await getDocs(getTransactionsCollection(auth.currentUser.uid));
+    const nextTransactions = migrateTransactions(snapshot.docs.map((item) => item.data() as Transaction));
+    setTransactions(nextTransactions);
+    transactionsRef.current = nextTransactions;
+    saveTransactionsCache(auth.currentUser.uid, nextTransactions);
+    return nextTransactions.length;
+  }, [getTransactionsCollection]);
+
   const updateTransaction = async (id: string, data: Partial<Transaction>) => {
     if (!auth.currentUser) {
       throw new Error("Sign in with Google first.");
@@ -3176,6 +3190,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         signIn,
         logout,
         addTransaction,
+        refreshTransactionsNow,
         updateTransaction,
         deleteTransaction,
         addIncome,

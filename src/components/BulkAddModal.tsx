@@ -60,7 +60,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
   onClose,
   onRefresh,
 }) => {
-  const { user, previewImport, aiConfig } = useFirebase();
+  const { user, previewImport, aiConfig, refreshTransactionsNow } = useFirebase();
   const [files, setFiles] = useState<File[]>([]);
   const [targetType, setTargetType] = useState<"expenses" | "income">("expenses");
   const [extracting, setExtracting] = useState(false);
@@ -398,6 +398,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
         skipped: 0,
         invalid: 0,
       };
+      await refreshTransactionsNow();
       const historyEntry = {
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
