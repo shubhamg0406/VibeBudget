@@ -53,7 +53,7 @@ const softDeleteFirestoreTransaction = async (idToken: string, uid: string, id: 
   const namespace = encodePath(getDataNamespace());
   const encodedUid = encodePath(uid);
   const encodedId = encodePath(id);
-  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/environments/${namespace}/users/${encodedUid}/transactions/${encodedId}`;
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/environments/${namespace}/users/${encodedUid}/transactions/${encodedId}?updateMask.fieldPaths=deleted&updateMask.fieldPaths=updatedAt`;
   const response = await fetch(url, {
     method: "PATCH",
     headers: {
