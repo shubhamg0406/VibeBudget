@@ -4,10 +4,78 @@ VibeBudget's philosophy is **bring your own key (BYOK)**. Every paid or quota-se
 
 This guide covers:
 
+- [Firebase](#firebase) — Authentication, Firestore, Admin
 - [AI Providers](#ai-providers) — Gemini, DeepSeek
 - [Google Workspace](#google-workspace) — Auth, Drive, Sheets
 - [Plaid](#plaid) — Bank feed via Plaid
 - [Teller](#teller) — Bank feed via Teller
+
+---
+
+## Firebase
+
+Firebase powers authentication and data storage for VibeBudget. You bring your own Firebase project whether you self-host or use the browser setup flow.
+
+### What You Need
+
+- A [Google Cloud Platform](https://console.cloud.google.com) project with Firebase enabled
+- **Authentication** → Google provider enabled
+- **Firestore Database** — created in your preferred region
+- **Firebase Web App** configured in Project Settings → General → Your apps
+
+### Browser-Visible Env Vars
+
+These six `VITE_FIREBASE_*` values are bundled into the frontend. They are public by design:
+
+| Variable | Source |
+|----------|--------|
+| `VITE_FIREBASE_API_KEY` | Firebase Web App Config → `apiKey` |
+| `VITE_FIREBASE_AUTH_DOMAIN` | `{project_id}.firebaseapp.com` |
+| `VITE_FIREBASE_PROJECT_ID` | Firebase Project ID |
+| `VITE_FIREBASE_STORAGE_BUCKET` | `{project_id}.firebasestorage.app` |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | Firebase Web App Config → `messagingSenderId` |
+| `VITE_FIREBASE_APP_ID` | Firebase Web App Config → `appId` |
+
+### Server-Only Firebase Admin Env Vars
+
+These are used by server-side features (AI chat, OCR) and must never be exposed to the browser:
+
+- `FIREBASE_ADMIN_CREDENTIALS_JSON` — Full service account JSON
+- `FIREBASE_ADMIN_CREDENTIALS_PATH` — Path to service account JSON file (local dev)
+- `FIREBASE_PROJECT_ID` + `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` — Alternative individual fields
+
+### Setup Methods
+
+**Method 1 — Environment Variables (recommended for production):**
+Set all six `VITE_FIREBASE_*` values in `.env.local` or Vercel env vars. Firebase initializes on app load.
+
+**Method 2 — Browser Setup (no env vars required):**
+If `VITE_FIREBASE_*` values are missing, the app shows a setup form. Enter your Firebase web app config once, and it is saved to `localStorage`. No env vars needed to render.
+
+**Method 3 — Self-Host Owner Flow:**
+After signing in with your self-hosted Firebase, claim owner status via the setup UI. Then configure server secrets (Firebase Admin credentials, Gemini API key) through the browser. Secrets are stored server-side in SQLite.
+
+### Common Failure States
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `Missing Firebase environment variables` | `VITE_FIREBASE_*` env vars not set, no browser config saved | Set env vars or use the browser setup form |
+| `auth/unauthorized-domain` | Domain not in Firebase Auth authorized domains | Add domain in Firebase Console → Authentication → Settings |
+| `Missing or insufficient permissions` | Firestore rules not deployed | Run `firebase deploy --only firestore:rules` |
+| Data not visible after sign-in | Namespace mismatch | Check `VITE_FIREBASE_DATA_NAMESPACE` vs where data exists in Firestore |
+| AI chat returns 500 | Firebase Admin credentials missing | Set `FIREBASE_ADMIN_CREDENTIALS_JSON` or configure via owner flow |
+
+### Setup Checklist
+
+- [ ] Enable Google Authentication in Firebase Console
+- [ ] Create Firestore database
+- [ ] Add `localhost` and your domain to Authorized domains
+- [ ] Copy six Firebase web app config values
+- [ ] Set `VITE_FIREBASE_DATA_NAMESPACE` (e.g., `local-dev`, `staging`, `prod`)
+- [ ] Deploy `firestore.rules` for production
+- [ ] Configure Firebase Admin credentials for server features
+
+For full Firebase setup details, see the [Self-Hosting Guide](self-hosting.md).
 
 ---
 

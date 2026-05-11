@@ -47,12 +47,37 @@ Tips:
 
 For the product direction, hosted/self-hosted strategy, and engineering baselines, see [VibeBudget North Star + Strategy](docs/north-star-strategy.md). For execution sequencing, see [VibeBudget Roadmap](docs/roadmap.md).
 
+## Setup Modes
+
+VibeBudget supports three setup modes:
+
+| Mode | Description | For Whom |
+|------|-------------|----------|
+| **Hosted** | Managed at [vibebudget-chi.vercel.app](https://vibebudget-chi.vercel.app) — sign in and go | Users who want the fastest start |
+| **Self-Hosted** | Your own Firebase + Vercel deployment | Users who want full control |
+| **Local Dev** | `npm run dev` with `.env.local` | Developers and contributors |
+
+See [Setup Modes](docs/setup-modes.md) for a detailed comparison, [Hosted vs Self-Hosted](docs/hosted-vs-self-hosted.md) for tradeoffs, and [Getting Started](docs/getting-started.md) for the first-run flow.
+
+### Bring Your Own Firebase
+
+VibeBudget lets you use your own Firebase project even without env vars. Enter your Firebase web app config in the browser setup form, and it is saved to `localStorage`. You can reset it from the setup UI at any time.
+
+- [Firebase Provider Guide](docs/byok-provider-setup.md#firebase) — setup checklist and common errors
+- [Security & Privacy](docs/security-privacy.md) — how Firebase config and secrets are handled
+- [Self-Hosting Guide](docs/self-hosting.md#dynamic-browser-setup-flow) — browser setup flow details
+
 ## Guides & Documentation
 
 | Guide | Description |
 |---|---|
+| [Docs Index](docs/README.md) | Full documentation index |
+| [Getting Started](docs/getting-started.md) | First-run walkthrough for all modes |
+| [Setup Modes](docs/setup-modes.md) | Local dev, self-hosted, hosted, and BYO Firebase |
+| [Hosted vs Self-Hosted](docs/hosted-vs-self-hosted.md) | Practical tradeoffs and recommendations |
 | [Self-Hosting Guide](docs/self-hosting.md) | Full self-hosting setup: Firebase, Vercel, namespaces, security |
-| [BYOK Provider Setup](docs/byok-provider-setup.md) | Setup for AI, Google Workspace, Plaid, and Teller providers |
+| [BYOK Provider Setup](docs/byok-provider-setup.md) | Setup for Firebase, AI, Google Workspace, Plaid, and Teller |
+| [Security & Privacy](docs/security-privacy.md) | Data handling, credential storage, self-owned Firebase model |
 | [Troubleshooting Guide](docs/troubleshooting.md) | Common issues: auth, Firestore, deploy, providers |
 | [North Star Strategy](docs/north-star-strategy.md) | Product vision, positioning, and engineering baselines |
 | [Roadmap](docs/roadmap.md) | Execution phases and priorities |

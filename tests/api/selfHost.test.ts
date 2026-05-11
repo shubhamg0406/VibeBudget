@@ -267,4 +267,66 @@ describe("self-host api", () => {
       expect(row?.value).toBe("sqlite-gemini-key");
     });
   });
+
+  describe("GET /api/setup/status", () => {
+    it("returns setup status with defaults", async () => {
+      const res = await request(app).get("/api/setup/status");
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("mode");
+      expect(res.body).toHaveProperty("app");
+      expect(res.body).toHaveProperty("firebase");
+      expect(res.body).toHaveProperty("firebaseAdmin");
+      expect(res.body).toHaveProperty("selfHost");
+      expect(res.body).toHaveProperty("ai");
+      expect(res.body).toHaveProperty("features");
+    });
+
+    it("detects self-host mode when env vars are present", async () => {
+      process.env.VITE_FIREBASE_API_KEY = "test-api-key";
+      process.env.VITE_FIREBASE_AUTH_DOMAIN = "test.firebaseapp.com";
+      process.env.VITE_FIREBASE_PROJECT_ID = "test-project";
+
+      const res = await request(app).get("/api/setup/status");
+      expect(res.status).toBe(200);
+      expect(res.body.firebase.configured).toBe(true);
+      expect(res.body.firebase.projectId).toBe("test-project");
+
+      delete process.env.VITE_FIREBASE_API_KEY;
+      delete process.env.VITE_FIREBASE_AUTH_DOMAIN;
+      delete process.env.VITE_FIREBASE_PROJECT_ID;
+    });
+
+    it("detects Firebase Admin configured", async () => {
+      process.env.FIREBASE_ADMIN_CREDENTIALS_JSON = '{"type":"service_account","project_id":"test"}';
+
+      const res = await request(app).get("/api/setup/status");
+      expect(res.status).toBe(200);
+      expect(res.body.firebaseAdmin.configured).toBe(true);
+      expect(res.body.firebaseAdmin.hasCredentialsJson).toBe(true);
+
+      delete process.env.FIREBASE_ADMIN_CREDENTIALS_JSON;
+    });
+
+    it("reports firebaseAdmin not configured when no credentials", async () => {
+      delete process.env.FIREBASE_ADMIN_CREDENTIALS_JSON;
+
+      const res = await request(app).get("/api/setup/status");
+      expect(res.status).toBe(200);
+      expect(res.body.firebaseAdmin.configured).toBe(false);
+    });
+
+    it("reports features based on config", async () => {
+      process.env.VITE_FIREBASE_API_KEY = "test-api-key";
+      process.env.VITE_FIREBASE_AUTH_DOMAIN = "test.firebaseapp.com";
+
+      const res = await request(app).get("/api/setup/status");
+      expect(res.status).toBe(200);
+      expect(res.body.features.firebaseAuth).toBe(true);
+      expect(res.body.features.firebaseAdmin).toBe(false);
+      expect(res.body.features.selfHostedSetup).toBe(true);
+
+      delete process.env.VITE_FIREBASE_API_KEY;
+      delete process.env.VITE_FIREBASE_AUTH_DOMAIN;
+    });
+  });
 });

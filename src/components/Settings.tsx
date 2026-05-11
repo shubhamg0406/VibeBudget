@@ -59,7 +59,9 @@ interface SettingsProps {
   initialTab?: SettingsTab;
 }
 
-export type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai";
+import { SetupStatus } from "./SetupStatus";
+
+export type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai" | "setup";
 type RangeDraft = SheetRangeDraft;
 type MappingTab = "expenses" | "income" | "expense_categories" | "income_categories" | "sync";
 type StatusLevel = "success" | "info" | "warning" | "error";
@@ -2143,6 +2145,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
         <button onClick={() => setActiveTab("finance_feeds")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "finance_feeds" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>3. Finance Feeds</button>
         <button onClick={() => setActiveTab("maintenance")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>4. Maintenance</button>
         <button onClick={() => setActiveTab("ai")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "ai" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>5. AI</button>
+        <button onClick={() => setActiveTab("setup")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "setup" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>6. Setup</button>
 
       </div>
 
@@ -3141,6 +3144,14 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           </section>
         )}
       </div>
+
+        {activeTab === "setup" && (
+          <section className="space-y-5">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Database size={16} className="text-fintech-accent" /> Setup Status</div>
+            <p className="text-xs text-fintech-muted">Diagnostics overview for Firebase, server secrets, and feature availability. All values are public-safe — no secrets exposed.</p>
+            <SetupStatus />
+          </section>
+        )}
 
       <footer className="py-8 text-center">
         <p className="text-[10px] uppercase tracking-[0.2em] text-fintech-muted">VibeBudget v1.0.0</p>

@@ -45,6 +45,52 @@ Common issues when running or deploying VibeBudget.
 
 ---
 
+## Firebase Setup / Diagnostics
+
+### Self-host setup form does not appear
+
+**Symptom:** The app loads but shows a blank page or Firebase error instead of the setup form.
+
+**Cause:** Env vars may be partially set. The app checks for all six `VITE_FIREBASE_*` vars — if any are present but incomplete, setup form may not trigger.
+
+**Fix:**
+- Remove all `VITE_FIREBASE_*` env vars to force the browser setup form
+- Or set all six vars correctly for env-var mode
+- Check `localStorage` for `vibebudgetSelfHostConfig` — clear it if corrupted
+
+### "Failed to initialize Firebase. Check your config values."
+
+**Symptom:** After entering Firebase config in the browser setup form, the app shows this error.
+
+**Cause:** One or more config values are incorrect — wrong project ID, malformed API key, or a deleted Firebase project.
+
+**Fix:**
+- Double-check each value against Firebase Console → Project Settings → Web App
+- Ensure the Firebase project is not deleted or disabled
+- Verify your API key restrictions in GCP Console (if restricted, ensure your domain is allowed)
+
+### Firebase initialized but sign-in redirects back to logged-out state
+
+**Symptom:** Google sign-in popup succeeds but the page refreshes to the logged-out view.
+
+**Cause:** Firebase Auth persistence issue, or the auth domain is misconfigured.
+
+**Fix:**
+- Verify `VITE_FIREBASE_AUTH_DOMAIN` matches the Firebase project's auth domain exactly
+- Clear `localStorage` and re-authenticate
+- Check that the OAuth client ID in Firebase matches the one in GCP OAuth credentials
+
+### Setup diagnostics shows "Not configured" for Firebase Admin
+
+**Symptom:** The Setup Status panel in Settings shows Firebase Admin as not configured, even though you entered credentials in the browser setup.
+
+**Cause:** The Express server could not read the secrets from SQLite, or the env vars are not set on the server.
+
+**Fix:**
+- If using env vars: ensure `FIREBASE_ADMIN_CREDENTIALS_JSON` is set in the server environment
+- If using browser setup: verify the owner claim step completed successfully, then re-save secrets
+- **Vercel note:** The browser setup flow stores secrets in SQLite on the Express server. Vercel serverless functions cannot read this database. Use Vercel env vars instead.
+
 ## Firebase Env/Config Failures
 
 ### App crashes on load: "Missing Firebase environment variables"
@@ -513,9 +559,11 @@ kill -9 <PID>
 ## Quick Reference: Where to Check
 
 | Issue | Check First | Second |
-|---|---|---|
+|---|---|---|---|
 | Google sign-in | Firebase Console → Auth → Authorized domains | Browser console for error codes |
 | Firebase env errors | `.env.local` or Vercel env vars | `src/firebase.ts` validation |
+| Setup form not appearing | `localStorage` → `vibebudgetSelfHostConfig` | Remove all `VITE_FIREBASE_*` env vars |
+| Setup diagnostics | Settings → Setup Status tab | `GET /api/setup/status` |
 | Firestore permissions | Deployed `firestore.rules` | Firestore Console → Rules tab |
 | Data not visible | Namespace: check `VITE_FIREBASE_DATA_NAMESPACE` | Firestore Console → data path |
 | Service account | GCP IAM → Service Accounts → keys | Vercel env vars |

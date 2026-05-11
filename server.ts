@@ -338,6 +338,51 @@ export const createApp = async ({
     return { isOwner: identity.uid === ownerUid, uid: identity.uid, verified: identity.verified };
   };
 
+  app.get("/api/setup/status", (_req, res) => {
+    const hasEnvFirebase = !!(process.env.VITE_FIREBASE_API_KEY && process.env.VITE_FIREBASE_AUTH_DOMAIN);
+    const hasStoredConfig = false; // Can't read localStorage from server
+    const adminJson = process.env.FIREBASE_ADMIN_CREDENTIALS_JSON || resolveSelfHostSecret("FIREBASE_ADMIN_CREDENTIALS_JSON");
+    const geminiKey = process.env.GEMINI_API_KEY || resolveSelfHostSecret("GEMINI_API_KEY");
+    const geminiModel = process.env.GEMINI_MODEL || resolveSelfHostSecret("GEMINI_MODEL");
+    const namespace = process.env.VITE_FIREBASE_DATA_NAMESPACE || process.env.FIREBASE_DATA_NAMESPACE || "unknown";
+    const ownerExists = !!getOwnerUid();
+    const isProd = process.env.NODE_ENV === "production" && namespace === "prod";
+
+    res.json({
+      mode: isProd ? "hosted" : (hasEnvFirebase || hasStoredConfig ? "self-hosted" : "local"),
+      app: {
+        nodeEnv: process.env.NODE_ENV || "development",
+        namespace,
+      },
+      firebase: {
+        configured: hasEnvFirebase,
+        projectId: process.env.VITE_FIREBASE_PROJECT_ID || null,
+        authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || null,
+        storageBucketConfigured: !!process.env.VITE_FIREBASE_STORAGE_BUCKET,
+      },
+      firebaseAdmin: {
+        configured: !!adminJson,
+        hasCredentialsJson: !!adminJson,
+      },
+      selfHost: {
+        ownerExists,
+        secretsConfigured: !!(adminJson || geminiKey),
+      },
+      ai: {
+        serverKeyConfigured: !!geminiKey,
+        modelConfigured: !!geminiModel,
+        model: geminiModel || null,
+      },
+      features: {
+        firebaseAuth: hasEnvFirebase || hasStoredConfig,
+        firebaseAdmin: !!adminJson,
+        aiChat: !!geminiKey,
+        selfHostedSetup: true,
+        ownerClaim: !ownerExists,
+      },
+    });
+  });
+
   app.get("/api/self-host/status", async (req, res) => {
     const ownerUidVal = getOwnerUid();
     const ownerEmail = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("owner_email") as { value: string } | undefined;
