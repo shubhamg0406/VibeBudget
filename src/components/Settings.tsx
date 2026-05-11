@@ -2141,10 +2141,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       <nav className="flex w-full overflow-x-auto rounded-2xl border bg-[var(--app-ghost)] p-1.5 gap-1" style={{ borderColor: "var(--app-border)" }}>
         {([
           { id: "data",             icon: <FolderOpen size={14} />, label: "Data" },
+          { id: "google_workspace", icon: <Cloud size={14} />,      label: "Connections" },
           { id: "categories",       icon: <Banknote size={14} />,   label: "Categories" },
           { id: "finance_feeds",    icon: <Link2 size={14} />,      label: "Bank Feeds" },
           { id: "currency",         icon: <Globe size={14} />,      label: "Currency" },
-          { id: "google_workspace", icon: <Cloud size={14} />,      label: "Connections" },
           { id: "ai",               icon: <Sparkles size={14} />,   label: "AI" },
           { id: "setup",            icon: <Database size={14} />,   label: "Setup" },
           { id: "maintenance",      icon: <Shield size={14} />,     label: "Maintenance" },
