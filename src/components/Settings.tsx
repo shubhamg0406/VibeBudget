@@ -306,8 +306,6 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     }
   }, [initialTab]);
 
-  const [showGoogleWorkspaceInDataHub, setShowGoogleWorkspaceInDataHub] = useState(false);
-  const [googleWorkspaceModalTab, setGoogleWorkspaceModalTab] = useState<"sheets" | "drive">("sheets");
   const [aiProvider, setAiProvider] = useState<AiProvider>(aiConfig?.provider || "gemini");
   const [aiModel, setAiModel] = useState(aiConfig?.model || AI_PROVIDER_DEFAULT_MODEL.gemini);
   const [aiApiKey, setAiApiKey] = useState(aiConfig?.apiKey || "");
@@ -2134,38 +2132,52 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
         )}
       </AnimatePresence>
 
-      <header className="space-y-2">
+      <header className="space-y-1">
         <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
-        <p className="text-sm text-fintech-muted">Budget controls organized by imports, live sync, currency, bank feeds, and safety actions.</p>
+        <p className="text-sm text-fintech-muted">Data, connections, currency, bank feeds, and maintenance tools.</p>
       </header>
 
-      <div className="flex w-fit flex-wrap gap-2 rounded-xl border bg-[var(--app-ghost)] p-1" style={{ borderColor: "var(--app-border)" }}>
-        <button onClick={() => setActiveTab("data")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "data" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>1. Data Hub</button>
-        <button onClick={() => setActiveTab("currency")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "currency" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>2. Currency</button>
-        <button onClick={() => setActiveTab("finance_feeds")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "finance_feeds" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>3. Finance Feeds</button>
-        <button onClick={() => setActiveTab("maintenance")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>4. Maintenance</button>
-        <button onClick={() => setActiveTab("ai")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "ai" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>5. AI</button>
-        <button onClick={() => setActiveTab("setup")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "setup" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>6. Setup</button>
-
-      </div>
+      <nav className="flex w-full overflow-x-auto rounded-2xl border bg-[var(--app-ghost)] p-1.5 gap-1" style={{ borderColor: "var(--app-border)" }}>
+        {([
+          { id: "data", icon: <FolderOpen size={14} />, label: "Data" },
+          { id: "currency", icon: <Globe size={14} />, label: "Currency" },
+          { id: "google_workspace", icon: <Cloud size={14} />, label: "Connections" },
+          { id: "finance_feeds", icon: <Banknote size={14} />, label: "Bank Feeds" },
+          { id: "ai", icon: <Sparkles size={14} />, label: "AI" },
+          { id: "maintenance", icon: <Shield size={14} />, label: "Maintenance" },
+          { id: "setup", icon: <Database size={14} />, label: "Setup" },
+        ] as { id: SettingsTab; icon: React.ReactNode; label: string }[]).map(({ id, icon, label }) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`flex flex-1 min-w-fit items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold whitespace-nowrap transition-colors ${
+              activeTab === id
+                ? "bg-[var(--app-panel)] text-[var(--app-text)] shadow-sm"
+                : "text-fintech-muted hover:text-[var(--app-text)]"
+            }`}
+          >
+            {icon}
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
 
       <div className="space-y-6">
         {activeTab === "data" && (
           <>
             <ImpExCenter
               onRefresh={onRefresh}
-              onNavigateToConnections={() => {
-                setGoogleWorkspaceModalTab("sheets");
-                setShowGoogleWorkspaceInDataHub(true);
-              }}
+              onNavigateToConnections={() => setActiveTab("google_workspace")}
             />
           </>
         )}
 
         {activeTab === "currency" && (
           <section className="space-y-5">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Globe size={16} className="text-fintech-accent" /> Currency</div>
-            <p className="text-xs text-fintech-muted">Primary currency defines all budget rollups. FX rates cover non-base transactions.</p>
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-bold"><Globe size={18} className="text-fintech-accent" /> Currency</h2>
+              <p className="text-sm text-fintech-muted">Primary currency defines all budget rollups. FX rates cover non-base transactions.</p>
+            </div>
             {renderStatusStrip("currency")}
 
             {(missingCoverageCurrencies.length > 0 || staleCurrencies.length > 0) && (
@@ -2299,55 +2311,22 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           </section>
         )}
 
-        {(activeTab === "google_workspace" || (activeTab === "data" && showGoogleWorkspaceInDataHub)) && (
-          <section
-            className={activeTab === "data" ? "fixed inset-0 z-[130] flex items-start justify-center overflow-y-auto p-6 backdrop-blur-sm" : ""}
-            style={activeTab === "data" ? { backgroundColor: "var(--app-overlay)" } : undefined}
-          >
-            <div className={activeTab === "data" ? "w-full max-w-6xl space-y-5 rounded-2xl border bg-[var(--app-shell)] p-5" : "space-y-5"} style={activeTab === "data" ? { borderColor: "var(--app-border)" } : undefined}>
-            {activeTab === "data" && (
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold">Google Management</h3>
-                <button
-                  type="button"
-                  onClick={() => setShowGoogleWorkspaceInDataHub(false)}
-                  className="rounded-lg bg-[var(--app-ghost)] px-3 py-1.5 text-xs font-bold text-fintech-muted hover:bg-[var(--app-border)]"
-                >
-                  Close
-                </button>
-              </div>
-            )}
-            {activeTab === "data" && (
-              <div className="flex w-fit gap-1 rounded-lg bg-[var(--app-ghost)] p-1">
-                <button
-                  type="button"
-                  onClick={() => setGoogleWorkspaceModalTab("sheets")}
-                  className={`rounded-md px-3 py-1.5 text-xs font-bold ${googleWorkspaceModalTab === "sheets" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}
-                >
-                  Google Sheets
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGoogleWorkspaceModalTab("drive")}
-                  className={`rounded-md px-3 py-1.5 text-xs font-bold ${googleWorkspaceModalTab === "drive" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}
-                >
-                  Google Drive
-                </button>
-              </div>
-            )}
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Cloud size={16} className="text-fintech-accent" /> Google Workspace</div>
-            <p className="text-xs text-fintech-muted">Mapping-first pull flow: connect Google, pick your sheet from Drive, map your columns, then pull data.</p>
+        {activeTab === "google_workspace" && (
+          <section className="space-y-5">
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-bold"><Cloud size={18} className="text-fintech-accent" /> Connections</h2>
+              <p className="text-sm text-fintech-muted">Connect Google Sheets for data sync and Google Drive for cloud backups.</p>
+            </div>
             {renderStatusStrip("google_workspace")}
 
             {/* Stage Indicator */}
             <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-[var(--app-panel)] px-4 py-3 text-xs" style={{ borderColor: "var(--app-border)" }}>
-              <span className="font-semibold text-fintech-muted">Status:</span>
+              <span className="font-semibold text-fintech-muted">Sheets status:</span>
               <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold ${googleSheetsStage.bg} ${googleSheetsStage.color}`}>
                 {googleSheetsStage.label}
               </span>
             </div>
 
-            {(activeTab !== "data" || googleWorkspaceModalTab === "sheets") && (
             <>
             {/* Step 1: Connect Google Sheets */}
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
@@ -2763,13 +2742,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
               </div>
             </details>
             </>
-            )}
 
             {/* Section B — Drive Backup Vault */}
-            {(activeTab !== "data" || googleWorkspaceModalTab === "drive") && (
             <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
               <div className="mb-4 flex items-center gap-2">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-fintech-accent/10 text-[10px] font-bold text-fintech-accent">B</span>
                 <h3 className="font-bold">Drive Backup Vault</h3>
               </div>
               <p className="mb-3 text-xs text-fintech-muted">Optional cloud backup uses one VibeBudget folder in Google Drive. It backs up data + preferences only; bank credentials are never included.</p>
@@ -2790,15 +2766,15 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                 {driveConnection?.lastRestoreAt && <p className="text-[11px] text-fintech-muted">Last restore: {new Date(driveConnection.lastRestoreAt).toLocaleString()}</p>}
               </div>
             </div>
-            )}
-            </div>
           </section>
         )}
 
         {activeTab === "finance_feeds" && (
           <section className="space-y-5">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Banknote size={16} className="text-fintech-accent" /> Finance Feeds</div>
-            <p className="text-xs text-fintech-muted">Log transactions from bank feeds. Credentials are session-only and never saved to Firestore or Drive backups.</p>
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-bold"><Banknote size={18} className="text-fintech-accent" /> Bank Feeds</h2>
+              <p className="text-sm text-fintech-muted">Log transactions from bank feeds. Credentials are session-only and never saved to Firestore or Drive backups.</p>
+            </div>
             {renderStatusStrip("finance_feeds")}
 
             {/* ─── Plaid ─── */}
@@ -2963,8 +2939,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
         {activeTab === "maintenance" && (
           <section className="space-y-5">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Shield size={16} className="text-fintech-accent" /> Maintenance</div>
-            <p className="text-xs text-fintech-muted">Operational safety tools and scoped destructive actions only.</p>
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-bold"><Shield size={18} className="text-fintech-accent" /> Maintenance</h2>
+              <p className="text-sm text-fintech-muted">Operational safety tools and scoped destructive actions only.</p>
+            </div>
             {renderStatusStrip("maintenance")}
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -3012,8 +2990,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
         {activeTab === "ai" && (
           <section className="space-y-5">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Sparkles size={16} className="text-fintech-accent" /> AI Provider</div>
-            <p className="text-xs text-fintech-muted">Configure which AI provider powers the OCR import and budget assistant features.</p>
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-bold"><Sparkles size={18} className="text-fintech-accent" /> AI Provider</h2>
+              <p className="text-sm text-fintech-muted">Configure which AI provider powers the OCR import and budget assistant features.</p>
+            </div>
 
             {aiMessage && (
               <div className="rounded-lg bg-[var(--app-ghost)] px-4 py-3 text-xs text-fintech-muted">{aiMessage}</div>
@@ -3143,15 +3123,17 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
             </div>
           </section>
         )}
-      </div>
 
         {activeTab === "setup" && (
           <section className="space-y-5">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted"><Database size={16} className="text-fintech-accent" /> Setup Status</div>
-            <p className="text-xs text-fintech-muted">Diagnostics overview for Firebase, server secrets, and feature availability. All values are public-safe — no secrets exposed.</p>
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-bold"><Database size={18} className="text-fintech-accent" /> Setup Status</h2>
+              <p className="text-sm text-fintech-muted">Diagnostics overview for Firebase, server secrets, and feature availability. All values are public-safe — no secrets exposed.</p>
+            </div>
             <SetupStatus />
           </section>
         )}
+      </div>
 
       <footer className="py-8 text-center">
         <p className="text-[10px] uppercase tracking-[0.2em] text-fintech-muted">VibeBudget v1.0.0</p>
