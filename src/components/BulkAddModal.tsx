@@ -29,6 +29,16 @@ interface BulkAddModalProps {
   onRefresh: () => void;
 }
 
+interface OcrMeta {
+  pre_tax_amount?: number;
+  tax_amount?: number;
+  taxable?: boolean;
+  receipt_tax_total?: number;
+  receipt_subtotal?: number;
+  source_file?: string;
+  page?: number;
+}
+
 const STATUS_STYLES: Record<ImportRecordStatus, string> = {
   new: "bg-fintech-accent/10 text-fintech-accent",
   duplicate: "bg-[var(--app-ghost)] text-fintech-muted",
@@ -115,6 +125,79 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
         warnings,
         status,
         confidence,
+      });
+    });
+
+    // Deterministic tax allocator:
+    // If receipt-level tax exists, allocate only across taxable groups.
+    const receiptGroups = new Map<string, ImportRecord[]>();
+    consolidated.forEach((record) => {
+      if (record.kind !== "expense") return;
+      const sourceFile = getSourceFileFromRawDescription(record.raw_description);
+      const receiptKey = [
+        sourceFile || "",
+        record.date || "",
+        (record.merchant || "").toLowerCase(),
+      ].join("|");
+      if (!receiptGroups.has(receiptKey)) receiptGroups.set(receiptKey, []);
+      receiptGroups.get(receiptKey)?.push(record);
+    });
+
+    receiptGroups.forEach((records) => {
+      const metas = records.map((record) => {
+        const raw = record.raw_payload && typeof record.raw_payload === "object"
+          ? record.raw_payload as { __meta?: OcrMeta }
+          : undefined;
+        return raw?.__meta;
+      });
+      const receiptTaxTotal = Math.max(
+        0,
+        ...metas.map((meta) => (typeof meta?.receipt_tax_total === "number" ? meta.receipt_tax_total : 0)),
+      );
+      if (receiptTaxTotal <= 0) return;
+
+      const preTax = new Map<string, number>();
+      const explicitTax = new Map<string, number>();
+      const taxable = new Map<string, boolean>();
+
+      records.forEach((record) => {
+        const raw = record.raw_payload && typeof record.raw_payload === "object"
+          ? record.raw_payload as { __meta?: OcrMeta }
+          : undefined;
+        const meta = raw?.__meta;
+        const preTaxAmount = typeof meta?.pre_tax_amount === "number" ? meta.pre_tax_amount : record.amount || 0;
+        const explicitTaxAmount = typeof meta?.tax_amount === "number" ? meta.tax_amount : 0;
+        preTax.set(record.id, (preTax.get(record.id) || 0) + Math.max(0, preTaxAmount));
+        explicitTax.set(record.id, (explicitTax.get(record.id) || 0) + Math.max(0, explicitTaxAmount));
+        taxable.set(record.id, meta?.taxable !== false);
+      });
+
+      const totalExplicitTax = Array.from(explicitTax.values()).reduce((sum, value) => sum + value, 0);
+      const remainingTax = Math.max(0, receiptTaxTotal - totalExplicitTax);
+      const taxableIds = records.filter((record) => taxable.get(record.id)).map((record) => record.id);
+      const taxableBase = taxableIds.reduce((sum, id) => sum + (preTax.get(id) || 0), 0);
+
+      let allocatedRunning = 0;
+      const lastTaxableId = taxableIds[taxableIds.length - 1];
+      records.forEach((record) => {
+        const basePreTax = preTax.get(record.id) || 0;
+        const baseExplicitTax = explicitTax.get(record.id) || 0;
+        let allocated = baseExplicitTax;
+        if (taxable.get(record.id) && taxableBase > 0) {
+          const share = (basePreTax / taxableBase) * remainingTax;
+          const rounded = Number(share.toFixed(2));
+          allocated += rounded;
+          allocatedRunning += rounded;
+          if (record.id === lastTaxableId) {
+            const drift = Number((remainingTax - allocatedRunning).toFixed(2));
+            allocated += drift;
+          }
+        }
+        const total = Number((basePreTax + allocated).toFixed(2));
+        record.amount = total;
+        const existingNotes = (record.notes || "").trim();
+        const taxNote = `pre-tax ${basePreTax.toFixed(2)}, tax ${allocated.toFixed(2)}`;
+        record.notes = existingNotes ? `${existingNotes}; ${taxNote}` : taxNote;
       });
     });
 
@@ -505,11 +588,12 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                             )}
                           </td>
                           <td className="p-3">
-                            <input
+                            <textarea
                               value={record.notes || ""}
                               onChange={(e) => setRecordNotes(record.id, e.target.value)}
-                              placeholder="Add note"
-                              className="w-full min-w-[220px] rounded-md border bg-[var(--app-ghost)] px-2 py-1 text-xs text-[var(--app-text)]"
+                              placeholder="Edit note"
+                              rows={2}
+                              className="w-full min-w-[220px] resize-y rounded-md border bg-[var(--app-ghost)] px-2 py-1 text-xs text-[var(--app-text)] outline-none focus:border-fintech-accent focus:ring-1 focus:ring-fintech-accent/40"
                               style={{ borderColor: "var(--app-border)" }}
                             />
                           </td>

@@ -110,6 +110,11 @@ export interface ExtractedTransactionCandidate {
   amount: number;
   category: string;
   notes: string;
+  pre_tax_amount?: number;
+  tax_amount?: number;
+  taxable?: boolean;
+  receipt_tax_total?: number;
+  receipt_subtotal?: number;
   confidence: number;
   warnings: string[];
   source_file: string;

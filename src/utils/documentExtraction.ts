@@ -62,4 +62,13 @@ export const buildFilePayload = (
     // Include index/category/page/notes to avoid source-id collisions for multi-line receipts.
     __sourceId: `ocr-${c.source_file.replace(/[^a-zA-Z0-9_-]/g, "-")}-${c.date}-${c.merchant}-${c.amount}-${c.category}-${c.page || 0}-${index + 1}`.replace(/[^a-zA-Z0-9_-]/g, "-"),
     __rawDescription: `source_file:${c.source_file} | ${c.notes || ""}`,
+    __meta: {
+      pre_tax_amount: c.pre_tax_amount,
+      tax_amount: c.tax_amount,
+      taxable: c.taxable,
+      receipt_tax_total: c.receipt_tax_total,
+      receipt_subtotal: c.receipt_subtotal,
+      source_file: c.source_file,
+      page: c.page,
+    },
   }));
