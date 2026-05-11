@@ -68,7 +68,9 @@ export const TransactionEntry: React.FC<TransactionEntryProps> = ({
   const [type, setType] = useState<"expense" | "income">(initialData?.type || "expense");
   const [date, setDate] = useState(initialData?.date || getTodayStr());
   const [vendor, setVendor] = useState(initialData?.vendor || initialData?.source || "");
-  const [amount, setAmount] = useState(initialData?.amount?.toString() || "");
+  const [amount, setAmount] = useState(
+    initialData?.amount_formula || initialData?.amount?.toString() || ""
+  );
   const [currency, setCurrency] = useState(initialData?.currency || preferences?.baseCurrency || "CAD");
   const [isAmountFocused, setIsAmountFocused] = useState(false);
   const [categoryId, setCategoryId] = useState(initialData?.category_id?.toString() || "");

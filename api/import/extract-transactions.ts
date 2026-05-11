@@ -77,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const typeHint = targetType === "income" ? "income" : "expense";
   const receiptModeHint = targetType === "income"
     ? "Each file typically represents one income document (pay stub, invoice). Aggregate line items into one row."
-    : "For receipt/invoice images: split into MULTIPLE transactions by spending category whenever line items span categories (for example groceries vs household). Include concise item details in notes per split transaction and include proportional tax in each split amount so totals reconcile.";
+    : "Extract EVERY individual line item as its own separate row — do NOT pre-aggregate or merge any items. Each row gets its own date, merchant (store name, same for all items on same receipt), amount (that line item's price), category (closest match), and notes (item name/description). Distribute tax proportionally across items, or add a separate row labeled 'Tax'. The goal is maximum granularity at extraction time.";
   const providerLabel = aiConfig.provider === "gemini" ? "Gemini" : "DeepSeek";
   const canonicalCategories = INITIAL_CATEGORIES.map((category) => `"${category}"`).join(", ");
 

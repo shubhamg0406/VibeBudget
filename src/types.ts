@@ -17,6 +17,7 @@ export interface Transaction {
   date: string;
   vendor: string;
   amount: number;
+  amount_formula?: string;
   currency?: string;
   category_id: string;
   category_name: string;
@@ -29,6 +30,8 @@ export interface Transaction {
   recurring_rule_id?: string;
   is_recurring_instance?: boolean;
   updated_at?: string;
+  updatedAt?: number;
+  deleted?: boolean;
 }
 
 export interface Income {
