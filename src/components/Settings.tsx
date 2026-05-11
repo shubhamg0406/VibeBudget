@@ -1601,14 +1601,17 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     }));
   };
 
-  const fetchLiveRate = async (currency: string) => {
+  // currentRates lets callers pass the already-updated array when calling
+  // immediately after updatePreferences — avoids stale closure overwriting new entries.
+  const fetchLiveRate = async (currency: string, currentRates?: ExchangeRate[]) => {
     setFetchingLiveRates((prev) => ({ ...prev, [currency]: true }));
     try {
       const res = await fetch(`/api/fx?from=${currency}&to=${baseCurrency}`);
       const data = await res.json() as { rate?: number; error?: string };
       if (!res.ok || !data.rate) throw new Error(data.error || "Rate unavailable");
       if (!updatePreferences) return;
-      const next = exchangeRates.map((r) =>
+      const rates = currentRates ?? exchangeRates;
+      const next = rates.map((r) =>
         r.currency === currency ? { ...r, rateToBase: data.rate!, liveRateUpdatedAt: new Date().toISOString() } : r
       );
       await updatePreferences({ ...preferences, exchangeRates: next });
@@ -1625,16 +1628,17 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     const existing = exchangeRates.find((r) => r.currency === code);
     if (existing) return;
     const newRate: ExchangeRate = { currency: code, rateToBase: 0, mode: "live" };
-    await updatePreferences({ ...preferences, exchangeRates: [...exchangeRates, newRate] });
+    const updatedRates = [...exchangeRates, newRate];
+    await updatePreferences({ ...preferences, exchangeRates: updatedRates });
     setTrackedCurrencies((cur) => Array.from(new Set([...cur, code])));
-    void fetchLiveRate(code);
+    void fetchLiveRate(code, updatedRates);
   };
 
-  const handleSetRateMode = async (currency: string, mode: import("../types").FxRateMode) => {
+  const handleSetRateMode = async (currency: string, mode: FxRateMode) => {
     if (!updatePreferences) return;
     const next = exchangeRates.map((r) => r.currency === currency ? { ...r, mode } : r);
     await updatePreferences({ ...preferences, exchangeRates: next });
-    if (mode === "live") void fetchLiveRate(currency);
+    if (mode === "live") void fetchLiveRate(currency, next);
   };
 
   const handleRemoveRate = async (currency: string) => {
