@@ -20,7 +20,7 @@ import type {
   ExtractTransactionsResponse,
 } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
-import { auth, firebaseDataNamespace } from "../firebase";
+import { auth, firebaseDataNamespace, getStoredFirebaseConfig, getEnvFirebaseConfig } from "../firebase";
 import { extractTransactionsFromFiles, buildFilePayload } from "../utils/documentExtraction";
 
 interface BulkAddModalProps {
@@ -378,12 +378,14 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
           amount: record.amount,
         }));
       const response = await fetch("/api/import/commit-ocr", {
+        // Send exact active Firebase target so server writes to the same dataset the UI reads from.
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "x-firebase-project-id": getStoredFirebaseConfig()?.projectId || getEnvFirebaseConfig()?.projectId || "",
           "x-firebase-namespace": firebaseDataNamespace || "prod",
-          "x-firebase-database-id": import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "(default)",
+          "x-firebase-database-id": getStoredFirebaseConfig()?.firestoreDatabaseId || getEnvFirebaseConfig()?.firestoreDatabaseId || "(default)",
         },
         body: JSON.stringify({ mode, rows, includeDuplicates }),
       });

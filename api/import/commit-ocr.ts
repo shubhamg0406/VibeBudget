@@ -23,7 +23,12 @@ const getEnv = (name: string, fallback?: string) => {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 };
 
-const getProjectId = () => getEnv("FIREBASE_PROJECT_ID", "VITE_FIREBASE_PROJECT_ID");
+const getProjectId = (req?: VercelRequest) => {
+  const headerVal = req?.headers["x-firebase-project-id"];
+  const headerProjectId = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+  if (headerProjectId && headerProjectId.trim()) return headerProjectId.trim();
+  return getEnv("FIREBASE_PROJECT_ID", "VITE_FIREBASE_PROJECT_ID");
+};
 const getApiKey = () => getEnv("FIREBASE_API_KEY", "VITE_FIREBASE_API_KEY");
 const getDatabaseId = (req?: VercelRequest) => {
   const headerVal = req?.headers["x-firebase-database-id"];
@@ -75,7 +80,7 @@ const writeFirestoreDoc = async (
   docId: string,
   fields: Record<string, unknown>
 ) => {
-  const projectId = getProjectId();
+  const projectId = getProjectId(req);
   if (!projectId) throw new Error("Missing Firebase project ID.");
   const databaseId = encodePath(getDatabaseId(req));
   const namespace = encodePath(getDataNamespace(req));
@@ -185,6 +190,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       success: true,
       mode,
       imported: commitRows.length,
+      uid,
+      projectId: getProjectId(req),
       namespace: getDataNamespace(req),
       databaseId: getDatabaseId(req),
     });
