@@ -8,6 +8,7 @@ interface CommitRow {
   category?: string;
   notes?: string;
   amount?: number;
+  amount_formula?: string;
 }
 
 const getBearerToken = (req: VercelRequest) => {
@@ -125,7 +126,9 @@ const toCategoryRows = (rows: CommitRow[]): CommitRow[] => {
   const consolidated: CommitRow[] = [];
   grouped.forEach((items) => {
     const first = items[0];
-    const amount = items.reduce((sum, item) => sum + (item.amount || 0), 0);
+    const amounts = items.map((item) => Number(item.amount || 0));
+    const amount = amounts.reduce((sum, a) => sum + a, 0);
+    const amountFormula = "=" + amounts.map((a) => a.toFixed(2)).join("+");
     const notes = items.map((item) => item.notes).filter(Boolean).join("; ");
     consolidated.push({
       date: first.date,
@@ -133,6 +136,7 @@ const toCategoryRows = (rows: CommitRow[]): CommitRow[] => {
       category: first.category,
       notes,
       amount: Number(amount.toFixed(2)),
+      amount_formula: amountFormula,
     });
   });
   return consolidated;
@@ -174,6 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         date: fString(row.date || now.slice(0, 10)),
         vendor: fString(row.merchant || "Imported expense"),
         amount: fNumber(Number(row.amount || 0)),
+        ...(row.amount_formula ? { amount_formula: fString(row.amount_formula) } : {}),
         category_id: fString(categoryId),
         category_name: fString(categoryName),
         notes: fString(row.notes || ""),

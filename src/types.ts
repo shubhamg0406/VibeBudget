@@ -17,6 +17,7 @@ export interface Transaction {
   date: string;
   vendor: string;
   amount: number;
+  amount_formula?: string;
   currency?: string;
   category_id: string;
   category_name: string;
