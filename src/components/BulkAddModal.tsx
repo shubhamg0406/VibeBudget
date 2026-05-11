@@ -73,6 +73,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
   const [committing, setCommitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [editableRows, setEditableRows] = useState<Record<string, EditableRowValues>>({});
+  const [receiptDate, setReceiptDate] = useState("");
 
   const getSourceFileFromRawDescription = (value?: string) => {
     if (!value?.startsWith("source_file:")) return "";
@@ -247,6 +248,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     setStatusFilter("all");
     setSelectedIds(new Set());
     setEditableRows({});
+    setReceiptDate("");
     setMessage(null);
   };
 
@@ -300,6 +302,8 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
       const parts: string[] = [
         `${nextBatch.summary.total} transaction(s) extracted from ${result.summary.filesProcessed} file(s).`,
       ];
+      const firstRecordDate = nextBatch.records.find((record) => record.date)?.date || "";
+      setReceiptDate(firstRecordDate);
       if (nextBatch.summary.invalid > 0) parts.push(`${nextBatch.summary.invalid} invalid.`);
       if (nextBatch.summary.duplicate > 0) parts.push(`${nextBatch.summary.duplicate} duplicates.`);
       if (result.errors.length > 0) parts.push(`${result.errors.length} file(s) had errors.`);
@@ -335,9 +339,16 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     if (selected.length === 0) return null;
     const prepared = selected.map((record) => {
       const edit = editableRows[record.id];
-      if (!edit) return record;
+      const finalDate = receiptDate || record.date;
+      if (!edit) {
+        return {
+          ...record,
+          date: finalDate,
+        } satisfies ImportRecord;
+      }
       return {
         ...record,
+        date: finalDate,
         amount: edit.finalAmount,
         notes: edit.notes,
       } satisfies ImportRecord;
@@ -600,6 +611,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                   <tbody>
                     {previewRecords.map((record) => {
                       const checked = selectedIds.has(record.id);
+                      const isFirstRow = previewRecords[0]?.id === record.id;
                       return (
                         <tr key={record.id} className="border-t" style={{ borderColor: "var(--app-border)" }}>
                           <td className="p-3">
@@ -625,7 +637,26 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                           <td className="max-w-[120px] truncate p-3 text-fintech-muted" title={record.raw_description?.startsWith("source_file:") ? record.raw_description.split("|")[0].replace("source_file:", "") : ""}>
                             {record.raw_description?.startsWith("source_file:") ? record.raw_description.split("|")[0].replace("source_file:", "") : "-"}
                           </td>
-                          <td className="p-3">{record.date || "-"}</td>
+                          <td className="p-3">
+                            {isFirstRow ? (
+                              <input
+                                type="date"
+                                value={receiptDate}
+                                onChange={(e) => setReceiptDate(e.target.value)}
+                                className="w-[145px] rounded-md border bg-[var(--app-ghost)] px-2 py-1 text-xs text-[var(--app-text)]"
+                                style={{ borderColor: "var(--app-border)" }}
+                              />
+                            ) : (
+                              <input
+                                type="date"
+                                value={receiptDate || record.date || ""}
+                                readOnly
+                                disabled
+                                className="w-[145px] cursor-not-allowed rounded-md border bg-[var(--app-ghost)] px-2 py-1 text-xs text-fintech-muted opacity-80"
+                                style={{ borderColor: "var(--app-border)" }}
+                              />
+                            )}
+                          </td>
                           <td className="p-3 font-semibold">{record.merchant || "-"}</td>
                           <td className="p-3">{editableRows[record.id]?.preTaxAmount.toFixed(2) || record.amount?.toFixed(2) || "-"}</td>
                           <td className="p-3">
