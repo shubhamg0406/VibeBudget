@@ -432,7 +432,7 @@ const incrementalTransactionSync = async (
   }
 
   const snapshot = await getDocs(q);
-  const changed = snapshot.docs.map((d) => d.data() as Transaction);
+  const changed = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction));
 
   const byId = new Map(cached.map((t) => [t.id, t]));
   for (const tx of changed) {

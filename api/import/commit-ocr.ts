@@ -188,6 +188,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         raw_description: fString(row.notes || ""),
         status: fString("posted"),
         updated_at: fString(now),
+        updatedAt: fNumber(Date.now()),
       });
     }
 
