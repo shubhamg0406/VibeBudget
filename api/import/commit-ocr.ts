@@ -60,7 +60,7 @@ const fNumber = (value: number) => ({ doubleValue: Number(value) });
 const writeFirestoreDoc = async (
   idToken: string,
   uid: string,
-  collectionName: "transactions" | "expenseCategories",
+  collectionName: "transactions" | "categories",
   docId: string,
   fields: Record<string, unknown>
 ) => {
@@ -145,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const row of commitRows) {
       const categoryName = row.category || "Misc.";
       const categoryId = `ocr-cat-${hashString(categoryName.toLowerCase())}`;
-      await writeFirestoreDoc(idToken, uid, "expenseCategories", categoryId, {
+      await writeFirestoreDoc(idToken, uid, "categories", categoryId, {
         id: fString(categoryId),
         name: fString(categoryName),
         target_amount: fNumber(0),
