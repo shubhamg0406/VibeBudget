@@ -50,6 +50,7 @@ import { getSavedTransactionSheetRowsForType } from "../utils/publicSheetImport"
 import { openGoogleSheetPicker } from "../utils/googlePicker";
 import { GoogleSheetImporter } from "./GoogleSheetImporter";
 import { ImpExCenter } from "./ImpExCenter";
+import { CategoryManager } from "./CategoryManager";
 import { usePlaidLink } from "react-plaid-link";
 import type { AiProvider, AiProviderConfig, PlaidCategoryMapping, PlaidCredentials, PlaidEnv, TellerCategoryMapping, TellerCredentials, TellerEnv } from "../types";
 import { AI_PROVIDER_MODELS, AI_PROVIDER_LABELS, AI_PROVIDER_DEFAULT_MODEL } from "../types";
@@ -61,7 +62,7 @@ interface SettingsProps {
 
 import { SetupStatus } from "./SetupStatus";
 
-export type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai" | "setup";
+export type SettingsTab = "data" | "categories" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai" | "setup";
 type RangeDraft = SheetRangeDraft;
 type MappingTab = "expenses" | "income" | "expense_categories" | "income_categories" | "sync";
 type StatusLevel = "success" | "info" | "warning" | "error";
@@ -2141,11 +2142,12 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
       <div className="flex w-fit flex-wrap gap-2 rounded-xl border bg-[var(--app-ghost)] p-1" style={{ borderColor: "var(--app-border)" }}>
         <button onClick={() => setActiveTab("data")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "data" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>1. Data Hub</button>
-        <button onClick={() => setActiveTab("currency")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "currency" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>2. Currency</button>
-        <button onClick={() => setActiveTab("finance_feeds")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "finance_feeds" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>3. Finance Feeds</button>
-        <button onClick={() => setActiveTab("maintenance")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>4. Maintenance</button>
-        <button onClick={() => setActiveTab("ai")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "ai" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>5. AI</button>
-        <button onClick={() => setActiveTab("setup")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "setup" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>6. Setup</button>
+        <button onClick={() => setActiveTab("categories")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "categories" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>2. Categories</button>
+        <button onClick={() => setActiveTab("currency")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "currency" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>3. Currency</button>
+        <button onClick={() => setActiveTab("finance_feeds")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "finance_feeds" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>4. Finance Feeds</button>
+        <button onClick={() => setActiveTab("maintenance")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "maintenance" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>5. Maintenance</button>
+        <button onClick={() => setActiveTab("ai")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "ai" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>6. AI</button>
+        <button onClick={() => setActiveTab("setup")} className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === "setup" ? "bg-fintech-accent text-[#002919]" : "text-fintech-muted"}`}>7. Setup</button>
 
       </div>
 
@@ -2160,6 +2162,18 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
               }}
             />
           </>
+        )}
+
+        {activeTab === "categories" && (
+          <section className="space-y-5">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-fintech-muted">
+              <Banknote size={16} className="text-fintech-accent" /> Categories
+            </div>
+            <p className="text-xs text-fintech-muted">
+              Manage your expense and income categories. Set monthly budget targets to track spending against your goals.
+            </p>
+            <CategoryManager />
+          </section>
         )}
 
         {activeTab === "currency" && (

@@ -160,6 +160,7 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     addTransaction: noop,
     updateTransaction: noop,
     deleteTransaction: noop,
+    refreshTransactionsNow: async () => 0,
     addIncome: noop,
     updateIncome: noop,
     deleteIncome: noop,
@@ -168,6 +169,12 @@ export const createMockFirebaseValue = (seed?: MockFirebaseSeed): FirebaseContex
     deleteRecurringRule: noop,
     generateRecurringTransactions: async () => ({ generated: 0, skipped: 0 }),
     getUpcomingRecurring: () => [],
+    addExpenseCategory: async (name: string, target_amount = 0) => ({ id: crypto.randomUUID(), name, target_amount }),
+    addIncomeCategory: async (name: string, target_amount = 0) => ({ id: crypto.randomUUID(), name, target_amount }),
+    deleteExpenseCategory: noop,
+    deleteIncomeCategory: noop,
+    updateExpenseCategoryName: noop,
+    updateIncomeCategoryName: noop,
     updateExpenseCategoryTarget: noop,
     updateIncomeCategoryTarget: noop,
     updateCategoryTarget: noop,
@@ -316,8 +323,33 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     },
     generateRecurringTransactions: async () => ({ generated: 0, skipped: 0 }),
     getUpcomingRecurring: () => [],
+    addExpenseCategory: async (name: string, target_amount = 0) => {
+      const cat = { id: crypto.randomUUID(), name, target_amount };
+      setExpenseCategories((current) => [...current, cat]);
+      return cat;
+    },
+    addIncomeCategory: async (name: string, target_amount = 0) => {
+      const cat = { id: crypto.randomUUID(), name, target_amount };
+      setIncomeCategories((current) => [...current, cat]);
+      return cat;
+    },
+    deleteExpenseCategory: async (id: string) => {
+      setExpenseCategories((current) => current.filter((c) => c.id !== id));
+    },
+    deleteIncomeCategory: async (id: string) => {
+      setIncomeCategories((current) => current.filter((c) => c.id !== id));
+    },
+    updateExpenseCategoryName: async (id: string, name: string) => {
+      setExpenseCategories((current) => current.map((c) => (c.id === id ? { ...c, name } : c)));
+    },
+    updateIncomeCategoryName: async (id: string, name: string) => {
+      setIncomeCategories((current) => current.map((c) => (c.id === id ? { ...c, name } : c)));
+    },
     updateExpenseCategoryTarget: async (id, target) => {
       setExpenseCategories((current) => current.map((item) => (item.id === id ? { ...item, target_amount: target } : item)));
+    },
+    updateIncomeCategoryTarget: async (id, target) => {
+      setIncomeCategories((current) => current.map((item) => (item.id === id ? { ...item, target_amount: target } : item)));
     },
     updateCategoryTarget: async (id, target) => {
       setExpenseCategories((current) => current.map((item) => (item.id === id ? { ...item, target_amount: target } : item)));
