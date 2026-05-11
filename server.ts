@@ -845,6 +845,58 @@ export const createApp = async ({
     }
   });
 
+  app.post("/api/import/commit-ocr", (req, res) => {
+    const { mode = "individual", rows } = req.body || {};
+    if (mode !== "individual" && mode !== "category") {
+      return res.status(400).json({ error: "mode must be `individual` or `category`." });
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "rows must be a non-empty array." });
+    }
+
+    const normalized = rows
+      .map((row: any) => ({
+        date: String(row?.date || "").trim(),
+        merchant: String(row?.merchant || "").trim(),
+        category: String(row?.category || "Misc.").trim() || "Misc.",
+        notes: String(row?.notes || "").trim(),
+        amount: Number(row?.amount || 0),
+      }))
+      .filter((row: any) => row.date && row.merchant && Number.isFinite(row.amount) && row.amount > 0);
+
+    if (normalized.length === 0) {
+      return res.status(400).json({ error: "No valid rows to commit." });
+    }
+
+    const commitRows = mode === "category"
+      ? Array.from(normalized.reduce((map: Map<string, any>, row: any) => {
+          const key = `${row.date}|${row.merchant}|${row.category}`.toLowerCase();
+          const existing = map.get(key);
+          if (existing) {
+            existing.amount = Number((existing.amount + row.amount).toFixed(2));
+            existing.notes = [existing.notes, row.notes].filter(Boolean).join("; ");
+          } else {
+            map.set(key, { ...row });
+          }
+          return map;
+        }, new Map()).values())
+      : normalized;
+
+    const insertCategory = db.prepare("INSERT OR IGNORE INTO categories (name, target_amount) VALUES (?, 0)");
+    const getCategory = db.prepare("SELECT id FROM categories WHERE name = ? LIMIT 1");
+    const insertTxn = db.prepare("INSERT INTO transactions (date, vendor, amount, category_id, notes) VALUES (?, ?, ?, ?, ?)");
+    const tx = db.transaction((items: any[]) => {
+      for (const row of items) {
+        insertCategory.run(row.category);
+        const category = getCategory.get(row.category) as { id: number } | undefined;
+        insertTxn.run(row.date, row.merchant, row.amount, category?.id ?? null, row.notes);
+      }
+    });
+    tx(commitRows);
+
+    return res.json({ success: true, mode, imported: commitRows.length });
+  });
+
   app.post("/api/import/extract-transactions", async (req, res) => {
     const uid = requireUid(req, res);
     if (!uid) return;

@@ -20,6 +20,7 @@ import type {
   ExtractTransactionsResponse,
 } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
+import { auth } from "../firebase";
 import { extractTransactionsFromFiles, buildFilePayload } from "../utils/documentExtraction";
 
 interface BulkAddModalProps {
@@ -59,7 +60,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
   onClose,
   onRefresh,
 }) => {
-  const { user, previewImport, commitImport, aiConfig } = useFirebase();
+  const { user, previewImport, aiConfig } = useFirebase();
   const [files, setFiles] = useState<File[]>([]);
   const [targetType, setTargetType] = useState<"expenses" | "income">("expenses");
   const [extracting, setExtracting] = useState(false);
@@ -363,9 +364,36 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     }
     setCommitting(true);
     try {
-      const summary = await commitImport(commitBatch, {
-        includeDuplicates,
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error("Missing Firebase session token. Please sign in again.");
+      }
+      const rows = commitBatch.records
+        .filter((record) => record.kind === "expense")
+        .map((record) => ({
+          date: record.date,
+          merchant: record.merchant,
+          category: record.category,
+          notes: record.notes,
+          amount: record.amount,
+        }));
+      const response = await fetch("/api/import/commit-ocr", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ mode, rows, includeDuplicates }),
       });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || `Commit OCR failed (${response.status}).`);
+      }
+      const summary = {
+        imported: Number(payload?.imported || 0),
+        skipped: 0,
+        invalid: 0,
+      };
       const historyEntry = {
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
