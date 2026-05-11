@@ -520,6 +520,12 @@ export interface FirebaseContextType {
   deleteRecurringRule: (id: string) => Promise<void>;
   generateRecurringTransactions: () => Promise<{ generated: number; skipped: number }>;
   getUpcomingRecurring: (days?: number) => UpcomingRecurringInstance[];
+  addExpenseCategory: (name: string, target_amount?: number) => Promise<ExpenseCategory>;
+  addIncomeCategory: (name: string, target_amount?: number) => Promise<IncomeCategory>;
+  deleteExpenseCategory: (id: string) => Promise<void>;
+  deleteIncomeCategory: (id: string) => Promise<void>;
+  updateExpenseCategoryName: (id: string, name: string) => Promise<void>;
+  updateIncomeCategoryName: (id: string, name: string) => Promise<void>;
   updateExpenseCategoryTarget: (id: string, target: number) => Promise<void>;
   updateIncomeCategoryTarget: (id: string, target: number) => Promise<void>;
   updateCategoryTarget: (id: string, target: number) => Promise<void>;
@@ -2457,6 +2463,46 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateCategoryTarget = updateExpenseCategoryTarget;
 
+  const addExpenseCategory = async (name: string, target_amount = 0): Promise<ExpenseCategory> => {
+    if (!auth.currentUser) throw new Error("Sign in with Google first.");
+    const id = crypto.randomUUID();
+    const category: ExpenseCategory = { id, name: normalizeCategoryName(name), target_amount };
+    await setDoc(doc(getExpenseCategoriesCollection(auth.currentUser.uid), id), category);
+    return category;
+  };
+
+  const addIncomeCategory = async (name: string, target_amount = 0): Promise<IncomeCategory> => {
+    if (!auth.currentUser) throw new Error("Sign in with Google first.");
+    const id = crypto.randomUUID();
+    const category: IncomeCategory = { id, name: normalizeCategoryName(name), target_amount };
+    await setDoc(doc(getIncomeCategoriesCollection(auth.currentUser.uid), id), category);
+    return category;
+  };
+
+  const deleteExpenseCategory = async (id: string): Promise<void> => {
+    if (!auth.currentUser) throw new Error("Sign in with Google first.");
+    await deleteDoc(doc(getExpenseCategoriesCollection(auth.currentUser.uid), id));
+  };
+
+  const deleteIncomeCategory = async (id: string): Promise<void> => {
+    if (!auth.currentUser) throw new Error("Sign in with Google first.");
+    await deleteDoc(doc(getIncomeCategoriesCollection(auth.currentUser.uid), id));
+  };
+
+  const updateExpenseCategoryName = async (id: string, name: string): Promise<void> => {
+    if (!auth.currentUser) throw new Error("Sign in with Google first.");
+    const existing = expenseCategoriesRef.current.find((c) => c.id === id);
+    if (!existing) return;
+    await setDoc(doc(getExpenseCategoriesCollection(auth.currentUser.uid), id), { ...existing, name: normalizeCategoryName(name) });
+  };
+
+  const updateIncomeCategoryName = async (id: string, name: string): Promise<void> => {
+    if (!auth.currentUser) throw new Error("Sign in with Google first.");
+    const existing = incomeCategoriesRef.current.find((c) => c.id === id);
+    if (!existing) return;
+    await setDoc(doc(getIncomeCategoriesCollection(auth.currentUser.uid), id), { ...existing, name: normalizeCategoryName(name) });
+  };
+
   const previewImport = (
     source: ImportSource,
     payload: string | unknown[] | Record<string, unknown>,
@@ -3329,6 +3375,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         deleteRecurringRule,
         generateRecurringTransactions,
         getUpcomingRecurring,
+        addExpenseCategory,
+        addIncomeCategory,
+        deleteExpenseCategory,
+        deleteIncomeCategory,
+        updateExpenseCategoryName,
+        updateIncomeCategoryName,
         updateExpenseCategoryTarget,
         updateIncomeCategoryTarget,
         updateCategoryTarget,

@@ -50,6 +50,7 @@ import { getSavedTransactionSheetRowsForType } from "../utils/publicSheetImport"
 import { openGoogleSheetPicker } from "../utils/googlePicker";
 import { GoogleSheetImporter } from "./GoogleSheetImporter";
 import { ImpExCenter } from "./ImpExCenter";
+import { CategoryManager } from "./CategoryManager";
 import { usePlaidLink } from "react-plaid-link";
 import type { AiProvider, AiProviderConfig, PlaidCategoryMapping, PlaidCredentials, PlaidEnv, TellerCategoryMapping, TellerCredentials, TellerEnv } from "../types";
 import { AI_PROVIDER_MODELS, AI_PROVIDER_LABELS, AI_PROVIDER_DEFAULT_MODEL } from "../types";
@@ -61,7 +62,7 @@ interface SettingsProps {
 
 import { SetupStatus } from "./SetupStatus";
 
-export type SettingsTab = "data" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai" | "setup";
+export type SettingsTab = "data" | "categories" | "currency" | "google_workspace" | "finance_feeds" | "maintenance" | "ai" | "setup";
 type RangeDraft = SheetRangeDraft;
 type MappingTab = "expenses" | "income" | "expense_categories" | "income_categories" | "sync";
 type StatusLevel = "success" | "info" | "warning" | "error";
@@ -2140,9 +2141,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       <nav className="flex w-full overflow-x-auto rounded-2xl border bg-[var(--app-ghost)] p-1.5 gap-1" style={{ borderColor: "var(--app-border)" }}>
         {([
           { id: "data", icon: <FolderOpen size={14} />, label: "Data" },
+          { id: "categories", icon: <Banknote size={14} />, label: "Categories" },
           { id: "currency", icon: <Globe size={14} />, label: "Currency" },
           { id: "google_workspace", icon: <Cloud size={14} />, label: "Connections" },
-          { id: "finance_feeds", icon: <Banknote size={14} />, label: "Bank Feeds" },
+          { id: "finance_feeds", icon: <Link2 size={14} />, label: "Bank Feeds" },
           { id: "ai", icon: <Sparkles size={14} />, label: "AI" },
           { id: "maintenance", icon: <Shield size={14} />, label: "Maintenance" },
           { id: "setup", icon: <Database size={14} />, label: "Setup" },
@@ -2170,6 +2172,16 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
               onNavigateToConnections={() => setActiveTab("google_workspace")}
             />
           </>
+        )}
+
+        {activeTab === "categories" && (
+          <section className="space-y-5">
+            <div className="space-y-1">
+              <h2 className="flex items-center gap-2 text-lg font-bold"><Banknote size={18} className="text-fintech-accent" /> Categories</h2>
+              <p className="text-sm text-fintech-muted">Manage expense and income categories. Set monthly budget targets to track spending against goals.</p>
+            </div>
+            <CategoryManager />
+          </section>
         )}
 
         {activeTab === "currency" && (
