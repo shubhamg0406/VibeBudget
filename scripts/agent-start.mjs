@@ -16,6 +16,12 @@ function runGit(args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+function isDeploySafeGitHubNoreply(email) {
+  // Vercel/GitHub matching is reliable with the canonical noreply form:
+  // <id>+<username>@users.noreply.github.com
+  return /^[0-9]+\+[A-Za-z0-9-]+@users\.noreply\.github\.com$/.test(email);
+}
+
 const [, , agent, taskSlug] = process.argv;
 if (!agent || !taskSlug) {
   fail('Usage: node scripts/agent-start.mjs <agent> <task-slug>');
@@ -34,6 +40,13 @@ if (!agentConfig) {
 
 if (!/^[a-z0-9-]+$/.test(taskSlug)) {
   fail('Invalid task slug. Use lowercase letters, numbers, and hyphens only.');
+}
+
+if (!isDeploySafeGitHubNoreply(agentConfig.email)) {
+  fail(
+    `Agent email "${agentConfig.email}" is not deploy-safe for GitHub account matching. ` +
+    'Use canonical noreply format: <id>+<username>@users.noreply.github.com.'
+  );
 }
 
 const branch = `agent/${agent}/${taskSlug}`;

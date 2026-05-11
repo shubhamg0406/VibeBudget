@@ -7,6 +7,9 @@ Agents implement changes, push branches, and open PRs. Agents **do not merge the
 - Branch format: `agent/<agent>/<task-slug>`
 - Commit format: `[<agent>] <message>`
 - PR title format: `[<agent>] <task summary>`
+- Git email for all agents: `63102408+shubhamg0406@users.noreply.github.com` (shared on purpose for deploy/GitHub identity matching)
+
+Agent tracking is preserved by branch names, commit prefixes, PR title prefixes, and PR body metadata. Do not encode agent identity in the commit email local-part.
 
 ## Workflow
 

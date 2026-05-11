@@ -20,6 +20,10 @@ function runGh(args) {
   return execFileSync('gh', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
+function isDeploySafeGitHubNoreply(email) {
+  return /^[0-9]+\+[A-Za-z0-9-]+@users\.noreply\.github\.com$/.test(email);
+}
+
 const args = process.argv.slice(2);
 const approvedFlag = '--approved';
 const hasApproval = args.includes(approvedFlag);
@@ -51,6 +55,12 @@ const agentConfig = config.agents?.[agent];
 if (!agentConfig) {
   const keys = Object.keys(config.agents || {}).join(', ');
   fail(`Unknown agent "${agent}". Valid agents: ${keys}`);
+}
+if (!isDeploySafeGitHubNoreply(agentConfig.email)) {
+  fail(
+    `Agent email "${agentConfig.email}" is not deploy-safe for GitHub account matching. ` +
+    'Use canonical noreply format: <id>+<username>@users.noreply.github.com.'
+  );
 }
 
 const defaultBase = config.defaultBaseBranch || 'main';
