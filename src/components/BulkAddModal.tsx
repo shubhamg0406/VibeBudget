@@ -20,7 +20,7 @@ import type {
   ExtractTransactionsResponse,
 } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
-import { auth } from "../firebase";
+import { auth, firebaseDataNamespace } from "../firebase";
 import { extractTransactionsFromFiles, buildFilePayload } from "../utils/documentExtraction";
 
 interface BulkAddModalProps {
@@ -382,6 +382,8 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "x-firebase-namespace": firebaseDataNamespace || "prod",
+          "x-firebase-database-id": import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "(default)",
         },
         body: JSON.stringify({ mode, rows, includeDuplicates }),
       });

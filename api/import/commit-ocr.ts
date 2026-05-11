@@ -25,8 +25,18 @@ const getEnv = (name: string, fallback?: string) => {
 
 const getProjectId = () => getEnv("FIREBASE_PROJECT_ID", "VITE_FIREBASE_PROJECT_ID");
 const getApiKey = () => getEnv("FIREBASE_API_KEY", "VITE_FIREBASE_API_KEY");
-const getDatabaseId = () => getEnv("FIREBASE_FIRESTORE_DATABASE_ID", "VITE_FIREBASE_FIRESTORE_DATABASE_ID") || "(default)";
-const getDataNamespace = () => getEnv("FIREBASE_DATA_NAMESPACE", "VITE_FIREBASE_DATA_NAMESPACE") || "prod";
+const getDatabaseId = (req?: VercelRequest) => {
+  const headerVal = req?.headers["x-firebase-database-id"];
+  const headerDb = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+  if (headerDb && headerDb.trim()) return headerDb.trim();
+  return getEnv("FIREBASE_FIRESTORE_DATABASE_ID", "VITE_FIREBASE_FIRESTORE_DATABASE_ID") || "(default)";
+};
+const getDataNamespace = (req?: VercelRequest) => {
+  const headerVal = req?.headers["x-firebase-namespace"];
+  const headerNs = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+  if (headerNs && headerNs.trim()) return headerNs.trim();
+  return getEnv("FIREBASE_DATA_NAMESPACE", "VITE_FIREBASE_DATA_NAMESPACE") || "prod";
+};
 
 const encodePath = (segment: string) => encodeURIComponent(segment).replace(/%2F/g, "%252F");
 
@@ -58,6 +68,7 @@ const fString = (value: string) => ({ stringValue: value });
 const fNumber = (value: number) => ({ doubleValue: Number(value) });
 
 const writeFirestoreDoc = async (
+  req: VercelRequest,
   idToken: string,
   uid: string,
   collectionName: "transactions" | "categories",
@@ -66,8 +77,8 @@ const writeFirestoreDoc = async (
 ) => {
   const projectId = getProjectId();
   if (!projectId) throw new Error("Missing Firebase project ID.");
-  const databaseId = encodePath(getDatabaseId());
-  const namespace = encodePath(getDataNamespace());
+  const databaseId = encodePath(getDatabaseId(req));
+  const namespace = encodePath(getDataNamespace(req));
   const encodedUid = encodePath(uid);
   const encodedDocId = encodePath(docId);
   const encodedCollection = encodePath(collectionName);
@@ -145,7 +156,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const row of commitRows) {
       const categoryName = row.category || "Misc.";
       const categoryId = `ocr-cat-${hashString(categoryName.toLowerCase())}`;
-      await writeFirestoreDoc(idToken, uid, "categories", categoryId, {
+      await writeFirestoreDoc(req, idToken, uid, "categories", categoryId, {
         id: fString(categoryId),
         name: fString(categoryName),
         target_amount: fNumber(0),
@@ -153,7 +164,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const identity = `${row.date}|${row.merchant}|${row.category}|${row.amount}|${row.notes}|${now}`;
       const txnId = `document_ocr-expense-${hashString(identity)}`;
-      await writeFirestoreDoc(idToken, uid, "transactions", txnId, {
+      await writeFirestoreDoc(req, idToken, uid, "transactions", txnId, {
         id: fString(txnId),
         date: fString(row.date || now.slice(0, 10)),
         vendor: fString(row.merchant || "Imported expense"),
@@ -170,7 +181,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    return res.json({ success: true, mode, imported: commitRows.length });
+    return res.json({
+      success: true,
+      mode,
+      imported: commitRows.length,
+      namespace: getDataNamespace(req),
+      databaseId: getDatabaseId(req),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to commit OCR rows.";
     return res.status(500).json({ error: message });
