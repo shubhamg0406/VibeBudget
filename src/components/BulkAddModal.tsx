@@ -331,6 +331,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
   const buildCommitBatch = (mode: "individual" | "category"): ImportBatch | null => {
     if (!batch) return null;
     const selected = batch.records.filter((record) => selectedCommitIds.includes(record.id));
+    if (selected.length === 0) return null;
     const prepared = selected.map((record) => {
       const edit = editableRows[record.id];
       if (!edit) return record;
@@ -343,13 +344,23 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     if (mode === "individual") {
       return { ...batch, records: prepared };
     }
-    return consolidateForCommit({ ...batch, records: prepared });
+    const consolidated = consolidateForCommit({ ...batch, records: prepared });
+    if (consolidated.records.length === 0) return null;
+    return consolidated;
   };
 
   const handleCommit = async (mode: "individual" | "category") => {
     if (!batch) return;
+    if (selectedCommitIds.length === 0) {
+      setMessage("Select at least one row to commit.");
+      return;
+    }
+    setMessage(mode === "category" ? "Preparing category-wise commit..." : "Preparing individual commit...");
     const commitBatch = buildCommitBatch(mode);
-    if (!commitBatch) return;
+    if (!commitBatch) {
+      setMessage("No valid rows available for this commit mode.");
+      return;
+    }
     setCommitting(true);
     try {
       const summary = await commitImport(commitBatch, {
@@ -641,6 +652,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                 </div>
                 <div className="flex gap-2">
                   <button
+                    type="button"
                     onClick={() => void handleCommit("individual")}
                     disabled={committing || selectedCommitIds.length === 0}
                     className="inline-flex items-center gap-2 rounded-lg bg-fintech-accent px-4 py-2.5 text-sm font-bold text-[#002919] disabled:opacity-50"
@@ -649,6 +661,7 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
                     {committing ? "Committing..." : `Add Individual Items (${selectedCommitIds.length})`}
                   </button>
                   <button
+                    type="button"
                     onClick={() => void handleCommit("category")}
                     disabled={committing || selectedCommitIds.length === 0}
                     className="inline-flex items-center gap-2 rounded-lg border border-fintech-accent bg-transparent px-4 py-2.5 text-sm font-bold text-fintech-accent disabled:opacity-50"
