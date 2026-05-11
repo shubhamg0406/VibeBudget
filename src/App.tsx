@@ -80,6 +80,22 @@ export default function App() {
     window.localStorage.setItem("vibebudget-theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    const onFocusRange = (event: Event) => {
+      const customEvent = event as CustomEvent<{ start?: string; end?: string }>;
+      const start = customEvent.detail?.start;
+      const end = customEvent.detail?.end;
+      if (!start || !end) return;
+      setDateRange({
+        option: "custom",
+        start,
+        end,
+      });
+    };
+    window.addEventListener("vibebudget:focus-date-range", onFocusRange);
+    return () => window.removeEventListener("vibebudget:focus-date-range", onFocusRange);
+  }, []);
+
   const filteredTransactions = transactions.filter((t) => isDateInRange(t.date, effectiveDateRange.start, effectiveDateRange.end));
   const filteredIncome = income.filter((i) => isDateInRange(i.date, effectiveDateRange.start, effectiveDateRange.end));
 

@@ -399,6 +399,18 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
         invalid: 0,
       };
       await refreshTransactionsNow();
+      const committedDates = rows
+        .map((row) => String(row.date || "").trim())
+        .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
+        .sort();
+      if (committedDates.length > 0) {
+        window.dispatchEvent(new CustomEvent("vibebudget:focus-date-range", {
+          detail: {
+            start: committedDates[0],
+            end: committedDates[committedDates.length - 1],
+          },
+        }));
+      }
       const historyEntry = {
         id: crypto.randomUUID(),
         at: new Date().toISOString(),
