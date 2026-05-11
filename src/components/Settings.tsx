@@ -2140,21 +2140,21 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
       <nav className="flex w-full overflow-x-auto rounded-2xl border bg-[var(--app-ghost)] p-1.5 gap-1" style={{ borderColor: "var(--app-border)" }}>
         {([
-          { id: "data", icon: <FolderOpen size={14} />, label: "Data" },
-          { id: "categories", icon: <Banknote size={14} />, label: "Categories" },
-          { id: "currency", icon: <Globe size={14} />, label: "Currency" },
-          { id: "google_workspace", icon: <Cloud size={14} />, label: "Connections" },
-          { id: "finance_feeds", icon: <Link2 size={14} />, label: "Bank Feeds" },
-          { id: "ai", icon: <Sparkles size={14} />, label: "AI" },
-          { id: "maintenance", icon: <Shield size={14} />, label: "Maintenance" },
-          { id: "setup", icon: <Database size={14} />, label: "Setup" },
+          { id: "data",             icon: <FolderOpen size={14} />, label: "Data" },
+          { id: "categories",       icon: <Banknote size={14} />,   label: "Categories" },
+          { id: "finance_feeds",    icon: <Link2 size={14} />,      label: "Bank Feeds" },
+          { id: "currency",         icon: <Globe size={14} />,      label: "Currency" },
+          { id: "google_workspace", icon: <Cloud size={14} />,      label: "Connections" },
+          { id: "ai",               icon: <Sparkles size={14} />,   label: "AI" },
+          { id: "setup",            icon: <Database size={14} />,   label: "Setup" },
+          { id: "maintenance",      icon: <Shield size={14} />,     label: "Maintenance" },
         ] as { id: SettingsTab; icon: React.ReactNode; label: string }[]).map(({ id, icon, label }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
             className={`flex flex-1 min-w-fit items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold whitespace-nowrap transition-colors ${
               activeTab === id
-                ? "bg-[var(--app-panel)] text-[var(--app-text)] shadow-sm"
+                ? "bg-fintech-accent/20 text-fintech-accent"
                 : "text-fintech-muted hover:text-[var(--app-text)]"
             }`}
           >
