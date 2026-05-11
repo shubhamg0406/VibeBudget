@@ -28,17 +28,28 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
     firebase: {
       configured: hasEnvFirebase,
       projectId: process.env.VITE_FIREBASE_PROJECT_ID || null,
+      authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || null,
+      storageBucketConfigured: !!process.env.VITE_FIREBASE_STORAGE_BUCKET,
     },
     firebaseAdmin: {
       configured: adminConfigured,
+      hasCredentialsJson: adminConfigured,
+    },
+    selfHost: {
+      ownerExists: false,
+      secretsConfigured: adminConfigured || geminiConfigured,
     },
     ai: {
       serverKeyConfigured: geminiConfigured,
+      modelConfigured: !!process.env.GEMINI_MODEL,
+      model: process.env.GEMINI_MODEL || null,
     },
     features: {
       firebaseAuth: hasEnvFirebase,
       firebaseAdmin: adminConfigured,
       aiChat: geminiConfigured,
+      selfHostedSetup: false,
+      ownerClaim: false,
     },
   });
 }
