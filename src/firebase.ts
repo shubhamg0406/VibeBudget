@@ -1,6 +1,6 @@
 import { initializeApp, FirebaseApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, Auth } from "firebase/auth";
-import { enableIndexedDbPersistence, getFirestore, Firestore } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, Firestore } from "firebase/firestore";
 
 export const SELF_HOST_CONFIG_KEY = "vibebudgetSelfHostConfig";
 
@@ -118,9 +118,11 @@ export function initFirebase(config: FirebaseWebConfig): boolean {
     };
     const newApp = initializeApp(firebaseConfig);
     const newAuth = getAuth(newApp);
-    const newDb = config.firestoreDatabaseId
-      ? getFirestore(newApp, config.firestoreDatabaseId)
-      : getFirestore(newApp);
+    const newDb = initializeFirestore(
+      newApp,
+      { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) },
+      config.firestoreDatabaseId || undefined,
+    );
     const newNs = resolveDataNamespace(config.dataNamespace);
     const newGp = new GoogleAuthProvider();
     newGp.setCustomParameters({ prompt: "select_account" });
@@ -135,18 +137,6 @@ export function initFirebase(config: FirebaseWebConfig): boolean {
     _firebaseDataNamespace = firebaseDataNamespace = newNs;
     _googleProvider = googleProvider = newGp;
     _googleDriveProvider = googleDriveProvider = newGdp;
-
-    if (typeof window !== "undefined") {
-      void enableIndexedDbPersistence(newDb).catch((err: { code?: string }) => {
-        if (err?.code === "failed-precondition") {
-          console.warn("Persistence failed: multiple tabs open");
-        } else if (err?.code === "unimplemented") {
-          console.warn("Persistence not supported in this browser");
-        } else {
-          console.warn("Failed to enable Firestore persistence", err);
-        }
-      });
-    }
 
     _lastInitConfig = fp;
     return true;
