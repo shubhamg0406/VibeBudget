@@ -68,6 +68,7 @@ export default defineConfig(({mode}) => {
       environment: 'jsdom',
       setupFiles: './tests/setup/vitest.setup.ts',
       css: true,
+      exclude: ['**/node_modules/**', '**/.claude/**'],
     },
   };
 });

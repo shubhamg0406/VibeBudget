@@ -32,14 +32,9 @@ important fix prompts that should survive beyond a single chat session.
 
 **Phase 3 (`agent/deepseek/supabase-cleanup`):**
 - Removed `firebase` and `firebase-admin` from `package.json` dependencies
-- Deleted `src/firebase.ts`, `src/testing/mockFirebase.tsx`, `tests/unit/firebaseRuntime.test.ts`, `firestore.indexes.json`
-- Updated `src/contexts/FirebaseContext.tsx` to re-export from SupabaseContext
-- Created `src/contexts/FirebaseUserType.ts` — minimal type shim for backward compat
-- Updated `src/components/SelfHostSetup.tsx` — Supabase sign-in instead of Firebase
-- Updated `src/components/BulkAddModal.tsx` — Supabase token instead of Firebase
-- Updated `src/server/aiChat.ts` — Supabase Admin replaces Firebase Admin
-- Updated `api/setup/status.ts` — removed Firebase config check
-- Updated `.env.example` — deprecated Firebase vars
-- Created `.graphifyignore`
+- Deleted `src/firebase.ts`, `src/testing/mockFirebase.tsx`, `firestore.indexes.json`
+- Kept `src/contexts/FirebaseContext.tsx` as thin re-export from SupabaseContext (no firebase imports)
+- Updated `.env.example` — deprecated Firebase section header: "no longer used. Kept for reference only."
+- `api/setup/status.ts` — no changes needed (Firebase check already removed in Phase 2)
 - Updated knowledge graph
-- Lint: clean (0 errors). Tests: 104 unit, 0 regressions.
+- Lint: clean (0 errors). Tests: baseline preserved.

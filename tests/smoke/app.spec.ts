@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.__VIBEBUDGET_TEST_STATE__ = {
+    (window as any).__VIBEBUDGET_TEST_STATE__ = {
       user: {
         uid: "playwright-user",
         email: "playwright@vibebudget.dev",
