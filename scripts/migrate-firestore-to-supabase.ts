@@ -41,7 +41,9 @@ async function initFirebase() {
   const { initializeApp, getApps, cert } = await import("firebase-admin/app");
   const { getFirestore } = await import("firebase-admin/firestore");
   if (getApps().length === 0) {
-    initializeApp({ credential: cert(JSON.parse(credJson)) });
+    // Strip surrounding single/double quotes added by some dotenv parsers
+    const cleaned = credJson.trim().replace(/^['"]|['"]$/g, "");
+    initializeApp({ credential: cert(JSON.parse(cleaned)) });
   }
   return getFirestore();
 }

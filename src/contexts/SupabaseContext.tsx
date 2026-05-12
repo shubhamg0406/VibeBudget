@@ -349,6 +349,7 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const seededUsersRef = useRef<Set<string>>(new Set());
   const pendingImportRef = useRef<{ expenseCategories: number; incomeCategories: number; transactions: number; income: number; } | null>(null);
   const ignoreStaleTransactionSnapshotsUntilRef = useRef<number>(0);
+  const prevAuthUidRef = useRef<string | null>(null);
 
   useEffect(() => { expenseCategoriesRef.current = expenseCategories; }, [expenseCategories]);
   useEffect(() => { incomeCategoriesRef.current = incomeCategories; }, [incomeCategories]);
@@ -525,14 +526,18 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = mapSupabaseUser(session?.user || null);
-      setUser(nextUser);
+      const nextUid = nextUser?.uid ?? null;
+      const uidChanged = nextUid !== prevAuthUidRef.current;
+      prevAuthUidRef.current = nextUid;
+      // Preserve stable user object reference when uid hasn't changed (prevents effect re-runs)
+      setUser(prev => (prev?.uid === nextUser?.uid ? prev : nextUser));
       if (!nextUser) { resetBudgetState(); setLoading(false); return; }
       const storedOwnerEmail = readStoredGoogleAccessTokenOwnerEmail();
       if (googleSheetsAccessToken && storedOwnerEmail && nextUser.email && storedOwnerEmail !== nextUser.email.trim().toLowerCase()) storeAccessToken(null);
       setBudgetId(nextUser.uid); setAuthError(null);
       const cached = loadTransactionsCache(nextUser.uid);
       if (cached.length > 0) setTransactions(cached);
-      setLoading(true);
+      if (uidChanged) setLoading(true);
     });
     return () => { subscription.unsubscribe(); };
   }, [googleSheetsAccessToken, resetBudgetState]);
@@ -573,6 +578,24 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     }).subscribe();
     subscriptions.push(profileChannel);
+
+    // Initial profile fetch — realtime only fires on changes, not on first load
+    Promise.resolve(supabase.from('users').select('*').eq('id', uid).single()).then(({ data, error }) => {
+      if (error && error.code !== 'PGRST116') { handleLoadError('profile', error); return; }
+      if (data) {
+        remotePresence.profile = true;
+        setPreferences(normalizePreferences(data.preferences as Preferences | undefined | null));
+        setGoogleSheetsConfig(data.google_sheets_config as GoogleSheetsSyncConfig | null || null);
+        setDriveConnection(data.drive_connection as DriveConnection | null || null);
+        setPlaidConnection(data.plaid_connection as PlaidConnection | null || null);
+        setPlaidCategoryMappings(Array.isArray(data.plaid_category_mappings) ? data.plaid_category_mappings as PlaidCategoryMapping[] : []);
+        setTellerConnection(data.teller_connection as TellerConnection | null || null);
+        setTellerCategoryMappings(Array.isArray(data.teller_category_mappings) ? data.teller_category_mappings as TellerCategoryMapping[] : []);
+        setLastSynced(data.last_synced_at ? new Date(data.last_synced_at as string) : null);
+        setAiConfig(data.ai_config as AiProviderConfig | null || null);
+      }
+      loadedState.profile = true; markLoaded();
+    }).catch((err: unknown) => handleLoadError('profile', err));
 
     const rulesChannel = supabase.channel(`recurring-rules-${uid}`);
     rulesChannel.on('postgres_changes' as any, { event: '*', schema: 'public', table: 'recurring_rules', filter: `user_id=eq.${uid}` }, () => {
