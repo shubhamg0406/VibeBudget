@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 import dotenv from "dotenv";
-import { AiChatDependencies, registerAiChatRoute } from "./src/server/aiChat.js";
+import { AiChatDependencies, registerAiChatRoute, createDependencies } from "./src/server/aiChat.js";
 import { registerPlaidRoutes } from "./src/server/plaid.js";
 import { registerTellerRoutes } from "./src/server/teller.js";
 import { callAiOcr, AiClientError } from "./src/server/aiClient.js";
@@ -264,32 +264,6 @@ export const createApp = async ({
     return row?.value || undefined;
   };
 
-  const initFirebaseAdminSdk = async () => {
-    try {
-      const adminAppModule = await import("firebase-admin/app");
-      const adminAuthModule = await import("firebase-admin/auth");
-      const { getApps, initializeApp, cert, applicationDefault } = adminAppModule;
-      if (getApps().length === 0) {
-        const serviceAccountJson = resolveSelfHostSecret("FIREBASE_ADMIN_CREDENTIALS_JSON")
-          || process.env.FIREBASE_ADMIN_CREDENTIALS_JSON;
-        const serviceAccountPath = process.env.FIREBASE_ADMIN_CREDENTIALS_PATH;
-        if (serviceAccountJson) {
-          const parsed = JSON.parse(serviceAccountJson);
-          initializeApp({ credential: cert(parsed) });
-        } else if (serviceAccountPath) {
-          const fsMod = await import("fs");
-          const fileContents = fsMod.readFileSync(serviceAccountPath, "utf8");
-          initializeApp({ credential: cert(JSON.parse(fileContents)) });
-        } else {
-          initializeApp({ credential: applicationDefault() });
-        }
-      }
-      return { auth: adminAuthModule.getAuth() };
-    } catch {
-      return null;
-    }
-  };
-
   const decodeJwtPayload = (token: string): { uid: string; email: string | null } | null => {
     try {
       const parts = token.split(".");
@@ -304,22 +278,21 @@ export const createApp = async ({
     }
   };
 
-  const verifyFirebaseToken = async (token: string): Promise<{ uid: string; email: string | null } | null> => {
+  const resolveTokenIdentity = async (token: string): Promise<{ uid: string; email: string | null; verified: boolean } | null> => {
     try {
-      const admin = await initFirebaseAdminSdk();
-      if (admin) {
-        const decoded = await admin.auth.verifyIdToken(token);
-        return { uid: decoded.uid, email: decoded.email || null };
+      const supabaseUrl = process.env.VITE_SUPABASE_URL;
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (supabaseUrl && serviceRoleKey) {
+        const { getSupabaseServerClient } = await import("./src/lib/supabase");
+        const client = getSupabaseServerClient(serviceRoleKey);
+        const { data: { user }, error } = await client.auth.getUser(token);
+        if (!error && user) {
+          return { uid: user.id, email: user.email || null, verified: true };
+        }
       }
     } catch {
-      // Fall through to unverified
+      // fall through to raw decode
     }
-    return null;
-  };
-
-  const resolveTokenIdentity = async (token: string): Promise<{ uid: string; email: string | null; verified: boolean } | null> => {
-    const verified = await verifyFirebaseToken(token);
-    if (verified) return { ...verified, verified: true };
     const decoded = decodeJwtPayload(token);
     if (decoded) return { ...decoded, verified: false };
     return null;
@@ -339,34 +312,25 @@ export const createApp = async ({
   };
 
   app.get("/api/setup/status", (_req, res) => {
-    const hasEnvFirebase = !!(process.env.VITE_FIREBASE_API_KEY && process.env.VITE_FIREBASE_AUTH_DOMAIN);
-    const hasStoredConfig = false; // Can't read localStorage from server
-    const adminJson = process.env.FIREBASE_ADMIN_CREDENTIALS_JSON || resolveSelfHostSecret("FIREBASE_ADMIN_CREDENTIALS_JSON");
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const geminiKey = process.env.GEMINI_API_KEY || resolveSelfHostSecret("GEMINI_API_KEY");
     const geminiModel = process.env.GEMINI_MODEL || resolveSelfHostSecret("GEMINI_MODEL");
-    const namespace = process.env.VITE_FIREBASE_DATA_NAMESPACE || process.env.FIREBASE_DATA_NAMESPACE || "unknown";
     const ownerExists = !!getOwnerUid();
-    const isProd = process.env.NODE_ENV === "production" && namespace === "prod";
+    const isProd = process.env.NODE_ENV === "production";
 
     res.json({
-      mode: isProd ? "hosted" : (hasEnvFirebase || hasStoredConfig ? "self-hosted" : "local"),
+      mode: isProd ? "hosted" : (supabaseUrl ? "self-hosted" : "local"),
       app: {
         nodeEnv: process.env.NODE_ENV || "development",
-        namespace,
       },
-      firebase: {
-        configured: hasEnvFirebase,
-        projectId: process.env.VITE_FIREBASE_PROJECT_ID || null,
-        authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || null,
-        storageBucketConfigured: !!process.env.VITE_FIREBASE_STORAGE_BUCKET,
-      },
-      firebaseAdmin: {
-        configured: !!adminJson,
-        hasCredentialsJson: !!adminJson,
+      supabase: {
+        configured: !!(supabaseUrl && supabaseServiceKey),
+        url: supabaseUrl || null,
       },
       selfHost: {
         ownerExists,
-        secretsConfigured: !!(adminJson || geminiKey),
+        secretsConfigured: !!(supabaseServiceKey && geminiKey),
       },
       ai: {
         serverKeyConfigured: !!geminiKey,
@@ -374,8 +338,8 @@ export const createApp = async ({
         model: geminiModel || null,
       },
       features: {
-        firebaseAuth: hasEnvFirebase || hasStoredConfig,
-        firebaseAdmin: !!adminJson,
+        supabaseAuth: !!supabaseUrl,
+        supabaseAdmin: !!supabaseServiceKey,
         aiChat: !!geminiKey,
         selfHostedSetup: true,
         ownerClaim: !ownerExists,
@@ -386,9 +350,8 @@ export const createApp = async ({
   app.get("/api/self-host/status", async (req, res) => {
     const ownerUidVal = getOwnerUid();
     const ownerEmail = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("owner_email") as { value: string } | undefined;
-    const adminJson = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:FIREBASE_ADMIN_CREDENTIALS_JSON") as { value: string } | undefined;
     const geminiKey = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:GEMINI_API_KEY") as { value: string } | undefined;
-    const envConfigExists = !!(process.env.VITE_FIREBASE_API_KEY && process.env.VITE_FIREBASE_AUTH_DOMAIN);
+    const supabaseConfigured = !!(process.env.VITE_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
     const authHeader = req.header("authorization");
     let isOwner = false;
@@ -406,8 +369,8 @@ export const createApp = async ({
       ownerExists: !!ownerUidVal,
       isOwner,
       ownerEmail: ownerEmailSafe,
-      secretsConfigured: !!(adminJson || geminiKey || resolveSelfHostSecret("FIREBASE_ADMIN_CREDENTIALS_JSON") || resolveSelfHostSecret("GEMINI_API_KEY")),
-      envConfigExists,
+      secretsConfigured: !!(geminiKey || resolveSelfHostSecret("GEMINI_API_KEY")),
+      supabaseConfigured,
     });
   });
 
@@ -457,11 +420,8 @@ export const createApp = async ({
       res.status(403).json({ error: "Only the instance owner can configure secrets" });
       return;
     }
-    const { FIREBASE_ADMIN_CREDENTIALS_JSON, GEMINI_API_KEY, GEMINI_MODEL } = req.body || {};
+    const { GEMINI_API_KEY, GEMINI_MODEL } = req.body || {};
     const now = new Date().toISOString();
-    if (FIREBASE_ADMIN_CREDENTIALS_JSON) {
-      db.prepare("INSERT OR REPLACE INTO self_host_config (key, value, updated_at) VALUES (?, ?, ?)").run("secrets:FIREBASE_ADMIN_CREDENTIALS_JSON", FIREBASE_ADMIN_CREDENTIALS_JSON, now);
-    }
     if (GEMINI_API_KEY) {
       db.prepare("INSERT OR REPLACE INTO self_host_config (key, value, updated_at) VALUES (?, ?, ?)").run("secrets:GEMINI_API_KEY", GEMINI_API_KEY, now);
     }
@@ -487,11 +447,9 @@ export const createApp = async ({
       res.status(403).json({ error: "Only the instance owner can check secret status" });
       return;
     }
-    const adminJson = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:FIREBASE_ADMIN_CREDENTIALS_JSON") as { value: string } | undefined;
     const geminiKey = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:GEMINI_API_KEY") as { value: string } | undefined;
     const geminiModel = db.prepare("SELECT value FROM self_host_config WHERE key = ?").get("secrets:GEMINI_MODEL") as { value: string } | undefined;
     res.json({
-      FIREBASE_ADMIN_CREDENTIALS_JSON: !!(adminJson || process.env.FIREBASE_ADMIN_CREDENTIALS_JSON),
       GEMINI_API_KEY: !!(geminiKey || process.env.GEMINI_API_KEY),
       GEMINI_MODEL: !!(geminiModel || process.env.GEMINI_MODEL),
     });
@@ -508,7 +466,7 @@ export const createApp = async ({
     return { provider, model, apiKey };
   };
 
-  registerAiChatRoute(app, { ...aiChatDeps, resolveAiConfig });
+  registerAiChatRoute(app, { ...createDependencies(), ...aiChatDeps });
   registerPlaidRoutes(app);
   registerTellerRoutes(app);
 
