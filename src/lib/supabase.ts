@@ -1,8 +1,14 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "./supabaseTypes";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl =
+  typeof import.meta !== "undefined" && (import.meta as Record<string, unknown>).env
+    ? (import.meta as { env: Record<string, string> }).env.VITE_SUPABASE_URL
+    : process.env.VITE_SUPABASE_URL;
+const supabaseAnonKey =
+  typeof import.meta !== "undefined" && (import.meta as Record<string, unknown>).env
+    ? (import.meta as { env: Record<string, string> }).env.VITE_SUPABASE_ANON_KEY
+    : process.env.VITE_SUPABASE_ANON_KEY;
 
 let client: SupabaseClient<Database> | null = null;
 
@@ -21,7 +27,7 @@ export function getSupabaseClient(): SupabaseClient<Database> | null {
 export function getSupabaseServerClient(
   serviceRoleKey: string
 ): SupabaseClient<Database> {
-  const url = supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
+  const url = supabaseUrl || process.env.VITE_SUPABASE_URL;
   if (!url) {
     throw new Error(
       "VITE_SUPABASE_URL is required to create a server-side Supabase client."
