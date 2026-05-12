@@ -1267,11 +1267,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           "sync-now"
         );
       } else {
-        const message = direction === "both"
-          ? "Sync complete (pull + push)."
-          : direction === "push"
-            ? "Push complete. App changes uploaded to Google Sheet."
-            : "Pull complete. Latest sheet changes imported.";
+        const message = "Pull complete. Latest sheet changes imported.";
         setSectionStatus("google_workspace", "success", message, "sync-now");
       }
     } catch (error) {
@@ -2818,16 +2814,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                 </div>
               )}
 
-              {/* Push button */}
-              <div className="mt-4 pt-3 border-t" style={{ borderColor: "var(--app-border)" }}>
-                <button
-                  onClick={() => void handleGoogleSheetsSync("push")}
-                  disabled={!googleSheetsConfig || googleSheetsSyncing}
-                  className="w-full rounded-xl bg-[var(--app-ghost)] py-2 text-xs font-bold disabled:opacity-50 hover:bg-[var(--app-border)] transition-colors"
-                >
-                  Push App Data to Sheet
-                </button>
-              </div>
+
             </div>
             )}
 

@@ -234,7 +234,7 @@ export interface DateRange {
   option: DateRangeOption;
 }
 
-export type GoogleSheetsSyncDirection = "pull" | "push" | "both";
+export type GoogleSheetsSyncDirection = "pull";
 export type GoogleSheetsSyncMode = "incremental" | "full_reconcile";
 
 export interface GoogleSheetsSyncOptions {
