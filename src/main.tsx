@@ -5,29 +5,22 @@ import './index.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SelfHostSetup } from './components/SelfHostSetup';
 import { Workbox } from "workbox-window";
-import { getEnvFirebaseConfig, getStoredFirebaseConfig, initFirebase } from './firebase';
 
 async function bootstrap() {
   let FirebaseProviderImport: React.FC<{ children: React.ReactNode }> | null = null;
 
   if (import.meta.env.VITE_TEST_MODE === "mock") {
-    const providerModule = await import("./testing/mockFirebase");
-    FirebaseProviderImport = providerModule.FirebaseProvider;
+    const providerModule = await import("./testing/mockSupabase");
+    FirebaseProviderImport = providerModule.SupabaseProvider;
   } else {
-    const providerModule = await import("./contexts/FirebaseContext");
-    FirebaseProviderImport = providerModule.FirebaseProvider;
+    const providerModule = await import("./contexts/SupabaseContext");
+    FirebaseProviderImport = providerModule.SupabaseProvider;
   }
 
   const FireProvider = FirebaseProviderImport!;
 
-  const envConfig = getEnvFirebaseConfig();
-  const storedConfig = getStoredFirebaseConfig();
-
   function AppShell() {
-    const [mode, setMode] = useState<"setup" | "app">(() => {
-      if (envConfig || storedConfig) return "app";
-      return "setup";
-    });
+    const [mode, setMode] = useState<"setup" | "app">("app");
 
     if (mode === "setup") {
       return (
@@ -46,12 +39,6 @@ async function bootstrap() {
         </FireProvider>
       </ErrorBoundary>
     );
-  }
-
-  if (envConfig) {
-    initFirebase(envConfig);
-  } else if (storedConfig) {
-    initFirebase(storedConfig);
   }
 
   createRoot(document.getElementById('root')!).render(

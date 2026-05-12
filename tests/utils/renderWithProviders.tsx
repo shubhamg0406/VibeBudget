@@ -1,12 +1,12 @@
 import React from "react";
 import { render } from "@testing-library/react";
 import type { RenderOptions } from "@testing-library/react";
-import { FirebaseContext, type FirebaseContextType } from "../../src/contexts/FirebaseContext";
-import { createMockFirebaseValue, type MockFirebaseSeed } from "../../src/testing/mockFirebase";
+import { FirebaseContext, type FirebaseContextType } from "../../src/contexts/SupabaseContext";
+import { createMockSupabaseValue, type MockSupabaseSeed } from "../../src/testing/mockSupabase";
 
 interface ExtendedOptions extends Omit<RenderOptions, "wrapper"> {
   firebase?: Partial<FirebaseContextType>;
-  seed?: MockFirebaseSeed;
+  seed?: MockSupabaseSeed;
 }
 
 export const renderWithProviders = (
@@ -14,7 +14,7 @@ export const renderWithProviders = (
   { firebase, seed, ...options }: ExtendedOptions = {},
 ) => {
   const value = {
-    ...createMockFirebaseValue(seed),
+    ...createMockSupabaseValue(seed),
     ...firebase,
   };
 
