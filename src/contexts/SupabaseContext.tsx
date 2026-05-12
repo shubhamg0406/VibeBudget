@@ -11,7 +11,7 @@ import {
 } from "../types";
 import {
   getSheetColumnValuesUntilEmptyRun, getSheetValues, inspectSpreadsheet, normalizeSheetName,
-  parseA1CellReference, parseSpreadsheetId, syncAppDataToSheet,
+  parseA1CellReference, parseSpreadsheetId,
 } from "../utils/googleSheetsSync";
 import {
   createBudgetDataFile, ensureBudgetFile, ensureVibeBudgetFolder, parseBudgetDataFile,
@@ -784,7 +784,7 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return { rows: allRows, count: totalCount };
   };
 
-  const syncGoogleSheets = async (direction: GoogleSheetsSyncDirection = "both", options?: GoogleSheetsSyncOptions): Promise<GooglePullSummary | void> => {
+  const syncGoogleSheets = async (direction: GoogleSheetsSyncDirection = "pull", options?: GoogleSheetsSyncOptions): Promise<GooglePullSummary | void> => {
     if (!googleSheetsAccessToken || !sheetsConfigRef.current) throw new Error("Configure Google Sheets first.");
     if (syncInFlightRef.current) return;
     syncInFlightRef.current = true;
@@ -830,14 +830,6 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         setGoogleSheetsError(null); return pullSummary;
       }
-      if (direction === "push" || direction === "both") {
-        const config = sheetsConfigRef.current;
-        if (!config) throw new Error("Google Sheets config missing.");
-        await syncAppDataToSheet(googleSheetsAccessToken, config, transactionsRef.current, incomeRef.current);
-        const timestamp = getIsoNow();
-        const nextConfig: GoogleSheetsSyncConfig = { ...config, lastPushAt: timestamp, lastError: null };
-        await saveUserProfilePatch({ googleSheetsConfig: nextConfig }); setGoogleSheetsError(null);
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Google Sheets sync failed.";
       setGoogleSheetsError(message);
@@ -851,7 +843,6 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!cu) throw new Error("Sign in with Google first.");
     const id = crypto.randomUUID();
     await supabase.from('transactions').upsert({ id, user_id: cu.id, ...data, updated_at: getIsoNow() });
-    if (googleSheetsAccessToken && sheetsConfigRef.current) void syncGoogleSheets("push").catch(() => undefined);
   };
 
   const refreshTransactionsNow = useCallback(async (): Promise<number> => {
@@ -868,7 +859,6 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const existing = transactionsRef.current.find((i) => i.id === id);
     if (!existing) return;
     await supabase.from('transactions').upsert({ ...existing, ...data, id, user_id: cu.id, updated_at: getIsoNow() });
-    if (googleSheetsAccessToken && sheetsConfigRef.current) void syncGoogleSheets("push").catch(() => undefined);
   };
 
   const deleteTransaction = async (id: string) => {
@@ -883,7 +873,6 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const categoryId = await ensureIncomeCategoryId(data.category);
     const id = crypto.randomUUID();
     await supabase.from('income').upsert({ id, user_id: cu.id, ...data, category_id: data.category_id || categoryId, updated_at: getIsoNow() });
-    if (googleSheetsAccessToken && sheetsConfigRef.current) void syncGoogleSheets("push").catch(() => undefined);
   };
 
   const updateIncome = async (id: string, data: Partial<Income>) => {
@@ -893,7 +882,6 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!existing) return;
     const categoryId = data.category ? await ensureIncomeCategoryId(data.category) : undefined;
     await supabase.from('income').upsert({ ...existing, ...data, id, user_id: cu.id, category_id: categoryId || data.category_id || existing.category_id, updated_at: getIsoNow() });
-    if (googleSheetsAccessToken && sheetsConfigRef.current) void syncGoogleSheets("push").catch(() => undefined);
   };
 
   const deleteIncome = async (id: string) => {
