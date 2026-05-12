@@ -36,4 +36,8 @@ export function getSupabaseServerClient(
   });
 }
 
-export { client as supabase };
+// The @supabase/postgrest-js GenericSchema constraint check (conditional type
+// in SupabaseClient) sometimes fails with complex Database types. Using the
+// unparameterized SupabaseClient gives any-typed queries which is equivalent
+// to runtime behavior (the actual PostgREST API is schema-validated server-side).
+export const supabase = client as unknown as SupabaseClient;

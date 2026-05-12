@@ -7,36 +7,43 @@ export interface Database {
         Row: UsersRow;
         Insert: UsersInsert;
         Update: UsersUpdate;
+        Relationships: [];
       };
       categories: {
         Row: CategoriesRow;
         Insert: CategoriesInsert;
         Update: CategoriesUpdate;
+        Relationships: [];
       };
       income_categories: {
         Row: IncomeCategoriesRow;
         Insert: IncomeCategoriesInsert;
         Update: IncomeCategoriesUpdate;
+        Relationships: [];
       };
       transactions: {
         Row: TransactionsRow;
         Insert: TransactionsInsert;
         Update: TransactionsUpdate;
+        Relationships: [];
       };
       income: {
         Row: IncomeRow;
         Insert: IncomeInsert;
         Update: IncomeUpdate;
+        Relationships: [];
       };
       recurring_rules: {
         Row: RecurringRulesRow;
         Insert: RecurringRulesInsert;
         Update: RecurringRulesUpdate;
+        Relationships: [];
       };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;
     Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
   };
 }
 

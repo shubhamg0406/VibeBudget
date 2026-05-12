@@ -19,8 +19,8 @@ import type {
   IncomeCategory,
   ExtractTransactionsResponse,
 } from "../types";
+import { supabase } from "../lib/supabase";
 import { useFirebase } from "../contexts/FirebaseContext";
-import { auth, firebaseDataNamespace, getStoredFirebaseConfig, getEnvFirebaseConfig } from "../firebase";
 import { extractTransactionsFromFiles, buildFilePayload } from "../utils/documentExtraction";
 
 interface BulkAddModalProps {
@@ -377,9 +377,10 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
     }
     setCommitting(true);
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       if (!token) {
-        throw new Error("Missing Firebase session token. Please sign in again.");
+        throw new Error("Missing session token. Please sign in again.");
       }
       const rows = commitBatch.records
         .filter((record) => record.kind === "expense")
@@ -391,14 +392,10 @@ export const BulkAddModal: React.FC<BulkAddModalProps> = ({
           amount: record.amount,
         }));
       const response = await fetch("/api/import/commit-ocr", {
-        // Send exact active Firebase target so server writes to the same dataset the UI reads from.
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
-          "x-firebase-project-id": getStoredFirebaseConfig()?.projectId || getEnvFirebaseConfig()?.projectId || "",
-          "x-firebase-namespace": firebaseDataNamespace || "prod",
-          "x-firebase-database-id": getStoredFirebaseConfig()?.firestoreDatabaseId || getEnvFirebaseConfig()?.firestoreDatabaseId || "(default)",
         },
         body: JSON.stringify({ mode, rows, includeDuplicates }),
       });

@@ -1,27 +1,4 @@
-import {
-  Auth,
-  GoogleAuthProvider,
-  UserCredential,
-  signInWithCredential,
-  signInWithPopup,
-  signInWithRedirect,
-} from "firebase/auth";
-
-const shouldFallbackToRedirect = (error: unknown) => {
-  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: string }).code) : "";
-  return [
-    "auth/popup-blocked",
-    "auth/popup-closed-by-user",
-    "auth/cancelled-popup-request",
-    "auth/operation-not-supported-in-this-environment",
-  ].includes(code);
-};
-
-const getAuthErrorCode = (error: unknown) => (
-  typeof error === "object" && error && "code" in error
-    ? String((error as { code?: string }).code)
-    : ""
-);
+import { supabase } from "./supabase";
 
 const isNativePlatform = async () => {
   try {
@@ -44,7 +21,7 @@ const isEmbeddedBrowser = () => {
   );
 };
 
-const signInWithNativePlugin = async (auth: Auth) => {
+const signInWithNativePlugin = async () => {
   const moduleName = "@codetrix-studio/capacitor-google-auth";
   const googleAuthPlugin = await import(/* @vite-ignore */ moduleName);
   const result = await googleAuthPlugin.GoogleAuth.signIn();
@@ -52,40 +29,70 @@ const signInWithNativePlugin = async (auth: Auth) => {
   if (!idToken) {
     throw new Error("Google Sign-In failed: missing idToken from native auth provider.");
   }
-  const credential = GoogleAuthProvider.credential(idToken);
-  return signInWithCredential(auth, credential);
+  const { error } = await supabase.auth.signInWithIdToken({
+    provider: "google",
+    token: idToken,
+  });
+  if (error) throw error;
 };
 
+const redirectTo = typeof window !== "undefined"
+  ? `${window.location.origin}/dashboard`
+  : undefined;
+
 export const signInWithGoogle = async (
-  auth: Auth,
-  provider: GoogleAuthProvider,
-): Promise<UserCredential | void> => {
+  withDriveScopes = false,
+): Promise<void> => {
   if (await isNativePlatform()) {
     try {
-      return await signInWithNativePlugin(auth);
+      return await signInWithNativePlugin();
     } catch (error) {
       console.warn("Native Google Sign-In unavailable; falling back to web popup.", error);
     }
   }
 
-  // Embedded browsers commonly block popups; use redirect first there.
+  const scopes = withDriveScopes
+    ? ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/spreadsheets.readonly"]
+    : undefined;
+
   if (isEmbeddedBrowser()) {
-    await signInWithRedirect(auth, provider);
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo,
+        scopes: scopes?.join(" "),
+        skipBrowserRedirect: false,
+      },
+    });
     return;
   }
 
   try {
-    return await signInWithPopup(auth, provider);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo,
+        scopes: scopes?.join(" "),
+      },
+    });
+    if (error) throw error;
   } catch (error) {
-    const code = getAuthErrorCode(error);
-    if (code === "auth/unauthorized-domain") {
-      throw new Error(
-        "Google sign-in is blocked for this origin. In Firebase Console -> Authentication -> Settings -> Authorized domains, add localhost and 127.0.0.1, then retry."
-      );
+    const message = error instanceof Error ? error.message : String(error || "");
+    if (
+      message.includes("popup") ||
+      message.includes("closed") ||
+      message.includes("cancelled")
+    ) {
+      await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          scopes: scopes?.join(" "),
+          skipBrowserRedirect: false,
+        },
+      });
+      return;
     }
-    if (!shouldFallbackToRedirect(error)) {
-      throw error;
-    }
-    await signInWithRedirect(auth, provider);
+    throw error;
   }
 };
