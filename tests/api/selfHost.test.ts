@@ -39,7 +39,7 @@ describe("self-host api", () => {
       expect(res.body.isOwner).toBe(false);
       expect(res.body.ownerEmail).toBeNull();
       expect(typeof res.body.secretsConfigured).toBe("boolean");
-      expect(typeof res.body.envConfigExists).toBe("boolean");
+      expect(typeof res.body.supabaseConfigured).toBe("boolean");
     });
 
     it("returns isOwner=true for the owner token", async () => {
@@ -81,7 +81,6 @@ describe("self-host api", () => {
     it("never returns raw secrets", async () => {
       const res = await request(app).get("/api/self-host/status");
       expect(res.status).toBe(200);
-      expect(res.body).not.toHaveProperty("FIREBASE_ADMIN_CREDENTIALS_JSON");
       expect(res.body).not.toHaveProperty("GEMINI_API_KEY");
       expect(res.body).not.toHaveProperty("secrets");
     });
@@ -170,7 +169,6 @@ describe("self-host api", () => {
         .post("/api/self-host/secrets")
         .set("Authorization", `Bearer ${token}`)
         .send({
-          FIREBASE_ADMIN_CREDENTIALS_JSON: '{"type":"service_account"}',
           GEMINI_API_KEY: "gemini-key-123",
           GEMINI_MODEL: "gemini-2.5-pro",
         });
@@ -179,11 +177,9 @@ describe("self-host api", () => {
       expect(res.body.success).toBe(true);
 
       // Verify stored in DB
-      const adminRow = db.prepare("SELECT value FROM self_host_config WHERE key='secrets:FIREBASE_ADMIN_CREDENTIALS_JSON'").get() as { value: string } | undefined;
       const geminiRow = db.prepare("SELECT value FROM self_host_config WHERE key='secrets:GEMINI_API_KEY'").get() as { value: string } | undefined;
       const modelRow = db.prepare("SELECT value FROM self_host_config WHERE key='secrets:GEMINI_MODEL'").get() as { value: string } | undefined;
 
-      expect(adminRow?.value).toBe('{"type":"service_account"}');
       expect(geminiRow?.value).toBe("gemini-key-123");
       expect(modelRow?.value).toBe("gemini-2.5-pro");
     });
@@ -227,7 +223,6 @@ describe("self-host api", () => {
       // Must only return booleans
       expect(typeof res.body.GEMINI_API_KEY).toBe("boolean");
       expect(typeof res.body.GEMINI_MODEL).toBe("boolean");
-      expect(typeof res.body.FIREBASE_ADMIN_CREDENTIALS_JSON).toBe("boolean");
       // Must not return raw values
       expect(res.body.GEMINI_API_KEY).not.toBe("super-secret-key");
     });
@@ -274,59 +269,57 @@ describe("self-host api", () => {
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty("mode");
       expect(res.body).toHaveProperty("app");
-      expect(res.body).toHaveProperty("firebase");
-      expect(res.body).toHaveProperty("firebaseAdmin");
+      expect(res.body).toHaveProperty("supabase");
       expect(res.body).toHaveProperty("selfHost");
       expect(res.body).toHaveProperty("ai");
       expect(res.body).toHaveProperty("features");
     });
 
     it("detects self-host mode when env vars are present", async () => {
-      process.env.VITE_FIREBASE_API_KEY = "test-api-key";
-      process.env.VITE_FIREBASE_AUTH_DOMAIN = "test.firebaseapp.com";
-      process.env.VITE_FIREBASE_PROJECT_ID = "test-project";
+      process.env.VITE_SUPABASE_URL = "https://test-project.supabase.co";
+      process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
 
       const res = await request(app).get("/api/setup/status");
       expect(res.status).toBe(200);
-      expect(res.body.firebase.configured).toBe(true);
-      expect(res.body.firebase.projectId).toBe("test-project");
+      expect(res.body.supabase.configured).toBe(true);
+      expect(res.body.supabase.url).toBe("https://test-project.supabase.co");
 
-      delete process.env.VITE_FIREBASE_API_KEY;
-      delete process.env.VITE_FIREBASE_AUTH_DOMAIN;
-      delete process.env.VITE_FIREBASE_PROJECT_ID;
+      delete process.env.VITE_SUPABASE_URL;
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     });
 
-    it("detects Firebase Admin configured", async () => {
-      process.env.FIREBASE_ADMIN_CREDENTIALS_JSON = '{"type":"service_account","project_id":"test"}';
+    it("detects Supabase Admin configured", async () => {
+      process.env.VITE_SUPABASE_URL = "https://test-project.supabase.co";
+      process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
 
       const res = await request(app).get("/api/setup/status");
       expect(res.status).toBe(200);
-      expect(res.body.firebaseAdmin.configured).toBe(true);
-      expect(res.body.firebaseAdmin.hasCredentialsJson).toBe(true);
+      expect(res.body.supabase.configured).toBe(true);
+      expect(res.body.supabase.url).toBe("https://test-project.supabase.co");
 
-      delete process.env.FIREBASE_ADMIN_CREDENTIALS_JSON;
+      delete process.env.VITE_SUPABASE_URL;
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     });
 
-    it("reports firebaseAdmin not configured when no credentials", async () => {
-      delete process.env.FIREBASE_ADMIN_CREDENTIALS_JSON;
+    it("reports supabase not configured when no credentials", async () => {
+      delete process.env.VITE_SUPABASE_URL;
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 
       const res = await request(app).get("/api/setup/status");
       expect(res.status).toBe(200);
-      expect(res.body.firebaseAdmin.configured).toBe(false);
+      expect(res.body.supabase.configured).toBe(false);
     });
 
     it("reports features based on config", async () => {
-      process.env.VITE_FIREBASE_API_KEY = "test-api-key";
-      process.env.VITE_FIREBASE_AUTH_DOMAIN = "test.firebaseapp.com";
+      process.env.VITE_SUPABASE_URL = "https://test-project.supabase.co";
 
       const res = await request(app).get("/api/setup/status");
       expect(res.status).toBe(200);
-      expect(res.body.features.firebaseAuth).toBe(true);
-      expect(res.body.features.firebaseAdmin).toBe(false);
+      expect(res.body.features.supabaseAuth).toBe(true);
+      expect(res.body.features.supabaseAdmin).toBe(false);
       expect(res.body.features.selfHostedSetup).toBe(true);
 
-      delete process.env.VITE_FIREBASE_API_KEY;
-      delete process.env.VITE_FIREBASE_AUTH_DOMAIN;
+      delete process.env.VITE_SUPABASE_URL;
     });
   });
 });
