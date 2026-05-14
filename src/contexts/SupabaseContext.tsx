@@ -46,6 +46,10 @@ const DEFAULT_CATEGORY_NAMES = [
   "Misc.", "Public transportation", "Rent", "Shopping", "Telecom", "Travel", "Utilities",
 ];
 
+const DEFAULT_INCOME_CATEGORY_NAMES = [
+  "Card Refunds", "Expense Reimbursement", "Job", "Other", "Side Project", "Tax Refund",
+];
+
 const DEFAULT_CORE_EXCLUDED = ["Canada Investments", "India Transfer Investment"];
 
 const DEFAULT_PREFERENCES: Preferences = { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED };
@@ -125,6 +129,9 @@ const dedupeCategoriesByName = <T extends { id: string; name: string; target_amo
 
 const createDefaultExpenseCategories = (): ExpenseCategory[] => CANONICAL_EXPENSE_CATEGORY_NAMES.map((name) => ({ id: crypto.randomUUID(), name, target_amount: 0 }));
 
+const createDefaultIncomeCategories = (): IncomeCategory[] =>
+  [...DEFAULT_INCOME_CATEGORY_NAMES].sort((a, b) => a.localeCompare(b)).map((name) => ({ id: crypto.randomUUID(), name, target_amount: 0 }));
+
 const migrateExpenseCategories = (categories: ExpenseCategory[]) => {
   const normalized = dedupeCategoriesByName(categories.map((c) => ({ ...c, name: normalizeExpenseCategoryName(c.name) })));
   return normalized.length > 0 ? normalized : createDefaultExpenseCategories();
@@ -141,8 +148,11 @@ const normalizePreferences = (prefs?: Preferences | null): Preferences => ({
   coreExcludedCategories: migrateExcludedCategories(prefs?.coreExcludedCategories),
 });
 
-const createIncomeCategoriesFromRecords = (records: Income[]): IncomeCategory[] =>
-  Array.from(new Set(records.map((i) => normalizeCategoryName(i.category)).filter(Boolean))).sort((a, b) => a.localeCompare(b)).map((name) => ({ id: crypto.randomUUID(), name, target_amount: 0 }));
+const createIncomeCategoriesFromRecords = (records: Income[]): IncomeCategory[] => {
+  const fromRecords = Array.from(new Set(records.map((i) => normalizeCategoryName(i.category)).filter(Boolean))).sort((a, b) => a.localeCompare(b)).map((name) => ({ id: crypto.randomUUID(), name, target_amount: 0 }));
+  if (fromRecords.length > 0) return fromRecords;
+  return createDefaultIncomeCategories();
+};
 
 const resolveIncomeCategories = (stored: IncomeCategory[] | undefined, records: Income[]) =>
   Array.isArray(stored) && stored.length > 0 ? migrateIncomeCategories(stored) : createIncomeCategoriesFromRecords(records);
@@ -624,8 +634,8 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     else { Promise.resolve(supabase.from('categories').select('*').eq('user_id', uid)).then(({ data, error }) => { if (error) { handleLoadError('categories', error); return; } const nc = (data || []) as unknown as ExpenseCategory[]; writeSessionCache(uid, 'expenseCategories', nc); remotePresence.categories = nc.length > 0; setExpenseCategories(nc.length > 0 ? migrateExpenseCategories(nc) : createDefaultExpenseCategories()); loadedState.categories = true; markLoaded(); }).catch((err: unknown) => handleLoadError('categories', err)); }
 
     const cachedIC = readSessionCache<IncomeCategory>(uid, 'incomeCategories');
-    if (cachedIC) { remotePresence.incomeCategories = cachedIC.length > 0; setIncomeCategories(cachedIC.length > 0 ? migrateIncomeCategories(cachedIC) : []); loadedState.incomeCategories = true; markLoaded(); }
-    else { Promise.resolve(supabase.from('income_categories').select('*').eq('user_id', uid)).then(({ data, error }) => { if (error) { handleLoadError('income categories', error); return; } const nic = (data || []) as unknown as IncomeCategory[]; writeSessionCache(uid, 'incomeCategories', nic); remotePresence.incomeCategories = nic.length > 0; setIncomeCategories(nic.length > 0 ? migrateIncomeCategories(nic) : []); loadedState.incomeCategories = true; markLoaded(); }).catch((err: unknown) => handleLoadError('income categories', err)); }
+    if (cachedIC) { remotePresence.incomeCategories = cachedIC.length > 0; setIncomeCategories(cachedIC.length > 0 ? migrateIncomeCategories(cachedIC) : createDefaultIncomeCategories()); loadedState.incomeCategories = true; markLoaded(); }
+    else { Promise.resolve(supabase.from('income_categories').select('*').eq('user_id', uid)).then(({ data, error }) => { if (error) { handleLoadError('income categories', error); return; } const nic = (data || []) as unknown as IncomeCategory[]; writeSessionCache(uid, 'incomeCategories', nic); remotePresence.incomeCategories = nic.length > 0; setIncomeCategories(nic.length > 0 ? migrateIncomeCategories(nic) : createDefaultIncomeCategories()); loadedState.incomeCategories = true; markLoaded(); }).catch((err: unknown) => handleLoadError('income categories', err)); }
 
     const cachedTx = loadTransactionsCache(uid);
     if (cachedTx.length > 0) { remotePresence.transactions = true; setTransactions(cachedTx); transactionsRef.current = cachedTx; }
