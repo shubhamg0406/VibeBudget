@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   BarChart3,
-  Bell,
   CalendarCheck,
-  CalendarDays,
   CircleHelp,
   Home,
   List,
@@ -155,13 +153,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
                   title="Data Hub — Import & Refresh"
                 >
                   <Upload size={19} />
-                </button>
-                <button className="text-fintech-muted transition-colors hover:text-fintech-accent">
-                  <CalendarDays size={19} />
-                </button>
-                <button className="relative text-fintech-muted transition-colors hover:text-fintech-accent">
-                  <Bell size={19} />
-                  <span className="absolute -right-0.5 -top-1 h-2 w-2 rounded-full bg-[#ff716a]" />
                 </button>
               </div>
               <div className="h-8 w-px bg-[var(--app-divider)]" />

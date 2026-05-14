@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./components/Dashboard";
 import { Analysis } from "./components/Analysis";
@@ -26,6 +27,7 @@ export default function App() {
     transactions,
     income,
     updateExpenseCategoryTarget,
+    onboardingCompleted,
   } = useFirebase();
   const [view, setView] = useState<View>(() => {
     if (typeof window !== "undefined" && window.location.pathname.startsWith("/docs")) {
@@ -306,6 +308,16 @@ export default function App() {
         {renderView()}
       </Layout>
       <AiChat />
+      {!onboardingCompleted && (
+        <OnboardingWizard
+          onComplete={() => {
+            // onboardingCompleted state is updated by completeOnboarding() inside DoneStep
+          }}
+          onNavigateToSettings={(tab) => {
+            onNavigate("settings", tab);
+          }}
+        />
+      )}
     </>
   );
 }
