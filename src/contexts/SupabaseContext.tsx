@@ -40,14 +40,13 @@ const LEGACY_CATEGORY_RENAMES: Record<string, string> = {
 };
 
 const DEFAULT_CATEGORY_NAMES = [
-  "Alcohol + Weed", "Canada Investments", "Car fuel", "Car maintenance", "Car Parking",
+  "Alcohol", "Canada Investments", "Car fuel", "Car maintenance", "Car Parking",
   "Clothing", "Donation", "Electronics", "Entertainment", "Gifts", "Going out food",
-  "Groceries", "Household Items", "India Transfer - Parents", "India Transfer Investment",
-  "Insurance", "Medical", "Misc.", "Nagar/Bamor Expenses", "Public transportation",
-  "Rent", "Shopping", "Telecom", "Travel", "Utilities",
+  "Groceries", "Household Items", "India Transfer Investment", "Insurance", "Medical",
+  "Misc.", "Public transportation", "Rent", "Shopping", "Telecom", "Travel", "Utilities",
 ];
 
-const DEFAULT_CORE_EXCLUDED = ["Canada Investments", "India Transfer Investment", "India Transfer - Parents", "Nagar/Bamor Expenses"];
+const DEFAULT_CORE_EXCLUDED = ["Canada Investments", "India Transfer Investment"];
 
 const DEFAULT_PREFERENCES: Preferences = { baseCurrency: "CAD", exchangeRates: [], coreExcludedCategories: DEFAULT_CORE_EXCLUDED };
 
@@ -96,7 +95,7 @@ const FALLBACK_EXPENSE_CATEGORY_NAME = "Misc.";
 
 const normalizeExpenseCategoryName = (name: string) => {
   const n = normalizeCategoryName(name);
-  return CANONICAL_EXPENSE_CATEGORY_NAME_SET.has(n) ? n : FALLBACK_EXPENSE_CATEGORY_NAME;
+  return n || FALLBACK_EXPENSE_CATEGORY_NAME;
 };
 
 const normalizeSheetIdentityText = (value: unknown) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
@@ -128,8 +127,7 @@ const createDefaultExpenseCategories = (): ExpenseCategory[] => CANONICAL_EXPENS
 
 const migrateExpenseCategories = (categories: ExpenseCategory[]) => {
   const normalized = dedupeCategoriesByName(categories.map((c) => ({ ...c, name: normalizeExpenseCategoryName(c.name) })));
-  const byName = new Map(normalized.map((c) => [c.name, c]));
-  return CANONICAL_EXPENSE_CATEGORY_NAMES.map((name) => byName.get(name) || { id: crypto.randomUUID(), name, target_amount: 0 });
+  return normalized.length > 0 ? normalized : createDefaultExpenseCategories();
 };
 
 const migrateIncomeCategories = (categories: IncomeCategory[]) => dedupeCategoriesByName(categories.map((c) => ({ ...c, name: normalizeCategoryName(c.name) })));
@@ -585,7 +583,7 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setTellerCategoryMappings(Array.isArray(data.teller_category_mappings) ? data.teller_category_mappings as TellerCategoryMapping[] : []);
         setLastSynced(data.last_synced_at ? new Date(data.last_synced_at as string) : null);
         setAiConfig(data.ai_config as AiProviderConfig | null || null);
-        setOnboardingCompleted(Boolean(data.onboarding_completed));
+        setOnboardingCompleted(data.onboarding_completed == null ? true : Boolean(data.onboarding_completed));
         setOnboardingStep(typeof data.onboarding_step === 'number' ? data.onboarding_step : 0);
         loadedState.profile = true; markLoaded();
       }
@@ -606,7 +604,7 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setTellerCategoryMappings(Array.isArray(data.teller_category_mappings) ? data.teller_category_mappings as TellerCategoryMapping[] : []);
         setLastSynced(data.last_synced_at ? new Date(data.last_synced_at as string) : null);
         setAiConfig(data.ai_config as AiProviderConfig | null || null);
-        setOnboardingCompleted(Boolean((data as Record<string, unknown>).onboarding_completed));
+        setOnboardingCompleted((data as Record<string, unknown>).onboarding_completed == null ? true : Boolean((data as Record<string, unknown>).onboarding_completed));
         setOnboardingStep(typeof (data as Record<string, unknown>).onboarding_step === 'number' ? (data as Record<string, unknown>).onboarding_step as number : 0);
       }
       loadedState.profile = true; markLoaded();
