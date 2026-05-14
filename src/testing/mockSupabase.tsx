@@ -70,7 +70,10 @@ export const createMockSupabaseValue = (seed?: MockSupabaseSeed): FirebaseContex
     addIncome: noop, updateIncome: noop, deleteIncome: noop, createRecurringRule: async () => "mock-rule",
     updateRecurringRule: noop, deleteRecurringRule: noop, generateRecurringTransactions: async () => ({ generated: 0, skipped: 0 }),
     getUpcomingRecurring: () => [], updateExpenseCategoryTarget: noop, updateIncomeCategoryTarget: noop,
-    updateCategoryTarget: noop, previewImport, commitImport: async () => ({ imported: 0, skipped: 0, invalid: 0 }),
+    updateCategoryTarget: noop, addExpenseCategory: noop, addIncomeCategory: noop,
+    deleteExpenseCategory: noop, deleteIncomeCategory: noop,
+    updateExpenseCategoryName: noop, updateIncomeCategoryName: noop,
+    previewImport, commitImport: async () => ({ imported: 0, skipped: 0, invalid: 0 }),
     importData: noop, upsertGoogleSheetRows: async () => ({ imported: 0, updated: 0, skipped: 0 }),
     wipeData: noop, backupToDrive: noop, syncToCloud: noop, shareBudget: noop, googleSheetsConfig,
     googleSheetsConnected: true, googleSheetsSyncing: false, googleSheetsError: null,
@@ -90,6 +93,8 @@ export const createMockSupabaseValue = (seed?: MockSupabaseSeed): FirebaseContex
     connectTeller: noop, disconnectTeller: noop, syncTellerTransactions: async () => ({ imported: 0, skipped: 0, invalid: 0 }),
     fetchTellerAccounts: async () => [], setTellerCredentials: noop, setTellerCategoryMappings: noop,
     aiConfig: null, saveAiConfig: async () => {},
+    onboardingCompleted: true, onboardingStep: 6,
+    saveOnboardingStep: noop, completeOnboarding: noop,
   };
 };
 
@@ -122,7 +127,14 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     generateRecurringTransactions: async () => ({ generated: 0, skipped: 0 }),
     getUpcomingRecurring: () => [],
     updateExpenseCategoryTarget: async (id, target) => { setExpenseCategories((c) => c.map((i) => (i.id === id ? { ...i, target_amount: target } : i))); },
+    updateIncomeCategoryTarget: async (id, target) => { setIncomeCategories((c) => c.map((i) => (i.id === id ? { ...i, target_amount: target } : i))); },
     updateCategoryTarget: async (id, target) => { setExpenseCategories((c) => c.map((i) => (i.id === id ? { ...i, target_amount: target } : i))); },
+    addExpenseCategory: async (name, targetAmount) => { setExpenseCategories((c) => [...c, { id: crypto.randomUUID(), name, target_amount: targetAmount }]); },
+    addIncomeCategory: async (name, targetAmount) => { setIncomeCategories((c) => [...c, { id: crypto.randomUUID(), name, target_amount: targetAmount }]); },
+    deleteExpenseCategory: async (id) => { setExpenseCategories((c) => c.filter((i) => i.id !== id)); },
+    deleteIncomeCategory: async (id) => { setIncomeCategories((c) => c.filter((i) => i.id !== id)); },
+    updateExpenseCategoryName: async (id, name) => { setExpenseCategories((c) => c.map((i) => (i.id === id ? { ...i, name } : i))); },
+    updateIncomeCategoryName: async (id, name) => { setIncomeCategories((c) => c.map((i) => (i.id === id ? { ...i, name } : i))); },
     previewImport: (source, payload, options) => previewImportBatch({ source, payload, options, existing: { transactions, income, expenseCategories, incomeCategories } }),
     commitImport: async (batch, options) => {
       const allowedIds = options?.recordIds ? new Set(options.recordIds) : null;

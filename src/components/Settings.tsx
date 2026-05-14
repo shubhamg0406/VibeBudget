@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Banknote,
@@ -1563,6 +1563,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
   const exchangeRates = preferences?.exchangeRates || [];
   const baseCurrency = preferences?.baseCurrency || "CAD";
+  const exchangeRatesRef = useRef(exchangeRates);
+  useEffect(() => { exchangeRatesRef.current = exchangeRates; }, [exchangeRates]);
 
   const currenciesSeenInData = useMemo(() => {
     const fromExpenses = transactions.map((t) => t.currency).filter(Boolean) as string[];
@@ -1604,10 +1606,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       const data = await res.json() as { rate?: number; error?: string };
       if (!res.ok || !data.rate) throw new Error(data.error || "Rate unavailable");
       if (!updatePreferences) return;
-      const next = exchangeRates.map((r) =>
+      const next = exchangeRatesRef.current.map((r) =>
         r.currency === currency ? { ...r, rateToBase: data.rate!, liveRateUpdatedAt: new Date().toISOString() } : r
       );
-      await updatePreferences({ ...preferences, exchangeRates: next });
+      await updatePreferences({ exchangeRates: next });
       updateRateMeta(currency, "seeded");
     } catch (err) {
       setSectionStatus("currency", "error", `Live rate fetch failed for ${currency}: ${err instanceof Error ? err.message : "unknown"}`);

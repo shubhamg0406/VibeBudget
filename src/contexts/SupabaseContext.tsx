@@ -223,6 +223,9 @@ interface UserProfileDocument {
 
 export interface FirebaseContextType {
   user: FirebaseUser | null; loading: boolean; authError: string | null; clearAuthError: () => void;
+  onboardingCompleted: boolean; onboardingStep: number;
+  saveOnboardingStep: (step: number) => Promise<void>;
+  completeOnboarding: () => Promise<void>;
   budgetId: string | null; ownerEmail: string | null; sharedUsers: string[];
   expenseCategories: ExpenseCategory[]; incomeCategories: IncomeCategory[]; categories: Category[];
   transactions: Transaction[]; income: Income[]; recurringRules: RecurringRule[];
@@ -242,6 +245,12 @@ export interface FirebaseContextType {
   updateExpenseCategoryTarget: (id: string, target: number) => Promise<void>;
   updateIncomeCategoryTarget: (id: string, target: number) => Promise<void>;
   updateCategoryTarget: (id: string, target: number) => Promise<void>;
+  addExpenseCategory: (name: string, targetAmount: number) => Promise<void>;
+  addIncomeCategory: (name: string, targetAmount: number) => Promise<void>;
+  deleteExpenseCategory: (id: string) => Promise<void>;
+  deleteIncomeCategory: (id: string) => Promise<void>;
+  updateExpenseCategoryName: (id: string, name: string) => Promise<void>;
+  updateIncomeCategoryName: (id: string, name: string) => Promise<void>;
   previewImport: (source: ImportSource, payload: string | unknown[] | Record<string, unknown>, options?: ImportPreviewOptions) => ImportBatch;
   commitImport: (batch: ImportBatch, options?: ImportCommitOptions, onProgress?: (current: number, total: number) => void) => Promise<ImportCommitSummary>;
   importData: (type: string, data: any[], isUpsert?: boolean, onProgress?: (current: number, total: number) => void) => Promise<void>;
@@ -312,6 +321,8 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [googleSheetsSyncing, setGoogleSheetsSyncing] = useState(false);
   const [googlePullSummary, setGooglePullSummary] = useState<GooglePullSummary | null>(null);
   const [aiConfig, setAiConfig] = useState<AiProviderConfig | null>(null);
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(false);
+  const [onboardingStep, setOnboardingStep] = useState<number>(0);
   const [googleSheetsError, setGoogleSheetsError] = useState<string | null>(null);
   const [driveSyncError, setDriveSyncError] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
@@ -574,6 +585,8 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setTellerCategoryMappings(Array.isArray(data.teller_category_mappings) ? data.teller_category_mappings as TellerCategoryMapping[] : []);
         setLastSynced(data.last_synced_at ? new Date(data.last_synced_at as string) : null);
         setAiConfig(data.ai_config as AiProviderConfig | null || null);
+        setOnboardingCompleted(Boolean(data.onboarding_completed));
+        setOnboardingStep(typeof data.onboarding_step === 'number' ? data.onboarding_step : 0);
         loadedState.profile = true; markLoaded();
       }
     }).subscribe();
@@ -593,6 +606,8 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setTellerCategoryMappings(Array.isArray(data.teller_category_mappings) ? data.teller_category_mappings as TellerCategoryMapping[] : []);
         setLastSynced(data.last_synced_at ? new Date(data.last_synced_at as string) : null);
         setAiConfig(data.ai_config as AiProviderConfig | null || null);
+        setOnboardingCompleted(Boolean((data as Record<string, unknown>).onboarding_completed));
+        setOnboardingStep(typeof (data as Record<string, unknown>).onboarding_step === 'number' ? (data as Record<string, unknown>).onboarding_step as number : 0);
       }
       loadedState.profile = true; markLoaded();
     }).catch((err: unknown) => handleLoadError('profile', err));
@@ -1019,6 +1034,54 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updateCategoryTarget = updateExpenseCategoryTarget;
 
+  const addExpenseCategory = async (name: string, targetAmount: number) => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    if (!cu) throw new Error("Sign in with Google first.");
+    const next: ExpenseCategory = { id: crypto.randomUUID(), name: name.trim(), target_amount: targetAmount };
+    await supabase.from('categories').upsert({ ...next, user_id: cu.id, deleted: false, updated_at: getIsoNow() });
+    clearSessionCache(cu.id, 'expenseCategories');
+  };
+
+  const addIncomeCategory = async (name: string, targetAmount: number) => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    if (!cu) throw new Error("Sign in with Google first.");
+    const next: IncomeCategory = { id: crypto.randomUUID(), name: name.trim(), target_amount: targetAmount };
+    await supabase.from('income_categories').upsert({ ...next, user_id: cu.id, deleted: false, updated_at: getIsoNow() });
+    clearSessionCache(cu.id, 'incomeCategories');
+  };
+
+  const deleteExpenseCategory = async (id: string) => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    if (!cu) throw new Error("Sign in with Google first.");
+    await supabase.from('categories').update({ deleted: true, updated_at: getIsoNow() }).eq('id', id).eq('user_id', cu.id);
+    clearSessionCache(cu.id, 'expenseCategories');
+  };
+
+  const deleteIncomeCategory = async (id: string) => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    if (!cu) throw new Error("Sign in with Google first.");
+    await supabase.from('income_categories').update({ deleted: true, updated_at: getIsoNow() }).eq('id', id).eq('user_id', cu.id);
+    clearSessionCache(cu.id, 'incomeCategories');
+  };
+
+  const updateExpenseCategoryName = async (id: string, name: string) => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    if (!cu) throw new Error("Sign in with Google first.");
+    const existing = expenseCategoriesRef.current.find((c) => c.id === id);
+    if (!existing) return;
+    await supabase.from('categories').upsert({ ...existing, user_id: cu.id, name: name.trim(), updated_at: getIsoNow() });
+    clearSessionCache(cu.id, 'expenseCategories');
+  };
+
+  const updateIncomeCategoryName = async (id: string, name: string) => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    if (!cu) throw new Error("Sign in with Google first.");
+    const existing = incomeCategoriesRef.current.find((c) => c.id === id);
+    if (!existing) return;
+    await supabase.from('income_categories').upsert({ ...existing, user_id: cu.id, name: name.trim(), updated_at: getIsoNow() });
+    clearSessionCache(cu.id, 'incomeCategories');
+  };
+
   const previewImport = (source: ImportSource, payload: string | unknown[] | Record<string, unknown>, options?: ImportPreviewOptions) =>
     previewImportBatch({ source, payload, options, existing: { transactions: transactionsRef.current, income: incomeRef.current, expenseCategories: expenseCategoriesRef.current, incomeCategories: incomeCategoriesRef.current } });
 
@@ -1247,16 +1310,34 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setAiConfig(config);
   }, [user, saveUserProfilePatch]);
 
+  const saveOnboardingStep = useCallback(async (step: number) => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    if (!cu) throw new Error("Sign in first.");
+    setOnboardingStep(step);
+    await supabase.from('users').update({ onboarding_step: step }).eq('id', cu.id);
+  }, []);
+
+  const completeOnboarding = useCallback(async () => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    if (!cu) throw new Error("Sign in first.");
+    setOnboardingCompleted(true);
+    await supabase.from('users').update({ onboarding_completed: true, onboarding_step: 6 }).eq('id', cu.id);
+  }, []);
+
   return (
     <FirebaseContext.Provider
       value={{
-        user, loading, authError, clearAuthError: () => setAuthError(null), budgetId,
+        user, loading, authError, clearAuthError: () => setAuthError(null),
+        onboardingCompleted, onboardingStep, saveOnboardingStep, completeOnboarding,
+        budgetId,
         ownerEmail: user?.email || null, sharedUsers: [], expenseCategories, incomeCategories,
         categories: expenseCategories, transactions, income, recurringRules, preferences,
         updatePreferences, signIn, logout, addTransaction, refreshTransactionsNow, updateTransaction,
         deleteTransaction, addIncome, updateIncome, deleteIncome, createRecurringRule,
         updateRecurringRule, deleteRecurringRule, generateRecurringTransactions, getUpcomingRecurring,
         updateExpenseCategoryTarget, updateIncomeCategoryTarget, updateCategoryTarget,
+        addExpenseCategory, addIncomeCategory, deleteExpenseCategory, deleteIncomeCategory,
+        updateExpenseCategoryName, updateIncomeCategoryName,
         previewImport, commitImport, importData, upsertGoogleSheetRows, wipeData, backupToDrive,
         syncToCloud, shareBudget, googleSheetsConfig, googleSheetsConnected: Boolean(googleSheetsAccessToken && user),
         googleSheetsSyncing, googleSheetsError, connectGoogleSheets: async () => { await ensureSignedInWithDriveScopes(); },

@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Transaction, Income, ExpenseCategory, IncomeCategory } from "../types";
-import { 
-  Search, 
-  Filter, 
-  Plus, 
-  X, 
+import {
+  Search,
+  Filter,
+  Plus,
+  X,
   ChevronDown,
   ChevronUp,
   ArrowUpDown,
@@ -13,7 +13,7 @@ import {
   RotateCcw,
   SearchX,
   RefreshCw,
-  Upload,
+  ScanLine,
   Copy
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -265,17 +265,6 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setShowBulkAdd(true)}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border bg-[var(--app-panel)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-fintech-accent transition-colors hover:bg-fintech-accent/10"
-            style={{ borderColor: "var(--app-border)" }}
-            aria-label="Bulk add transactions from files"
-          >
-            <Upload size={15} />
-            <span>Bulk Add</span>
-          </button>
-
-          <button
-            type="button"
             onClick={() => setShowDuplicatePanel((prev) => !prev)}
             className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
               showDuplicatePanel
@@ -288,20 +277,6 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <Copy size={15} />
             <span>Duplicates</span>
           </button>
-
-          {canRefreshFromSheets && (
-            <button
-              type="button"
-              onClick={() => void handleSheetRefresh()}
-              disabled={isSheetRefreshing}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border bg-[var(--app-panel)] px-4 py-2 text-xs font-bold uppercase tracking-wider text-fintech-accent transition-colors hover:bg-fintech-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
-              style={{ borderColor: "var(--app-border)" }}
-              aria-label="Refresh transactions from Google Sheets"
-            >
-              <RefreshCw size={15} className={isSheetRefreshing ? "animate-spin" : ""} />
-              <span>{isSheetRefreshing ? "Refreshing..." : "Refresh Sheet"}</span>
-            </button>
-          )}
         </div>
       </header>
 
@@ -837,7 +812,16 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
       </section>
 
       {/* Floating Action Button */}
-      <div className="pointer-events-none fixed bottom-24 right-24 z-40 lg:bottom-8 lg:right-28">
+      <div className="pointer-events-none fixed bottom-24 right-24 z-40 lg:bottom-8 lg:right-28 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setShowBulkAdd(true)}
+          className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full border bg-[var(--app-panel)] text-fintech-accent shadow-lg transition-all hover:bg-fintech-accent/10 hover:scale-105 active:scale-95"
+          style={{ borderColor: "var(--app-border)" }}
+          title="Scan / bulk import from file or photo"
+        >
+          <ScanLine size={20} />
+        </button>
         <FAB onClick={() => setShowAddModal(true)} className="pointer-events-auto" />
       </div>
 
