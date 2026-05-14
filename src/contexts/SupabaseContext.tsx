@@ -269,6 +269,7 @@ export interface FirebaseContextType {
   syncTellerTransactions: () => Promise<ImportCommitSummary>; fetchTellerAccounts: () => Promise<import("../types").TellerAccount[]>;
   setTellerCredentials: (creds: TellerCredentials | null) => void; setTellerCategoryMappings: (mappings: TellerCategoryMapping[]) => void;
   aiConfig: AiProviderConfig | null; saveAiConfig: (config: AiProviderConfig | null) => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 export const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -711,6 +712,27 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const signIn = async () => { await beginGoogleAuth(false); };
 
   const logout = async () => {
+    const { data: { user: cu } } = await supabase.auth.getUser();
+    const uid = cu?.id;
+    clearLocalState();
+    if (uid) { clearTransactionsCache(uid); clearSessionCache(uid, 'expenseCategories'); clearSessionCache(uid, 'incomeCategories'); clearSessionCache(uid, 'recurringRules'); }
+    storeAccessToken(null);
+    await supabase.auth.signOut();
+  };
+
+  const deleteAccount = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error("Not signed in.");
+    const res = await fetch("/api/account/delete", {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "Failed to delete account.");
+    }
+    // Clear all local state then sign out (auth user is gone server-side)
     const { data: { user: cu } } = await supabase.auth.getUser();
     const uid = cu?.id;
     clearLocalState();
@@ -1273,6 +1295,7 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         tellerSyncing, tellerError, tellerCredentials, tellerCategoryMappings, connectTeller, disconnectTeller,
         syncTellerTransactions, fetchTellerAccounts, setTellerCredentials, setTellerCategoryMappings,
         aiConfig, saveAiConfig: saveAiConfigFn,
+        deleteAccount,
       }}
     >
       {children}
