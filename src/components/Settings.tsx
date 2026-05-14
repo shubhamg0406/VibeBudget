@@ -296,6 +296,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     // AI
     aiConfig,
     saveAiConfig,
+    deleteAccount,
   } = useFirebase();
 
   const connectedGoogleEmail = user?.email || googleSheetsConfig?.connectedBy || null;
@@ -321,6 +322,9 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
   const [confirmWipe, setConfirmWipe] = useState<string | null>(null);
   const [confirmWipeText, setConfirmWipeText] = useState("");
   const [maintenanceExportConfirmed, setMaintenanceExportConfirmed] = useState(false);
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [deleteAccountText, setDeleteAccountText] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [lastLocalExportAt, setLastLocalExportAt] = useState<string | null>(null);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [isUpsertByType, setIsUpsertByType] = useState<Record<string, boolean>>({
@@ -938,6 +942,20 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
       }
     } finally {
       if (!didTimeout) setWiping(null);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeletingAccount(true);
+    try {
+      await deleteAccount();
+      // deleteAccount signs the user out — Settings will unmount, no further state needed
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete account.";
+      setSectionStatus("maintenance", "error", message);
+      setShowDeleteAccount(false);
+      setDeleteAccountText("");
+      setDeletingAccount(false);
     }
   };
 
@@ -2012,6 +2030,69 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                 />
               </div>
             </div>
+          </motion.div>
+        )}
+
+        {showDeleteAccount && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-6 backdrop-blur-sm"
+            style={{ backgroundColor: "var(--app-overlay)" }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md space-y-5 rounded-3xl border bg-fintech-card p-6"
+              style={{ borderColor: "var(--app-border)" }}
+            >
+              <div className="flex items-center gap-3 text-fintech-danger">
+                <Trash2 size={18} />
+                <h3 className="font-bold">Delete Your Account</h3>
+              </div>
+              <div className="space-y-2 text-xs text-fintech-muted">
+                <p>This will permanently erase <span className="font-semibold text-[var(--app-text)]">everything</span> tied to your account:</p>
+                <ul className="ml-4 list-disc space-y-0.5">
+                  <li>All transactions and income records</li>
+                  <li>All categories and budgets</li>
+                  <li>All connected integrations</li>
+                  <li>Your account itself</li>
+                </ul>
+                <p className="pt-1">This cannot be undone. Signing in with the same email afterward creates a completely new account with no data.</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fintech-muted">Type DELETE to confirm</label>
+                <input
+                  type="text"
+                  value={deleteAccountText}
+                  onChange={(e) => setDeleteAccountText(e.target.value)}
+                  placeholder="DELETE"
+                  disabled={deletingAccount}
+                  className="w-full rounded-xl border bg-[var(--app-panel-strong)] px-3 py-2 text-sm disabled:opacity-50"
+                  style={{ borderColor: "var(--app-border)" }}
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteAccount()}
+                  disabled={deleteAccountText.trim().toUpperCase() !== "DELETE" || deletingAccount}
+                  className="flex-1 rounded-xl bg-fintech-danger px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                >
+                  {deletingAccount ? "Deleting..." : "Permanently Delete Account"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowDeleteAccount(false); setDeleteAccountText(""); }}
+                  disabled={deletingAccount}
+                  className="flex-1 rounded-xl bg-[var(--app-ghost)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
 
@@ -3094,6 +3175,19 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="rounded-xl border border-fintech-danger/60 bg-fintech-danger/10 p-5">
+              <div className="mb-1 text-sm font-bold text-fintech-danger">Delete Account</div>
+              <p className="mb-4 text-xs text-fintech-muted">Permanently erases all your data — transactions, income, categories, and your account. Signing in with the same email afterward starts completely fresh with no data.</p>
+              <button
+                onClick={() => { setShowDeleteAccount(true); setDeleteAccountText(""); }}
+                disabled={deletingAccount}
+                className="flex items-center gap-2 rounded-xl bg-fintech-danger px-4 py-2 text-sm font-bold text-white hover:bg-fintech-danger/80 disabled:opacity-50"
+              >
+                <Trash2 size={15} />
+                Delete My Account
+              </button>
             </div>
           </section>
         )}
