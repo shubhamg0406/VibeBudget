@@ -3,9 +3,8 @@ import { CheckCircle2, Loader2, XCircle, HelpCircle, Database, Shield, KeyRound,
 
 interface SetupStatusData {
   mode: string;
-  app: { nodeEnv: string; namespace: string };
-  firebase: { configured: boolean; projectId: string | null; authDomain: string | null; storageBucketConfigured: boolean };
-  firebaseAdmin: { configured: boolean; hasCredentialsJson: boolean };
+  app: { nodeEnv: string; namespace?: string };
+  supabase: { configured: boolean; hasUrl: boolean; hasAnonKey: boolean; hasServiceRole: boolean };
   selfHost: { ownerExists: boolean; secretsConfigured: boolean };
   ai: { serverKeyConfigured: boolean; modelConfigured: boolean; model: string | null };
   features: Record<string, boolean>;
@@ -60,16 +59,16 @@ export const SetupStatus: React.FC = () => {
 
   const items: StatusItem[] = [
     {
-      label: "Firebase Config",
+      label: "Supabase Config",
       icon: <Database size={14} />,
-      ok: data.firebase.configured,
-      detail: data.firebase.configured ? data.firebase.projectId || "Configured" : "Not configured — use env vars or browser setup",
+      ok: data.supabase.configured,
+      detail: data.supabase.configured ? "URL and anon key configured" : "Not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY",
     },
     {
-      label: "Firebase Admin",
+      label: "Service Role Key",
       icon: <Shield size={14} />,
-      ok: data.firebaseAdmin.configured,
-      detail: data.firebaseAdmin.configured ? "Service account configured" : "Not configured (needed for AI chat, OCR)",
+      ok: data.supabase.hasServiceRole,
+      detail: data.supabase.hasServiceRole ? "Service role key configured" : "Not configured (needed for server-side operations)",
     },
     {
       label: "Owner Claimed",
@@ -84,14 +83,14 @@ export const SetupStatus: React.FC = () => {
       detail: data.ai.serverKeyConfigured ? `Model: ${data.ai.model || "configured"}` : "No server GEMINI_API_KEY — configure in Settings or browser setup",
     },
     {
-      label: "Data Namespace",
+      label: "Environment",
       icon: <Globe size={14} />,
-      ok: data.app.namespace !== "unknown",
-      detail: data.app.namespace !== "unknown" ? `Namespace: ${data.app.namespace}` : "Not configured",
+      ok: data.app.nodeEnv === "production",
+      detail: `Node env: ${data.app.nodeEnv}`,
     },
   ];
 
-  const modeLabel = data.mode === "hosted" ? "Production (Hosted)" : data.mode === "self-hosted" ? "Self-Hosted" : "Local Development";
+  const modeLabel = data.mode === "hosted" ? "Production (Hosted)" : "Local Development";
 
   return (
     <div className="space-y-4">
