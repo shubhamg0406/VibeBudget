@@ -4,6 +4,7 @@ const config: CapacitorConfig = {
   appId: "com.vibebudget.app",
   appName: "VibeBudget",
   webDir: "dist",
+  backgroundColor: "#1E4D8C",
   server: { androidScheme: "https" },
   plugins: {
     SplashScreen: {
