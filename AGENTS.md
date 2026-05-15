@@ -5,16 +5,21 @@ This file provides guidance to AI coding agents when working with code in this r
 <!-- AUTO-MANAGED: project-description -->
 ## Overview
 
-**VibeBudget** — privacy-aware budgeting and personal finance workspace.
+**VibeBudget** — personal budgeting and finance workspace (Firebase Auth + Firestore backend).
 
-- Hosted (Supabase-backed) and self-hosted (local SQLite) deployment modes
-- Local-first workflows with optional cloud sync
-- Provider integrations: Plaid, Teller, Google Sheets, document OCR
-- PWA + Capacitor mobile (iOS/Android)
-- AI chat powered by Google Gemini
+- Deployment modes: Hosted ([vibebudget-chi.vercel.app](https://vibebudget-chi.vercel.app), Firebase-managed) / Self-Hosted (BYO Firebase + Vercel) / Local Dev
+- Provider integrations: Plaid, Teller, Google Sheets, Google Drive, document OCR
+- AI chat powered by Gemini (server-side) or DeepSeek (BYOK via Settings → AI)
+- `VITE_SELF_HOSTED=true` gates Setup tab and self-hosted features; hidden in hosted mode
+- Data namespace isolation: `local-dev` / `staging` / `prod` — client and server vars must match
 
 Key docs:
-- `README.md` — product and developer quickstart
+- `README.md` — product overview, settings reference, dev quickstart, env var table
+- `docs/README.md` — full documentation index
+- `docs/feature-guide.md` — complete reference for every view, panel, and setting
+- `docs/getting-started.md` — first-run walkthrough for all modes
+- `docs/setup-modes.md` — hosted, self-hosted, local dev, browser config, mode comparison
+- `docs/hosted-vs-self-hosted.md` — practical tradeoffs and recommendations
 - `docs/north-star-strategy.md` — product direction
 - `docs/roadmap.md` — prioritized scope
 - `docs/backlog.md` — open bugs, UX polish, ideas
@@ -170,8 +175,8 @@ vibebudget/
 ## Git Insights
 
 Recent design decisions from git history:
+- **Docs closeout** (2e076fc): Final docs, setup status, and self-host polish — `docs/` is now authoritative for setup modes, feature guide, and getting started
 - **Currency race condition fix** (d2034c5): Rewrote currency settings, fixed secondary currency race via `updateSingleExchangeRate` — don't reintroduce batch exchange rate updates
-- **Firebase→Supabase migration** (0f5802f, 2de2501): Treat missing `onboarding_completed` column as `true` for pre-migration safety
 - **Hosted/self-hosted split** (45de2fa): Setup tab hidden behind `VITE_SELF_HOSTED`; enforce this boundary strictly
 - **Onboarding simplification** (ed5daad): Integrations step removed from wizard — don't re-add without explicit request
 - **Agent branch convention**: `agent/<agent>/<task-slug>` — enforced by `agent-start.mjs`
