@@ -16,15 +16,17 @@ import {
   Wallet2
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Theme, View } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { BottomNav } from "./nav/BottomNav";
 import { DataHub } from "./DataHub";
+import type { SettingsTab } from "./Settings";
 
 interface LayoutProps {
   children: React.ReactNode;
   currentView: View;
-  setView: (view: View) => void;
+  onNavigate: (view: View, section?: SettingsTab) => void;
   theme: Theme;
   onToggleTheme: () => void;
   onOpenDocs?: () => void;
@@ -39,17 +41,27 @@ const PAGE_META: Record<View, { title: string; searchPlaceholder: string }> = {
   docs: { title: "Docs", searchPlaceholder: "Search docs..." },
 };
 
-export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, theme, onToggleTheme, onOpenDocs }) => {
+const VIEW_PATHS: Record<View, string> = {
+  dashboard: "/",
+  transactions: "/transactions",
+  analysis: "/stats",
+  "monthly-analysis": "/stats/monthly",
+  settings: "/settings",
+  docs: "/docs",
+};
+
+export const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigate, theme, onToggleTheme, onOpenDocs }) => {
   const { user, signIn, logout } = useFirebase();
+  const navigate = useNavigate();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showDataHub, setShowDataHub] = useState(false);
 
   const navItems = useMemo(() => ([
-    { id: "dashboard", icon: Home, label: "Home" },
-    { id: "transactions", icon: List, label: "Transactions" },
-    { id: "analysis", icon: BarChart3, label: "Stats" },
-    { id: "monthly-analysis", icon: CalendarCheck, label: "Monthly" },
-    { id: "settings", icon: SettingsIcon, label: "Settings" },
+    { id: "dashboard" as View, icon: Home, label: "Home" },
+    { id: "transactions" as View, icon: List, label: "Transactions" },
+    { id: "analysis" as View, icon: BarChart3, label: "Stats" },
+    { id: "monthly-analysis" as View, icon: CalendarCheck, label: "Monthly" },
+    { id: "settings" as View, icon: SettingsIcon, label: "Settings" },
   ]), []);
 
   const pageMeta = PAGE_META[currentView];
@@ -87,7 +99,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setView(item.id as View)}
+                    onClick={() => navigate(VIEW_PATHS[item.id])}
                     className={`relative flex items-center gap-3 px-5 py-2.5 text-left transition-colors duration-200 ${
                       isActive
                         ? "border-l-4 border-fintech-accent bg-[var(--app-panel-strong)] font-bold text-fintech-accent"
@@ -185,7 +197,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, setView, 
           </main>
         </div>
       </div>
-      <BottomNav currentView={currentView} setView={setView} />
+      <BottomNav />
 
       <AnimatePresence>
         {showProfileMenu && (

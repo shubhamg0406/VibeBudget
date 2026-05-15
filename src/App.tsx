@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Routes, Route, Navigate, useNavigate, useLocation, useParams } from "react-router-dom";
 import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./components/Dashboard";
@@ -15,6 +16,29 @@ import { View, DateRange, Theme } from "./types";
 import { useFirebase } from "./contexts/FirebaseContext";
 import type { SettingsTab } from "./components/Settings";
 
+function viewFromPath(pathname: string): View {
+  if (pathname.startsWith("/docs")) return "docs";
+  if (pathname.startsWith("/transactions")) return "transactions";
+  if (pathname === "/stats/monthly") return "monthly-analysis";
+  if (pathname.startsWith("/stats")) return "analysis";
+  if (pathname.startsWith("/settings")) return "settings";
+  return "dashboard";
+}
+
+function tabToSlug(tab: SettingsTab): string {
+  return tab.replace(/_/g, "-");
+}
+
+function slugToTab(slug: string): SettingsTab {
+  return slug.replace(/-/g, "_") as SettingsTab;
+}
+
+function SettingsRoute({ onRefresh, onTabChange }: { onRefresh: () => void; onTabChange: (tab: SettingsTab) => void }) {
+  const { tab } = useParams<{ tab: string }>();
+  const initialTab = slugToTab(tab ?? "data");
+  return <Settings onRefresh={onRefresh} initialTab={initialTab} onTabChange={onTabChange} />;
+}
+
 export default function App() {
   const {
     loading,
@@ -29,14 +53,11 @@ export default function App() {
     updateExpenseCategoryTarget,
     onboardingCompleted,
   } = useFirebase();
-  const [view, setView] = useState<View>(() => {
-    if (typeof window !== "undefined" && window.location.pathname.startsWith("/docs")) {
-      return "docs";
-    }
-    return "dashboard";
-  });
-  const prevViewRef = useRef<View>("dashboard");
-  const [settingsSection, setSettingsSection] = useState<SettingsTab>("data");
+
+  const navigate = useNavigate();
+  const location = useLocation();
+  const view = viewFromPath(location.pathname);
+
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "dark";
     const savedTheme = window.localStorage.getItem("vibebudget-theme");
@@ -44,38 +65,19 @@ export default function App() {
   });
 
   const onNavigate = (targetView: View, targetSection?: SettingsTab) => {
-    setView(targetView);
-    if (targetSection && targetView === "settings") {
-      setSettingsSection(targetSection);
+    switch (targetView) {
+      case "dashboard": navigate("/"); break;
+      case "transactions": navigate("/transactions"); break;
+      case "analysis": navigate("/stats"); break;
+      case "monthly-analysis": navigate("/stats/monthly"); break;
+      case "settings": navigate(`/settings/${tabToSlug(targetSection ?? "data")}`); break;
+      case "docs": navigate("/docs"); break;
     }
   };
 
   // Default date range: This Month
   const [dateRange, setDateRange] = useState<DateRange>(() => getPresetDateRange("this-month"));
   const effectiveDateRange = resolveDateRange(dateRange);
-
-  const navigateToDocs = useCallback(() => {
-    prevViewRef.current = view;
-    setView("docs");
-    window.history.pushState({ view: "docs" }, "", "/docs");
-  }, [view]);
-
-  const navigateFromDocs = useCallback(() => {
-    setView(prevViewRef.current);
-    window.history.pushState({ view: prevViewRef.current }, "", "/");
-  }, []);
-
-  useEffect(() => {
-    const handlePopState = (event: PopStateEvent) => {
-      if (window.location.pathname.startsWith("/docs")) {
-        setView("docs");
-      } else {
-        setView("dashboard");
-      }
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -88,11 +90,7 @@ export default function App() {
       const start = customEvent.detail?.start;
       const end = customEvent.detail?.end;
       if (!start || !end) return;
-      setDateRange({
-        option: "custom",
-        start,
-        end,
-      });
+      setDateRange({ option: "custom", start, end });
     };
     window.addEventListener("vibebudget:focus-date-range", onFocusRange);
     return () => window.removeEventListener("vibebudget:focus-date-range", onFocusRange);
@@ -104,7 +102,7 @@ export default function App() {
   const getPreviousDateRange = (range: DateRange) => {
     const start = parseDateString(range.start);
     const end = parseDateString(range.end);
-    
+
     const isLastDayOfMonth = (date: Date) => {
       const nextDay = new Date(date);
       nextDay.setDate(date.getDate() + 1);
@@ -118,7 +116,7 @@ export default function App() {
         prevEnd = new Date(end.getFullYear(), end.getMonth() - months + 1, 0);
       } else {
         prevEnd = new Date(end.getFullYear(), end.getMonth() - months, end.getDate());
-        const expectedMonth = (end.getMonth() - months + 120) % 12; // +120 to handle negative
+        const expectedMonth = (end.getMonth() - months + 120) % 12;
         if (prevEnd.getMonth() !== expectedMonth) prevEnd.setDate(0);
       }
       return { start: formatDate(prevStart), end: formatDate(prevEnd) };
@@ -128,7 +126,7 @@ export default function App() {
     if (range.option === "last-3-months") return shiftMonths(3);
     if (range.option === "last-6-months") return shiftMonths(6);
     if (range.option === "last-12-months") return shiftMonths(12);
-    
+
     if (range.option === "ytd") {
       const prevStart = new Date(start.getFullYear() - 1, 0, 1);
       let prevEnd;
@@ -140,13 +138,10 @@ export default function App() {
       return { start: formatDate(prevStart), end: formatDate(prevEnd) };
     }
 
-    // Custom
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
     const prevStart = new Date(start.getTime() - (diffDays + 1) * 24 * 60 * 60 * 1000);
     const prevEnd = new Date(start.getTime() - 1 * 24 * 60 * 60 * 1000);
-    
     return { start: formatDate(prevStart), end: formatDate(prevEnd) };
   };
 
@@ -157,87 +152,14 @@ export default function App() {
   const getMonthMultiplier = () => {
     const presetMonthCount = getMonthCountForDateRangeOption(effectiveDateRange.option);
     if (presetMonthCount) return presetMonthCount;
-    
     const start = parseDateString(effectiveDateRange.start);
     const end = parseDateString(effectiveDateRange.end);
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    
-    // Otherwise prorate by days (approx 30 days per month)
     return diffDays / 30;
   };
 
   const monthMultiplier = getMonthMultiplier();
-
-  const renderView = () => {
-    switch (view) {
-      case "dashboard":
-        return (
-          <div className="space-y-4">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-                <p className="mt-1 text-xs text-fintech-muted">Track your balance, budget targets, and financial momentum.</p>
-              </div>
-              <DateRangeSelector range={effectiveDateRange} onChange={setDateRange} />
-            </div>
-            <Dashboard 
-              expenseCategories={expenseCategories}
-              incomeCategories={incomeCategories}
-              transactions={filteredTransactions} 
-              income={filteredIncome}
-              previousTransactions={previousTransactions}
-              previousIncome={previousIncome}
-              allTransactions={transactions}
-              allIncome={income}
-              onViewHistory={() => onNavigate("transactions")}
-              onNavigate={(view, section) => onNavigate(view, section)}
-              onUpdateTarget={updateExpenseCategoryTarget}
-              monthMultiplier={monthMultiplier}
-            />
-          </div>
-        );
-      case "transactions":
-        return (
-            <TransactionsView 
-              transactions={transactions}
-              income={income}
-              expenseCategories={expenseCategories}
-              incomeCategories={incomeCategories}
-              onRefresh={() => {}} // Firestore handles real-time updates
-            />
-        );
-      case "analysis":
-        return (
-          <div className="space-y-6">
-            <Analysis 
-              expenseCategories={expenseCategories}
-              incomeCategories={incomeCategories}
-              transactions={transactions} 
-              income={income} 
-              allTransactions={transactions}
-              allIncome={income}
-              currentRange={effectiveDateRange}
-            />
-          </div>
-        );
-      case "monthly-analysis":
-        return (
-          <div className="space-y-4">
-            <MonthlyAnalysis
-              expenseCategories={expenseCategories}
-              incomeCategories={incomeCategories}
-              allTransactions={transactions}
-              allIncome={income}
-            />
-          </div>
-        );
-      case "settings":
-        return <Settings onRefresh={() => {}} initialTab={settingsSection} />;
-      default:
-        return <Dashboard expenseCategories={expenseCategories} incomeCategories={incomeCategories} transactions={filteredTransactions} income={filteredIncome} />;
-    }
-  };
 
   if (loading) {
     return (
@@ -252,7 +174,7 @@ export default function App() {
       <Docs
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-        onBack={navigateFromDocs}
+        onBack={() => navigate(-1)}
       />
     );
   }
@@ -262,7 +184,7 @@ export default function App() {
       <LoggedOutHome
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-        onOpenDocs={navigateToDocs}
+        onOpenDocs={() => navigate("/docs")}
       />
     );
   }
@@ -275,10 +197,7 @@ export default function App() {
           <p className="mt-3 text-sm text-fintech-muted">{authError}</p>
           <div className="mt-5 flex flex-wrap gap-3">
             <button
-              onClick={() => {
-                clearAuthError();
-                window.location.reload();
-              }}
+              onClick={() => { clearAuthError(); window.location.reload(); }}
               className="rounded-xl bg-fintech-accent px-4 py-2 text-sm font-semibold text-[#002919]"
             >
               Retry
@@ -296,16 +215,93 @@ export default function App() {
     );
   }
 
+  const dashboardElement = (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <p className="mt-1 text-xs text-fintech-muted">Track your balance, budget targets, and financial momentum.</p>
+        </div>
+        <DateRangeSelector range={effectiveDateRange} onChange={setDateRange} />
+      </div>
+      <Dashboard
+        expenseCategories={expenseCategories}
+        incomeCategories={incomeCategories}
+        transactions={filteredTransactions}
+        income={filteredIncome}
+        previousTransactions={previousTransactions}
+        previousIncome={previousIncome}
+        allTransactions={transactions}
+        allIncome={income}
+        onViewHistory={() => onNavigate("transactions")}
+        onNavigate={(v, section) => onNavigate(v, section)}
+        onUpdateTarget={updateExpenseCategoryTarget}
+        monthMultiplier={monthMultiplier}
+      />
+    </div>
+  );
+
+  const transactionsElement = (
+    <TransactionsView
+      transactions={transactions}
+      income={income}
+      expenseCategories={expenseCategories}
+      incomeCategories={incomeCategories}
+      onRefresh={() => {}}
+    />
+  );
+
+  const analysisElement = (
+    <div className="space-y-6">
+      <Analysis
+        expenseCategories={expenseCategories}
+        incomeCategories={incomeCategories}
+        transactions={transactions}
+        income={income}
+        allTransactions={transactions}
+        allIncome={income}
+        currentRange={effectiveDateRange}
+      />
+    </div>
+  );
+
+  const monthlyAnalysisElement = (
+    <div className="space-y-4">
+      <MonthlyAnalysis
+        expenseCategories={expenseCategories}
+        incomeCategories={incomeCategories}
+        allTransactions={transactions}
+        allIncome={income}
+      />
+    </div>
+  );
+
   return (
     <>
       <Layout
         currentView={view}
-        setView={setView}
+        onNavigate={onNavigate}
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-        onOpenDocs={navigateToDocs}
+        onOpenDocs={() => navigate("/docs")}
       >
-        {renderView()}
+        <Routes>
+          <Route path="/" element={dashboardElement} />
+          <Route path="/transactions" element={transactionsElement} />
+          <Route path="/stats" element={analysisElement} />
+          <Route path="/stats/monthly" element={monthlyAnalysisElement} />
+          <Route path="/settings" element={<Navigate to="/settings/data" replace />} />
+          <Route
+            path="/settings/:tab"
+            element={
+              <SettingsRoute
+                onRefresh={() => {}}
+                onTabChange={(tab) => navigate(`/settings/${tabToSlug(tab)}`)}
+              />
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </Layout>
       <AiChat />
       {!onboardingCompleted && (
