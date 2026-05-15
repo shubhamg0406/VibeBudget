@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { CheckCircle2, Download, FileText, Search, Upload, XCircle } from "lucide-react";
+import * as XLSX from "xlsx";
 import type { ImportBatch, ImportRecord, ImportRecordStatus, ImportSource } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
 
@@ -51,9 +52,15 @@ const encodeCsvCell = (value: string) => {
   return value;
 };
 
-const buildTemplateCsv = (type: ImportTarget) => TEMPLATE_ROWS[type]
+export const buildTemplateCsv = (type: ImportTarget) => TEMPLATE_ROWS[type]
   .map((row) => row.map((cell) => encodeCsvCell(cell)).join(","))
   .join("\n");
+
+export const buildTemplateXlsx = (type: ImportTarget): Uint8Array => {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(TEMPLATE_ROWS[type]), type);
+  return XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
+};
 
 export const ImportCenter: React.FC<{ onImported?: () => void; allowedSources?: ImportCenterSource[] }> = ({ onImported, allowedSources }) => {
   const { previewImport, commitImport, expenseCategories, incomeCategories } = useFirebase();
@@ -150,6 +157,19 @@ export const ImportCenter: React.FC<{ onImported?: () => void; allowedSources?: 
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = `vibebudget-${target}-sample.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadTemplateExcel = () => {
+    const buf = buildTemplateXlsx(target);
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `vibebudget-${target}-sample.xlsx`;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
@@ -259,7 +279,15 @@ export const ImportCenter: React.FC<{ onImported?: () => void; allowedSources?: 
           className="inline-flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-ghost)] px-4 py-2 text-sm font-semibold text-fintech-muted"
         >
           <Download size={16} />
-          Download Sample Template
+          Sample CSV
+        </button>
+        <button
+          type="button"
+          onClick={handleDownloadTemplateExcel}
+          className="inline-flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-ghost)] px-4 py-2 text-sm font-semibold text-fintech-muted"
+        >
+          <Download size={16} />
+          Sample Excel
         </button>
         {batch && (
           <>

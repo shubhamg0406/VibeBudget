@@ -11,7 +11,6 @@ import {
   Search,
   Settings as SettingsIcon,
   SunMedium,
-  Upload,
   User,
   Wallet2
 } from "lucide-react";
@@ -20,7 +19,6 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Theme, View } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { BottomNav } from "./nav/BottomNav";
-import { DataHub } from "./DataHub";
 import type { SettingsTab } from "./Settings";
 
 interface LayoutProps {
@@ -54,7 +52,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigat
   const { user, signIn, logout } = useFirebase();
   const navigate = useNavigate();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [showDataHub, setShowDataHub] = useState(false);
 
   const navItems = useMemo(() => ([
     { id: "dashboard" as View, icon: Home, label: "Home" },
@@ -159,13 +156,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigat
                   {isLight ? <Moon size={15} /> : <SunMedium size={15} />}
                   <span>{isLight ? "Dark" : "Light"}</span>
                 </button>
-                <button
-                  onClick={() => setShowDataHub(true)}
-                  className="relative text-fintech-muted transition-colors hover:text-fintech-accent"
-                  title="Data Hub — Import & Refresh"
-                >
-                  <Upload size={19} />
-                </button>
               </div>
               <div className="h-8 w-px bg-[var(--app-divider)]" />
               <div className="flex items-center gap-3">
@@ -253,7 +243,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, currentView, onNavigat
         )}
       </AnimatePresence>
 
-      {showDataHub && <DataHub onClose={() => setShowDataHub(false)} />}
     </div>
   );
 };
