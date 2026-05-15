@@ -661,15 +661,22 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const updatePreferences = async (prefs: Partial<Preferences>) => {
     const next = { ...preferencesRef.current, ...prefs, coreExcludedCategories: prefs.coreExcludedCategories ? migrateExcludedCategories(prefs.coreExcludedCategories) : preferencesRef.current.coreExcludedCategories };
+    preferencesRef.current = next;
+    setPreferences(next);
     await saveUserProfilePatch({ preferences: normalizePreferences(next) });
   };
 
-  // Patches a single exchange rate entry by currency code, reading fresh from preferencesRef.
-  // Avoids stale-closure races when called immediately after adding a new currency.
+  // Upserts a single exchange rate by currency code using preferencesRef (never stale).
+  // Upserts (not just maps) so calling immediately after addCurrency still works.
   const updateSingleExchangeRate = async (currency: string, patch: Partial<import("../types").ExchangeRate>) => {
     const currentRates = preferencesRef.current.exchangeRates;
-    const next = currentRates.map((r) => r.currency === currency ? { ...r, ...patch } : r);
-    const nextPrefs = { ...preferencesRef.current, exchangeRates: next };
+    const exists = currentRates.some((r) => r.currency === currency);
+    const nextRates = exists
+      ? currentRates.map((r) => r.currency === currency ? { ...r, ...patch } : r)
+      : [...currentRates, { currency, rateToBase: 0, mode: "live" as import("../types").FxRateMode, ...patch }];
+    const nextPrefs = { ...preferencesRef.current, exchangeRates: nextRates };
+    preferencesRef.current = nextPrefs;
+    setPreferences(nextPrefs);
     await saveUserProfilePatch({ preferences: normalizePreferences(nextPrefs) });
   };
 

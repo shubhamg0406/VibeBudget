@@ -21,8 +21,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  ExchangeRate,
-  FxRateMode,
   ExpenseCategory,
   ExpenseSheetMapping,
   GooglePullSummary,
@@ -38,7 +36,6 @@ import {
   SheetRangeDraft,
   Transaction,
 } from "../types";
-import { CURRENCIES, getCurrencySymbol } from "../utils/currencyUtils";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { getTodayStr } from "../utils/dateUtils";
 import {
@@ -52,6 +49,7 @@ import { openGoogleSheetPicker } from "../utils/googlePicker";
 import { GoogleSheetImporter } from "./GoogleSheetImporter";
 import { ImpExCenter } from "./ImpExCenter";
 import { CategoryManager } from "./CategoryManager";
+import { CurrencySettings } from "./CurrencySettings";
 import { usePlaidLink } from "react-plaid-link";
 import type { AiProvider, AiProviderConfig, PlaidCategoryMapping, PlaidCredentials, PlaidEnv, TellerCategoryMapping, TellerCredentials, TellerEnv } from "../types";
 import { AI_PROVIDER_MODELS, AI_PROVIDER_LABELS, AI_PROVIDER_DEFAULT_MODEL } from "../types";
@@ -105,10 +103,6 @@ interface SavedSheetMappingSummary {
   config: PublicSheetImportConfig;
 }
 
-interface FxRateMeta {
-  lastUpdated: string;
-  source: "manual" | "seeded";
-}
 
 interface SheetMappingRefreshCursor {
   lastImportedOffset: number;
@@ -127,8 +121,6 @@ interface PersistedRangeDrafts {
 const MAINTENANCE_WIPE_TIMEOUT_MS = 15000;
 const IMPORT_FINISH_TIMEOUT_MS = 30000;
 const IMPORT_HISTORY_KEY = "settings_import_history_v1";
-const FX_META_KEY = "settings_fx_meta_v1";
-const TRACKED_CURRENCIES_KEY = "settings_tracked_currencies_v1";
 const SHEET_MAPPING_META_KEY = "settings_sheet_mapping_meta_v1";
 const SHEET_VALIDATION_KEY = "settings_sheet_validation_v1";
 const SHEET_MAPPING_CURSOR_KEY = "settings_sheet_mapping_refresh_cursor_v1";
@@ -262,7 +254,6 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     disconnectDriveFolder,
     preferences,
     updatePreferences,
-    updateSingleExchangeRate,
     googleSheetsAccessToken,
 
     // Plaid
@@ -431,23 +422,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
 
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [generatingLinkToken, setGeneratingLinkToken] = useState(false);
-  const [showBaseCurrencyModal, setShowBaseCurrencyModal] = useState(false);
-  const [pendingBaseCurrency, setPendingBaseCurrency] = useState(preferences?.baseCurrency || "CAD");
-  const [trackedCurrencies, setTrackedCurrencies] = useState<string[]>(() => readJson<string[]>(TRACKED_CURRENCIES_KEY, []));
-  const [fxMeta, setFxMeta] = useState<Record<string, FxRateMeta>>(() => readJson<Record<string, FxRateMeta>>(FX_META_KEY, {}));
-  const [fetchingLiveRates, setFetchingLiveRates] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     writeJson(IMPORT_HISTORY_KEY, importHistory.slice(0, 12));
   }, [importHistory]);
-
-  useEffect(() => {
-    writeJson(FX_META_KEY, fxMeta);
-  }, [fxMeta]);
-
-  useEffect(() => {
-    writeJson(TRACKED_CURRENCIES_KEY, trackedCurrencies);
-  }, [trackedCurrencies]);
 
   useEffect(() => {
     writeJson(SHEET_MAPPING_META_KEY, sheetMappingMeta);
@@ -518,11 +496,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     }
   }, [sheetUrl]);
 
-  useEffect(() => {
-    if (!preferences?.exchangeRates) return;
-    const fromRates = preferences.exchangeRates.map((r) => r.currency);
-    setTrackedCurrencies((current) => Array.from(new Set([...current, ...fromRates])).filter((c) => c !== preferences.baseCurrency));
-  }, [preferences?.exchangeRates, preferences?.baseCurrency]);
+
 
   const ensureMappingOption = (headers: string[], fallback: string) => (headers.includes(fallback) ? headers : [...headers, fallback]);
 
@@ -1580,95 +1554,6 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
     setShowGoogleSheetImporter(true);
   };
 
-  const exchangeRates = preferences?.exchangeRates || [];
-  const baseCurrency = preferences?.baseCurrency || "CAD";
-
-  const currenciesSeenInData = useMemo(() => {
-    const fromExpenses = transactions.map((t) => t.currency).filter(Boolean) as string[];
-    const fromIncome = incomeRecords.map((i) => i.currency).filter(Boolean) as string[];
-    return Array.from(new Set([...fromExpenses, ...fromIncome])).filter((c) => c !== baseCurrency);
-  }, [transactions, incomeRecords, baseCurrency]);
-
-  const missingCoverageCurrencies = useMemo(() => {
-    const covered = new Set(exchangeRates.map((r) => r.currency));
-    return currenciesSeenInData.filter((currency) => !covered.has(currency));
-  }, [currenciesSeenInData, exchangeRates]);
-
-  const staleCurrencies = useMemo(() => {
-    const now = Date.now();
-    return exchangeRates
-      .map((r) => {
-        const meta = fxMeta[r.currency];
-        if (!meta?.lastUpdated) return r.currency;
-        const ageHours = (now - new Date(meta.lastUpdated).getTime()) / (1000 * 60 * 60);
-        return ageHours > 24 ? r.currency : null;
-      })
-      .filter((v): v is string => Boolean(v));
-  }, [exchangeRates, fxMeta]);
-
-  const updateRateMeta = (currency: string, source: "manual" | "seeded") => {
-    setFxMeta((current) => ({
-      ...current,
-      [currency]: {
-        source,
-        lastUpdated: new Date().toISOString(),
-      },
-    }));
-  };
-
-  const fetchLiveRate = async (currency: string) => {
-    setFetchingLiveRates((prev) => ({ ...prev, [currency]: true }));
-    try {
-      const res = await fetch(`/api/fx?from=${currency}&to=${baseCurrency}`);
-      const data = await res.json() as { rate?: number; error?: string };
-      if (!res.ok || !data.rate) throw new Error(data.error || "Rate unavailable");
-      await updateSingleExchangeRate(currency, { rateToBase: data.rate!, liveRateUpdatedAt: new Date().toISOString() });
-      updateRateMeta(currency, "seeded");
-    } catch (err) {
-      setSectionStatus("currency", "error", `Live rate fetch failed for ${currency}: ${err instanceof Error ? err.message : "unknown"}`);
-    } finally {
-      setFetchingLiveRates((prev) => ({ ...prev, [currency]: false }));
-    }
-  };
-
-  const handleAddCurrency = async (code: string) => {
-    if (!code || !updatePreferences) return;
-    const existing = exchangeRates.find((r) => r.currency === code);
-    if (existing) return;
-    const newRate: ExchangeRate = { currency: code, rateToBase: 0, mode: "live" };
-    await updatePreferences({ ...preferences, exchangeRates: [...exchangeRates, newRate] });
-    setTrackedCurrencies((cur) => Array.from(new Set([...cur, code])));
-    void fetchLiveRate(code);
-  };
-
-  const handleSetRateMode = async (currency: string, mode: import("../types").FxRateMode) => {
-    if (!updatePreferences) return;
-    const next = exchangeRates.map((r) => r.currency === currency ? { ...r, mode } : r);
-    await updatePreferences({ ...preferences, exchangeRates: next });
-    if (mode === "live") void fetchLiveRate(currency);
-  };
-
-  const handleRemoveRate = async (currency: string) => {
-    if (!updatePreferences) return;
-    await updatePreferences({ ...preferences, exchangeRates: exchangeRates.filter((r) => r.currency !== currency) });
-    setTrackedCurrencies((cur) => cur.filter((c) => c !== currency));
-  };
-
-  const handleAddRate = () => {
-    const suggestion = CURRENCIES.find((c) => c.code !== baseCurrency && !exchangeRates.find((r) => r.currency === c.code));
-    if (!suggestion || !updatePreferences) return;
-    const nextRate: ExchangeRate = { currency: suggestion.code, rateToBase: 1 };
-    void updatePreferences({ ...preferences, exchangeRates: [...exchangeRates, nextRate] });
-    updateRateMeta(suggestion.code, "seeded");
-  };
-
-  const handleChangeBaseCurrency = async () => {
-    if (!updatePreferences) return;
-    await updatePreferences({ ...preferences, baseCurrency: pendingBaseCurrency });
-    setShowBaseCurrencyModal(false);
-    setSectionStatus("currency", "success", `Primary currency updated to ${pendingBaseCurrency}. Totals will recalculate in this currency.`);
-  };
-
   // Plaid Link integration
   const generateLinkToken = useCallback(async () => {
     if (!plaidCredentials) return;
@@ -2164,36 +2049,6 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           </motion.div>
         )}
 
-        {showBaseCurrencyModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[110] flex items-center justify-center p-6 backdrop-blur-sm"
-            style={{ backgroundColor: "var(--app-overlay)" }}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg space-y-4 rounded-3xl border bg-fintech-card p-6"
-              style={{ borderColor: "var(--app-border)" }}
-            >
-              <h3 className="text-lg font-bold">Change Primary Currency</h3>
-              <p className="text-sm text-fintech-muted">
-                Budget totals, targets, and rollups will recalculate in <span className="font-semibold text-[var(--app-text)]">{pendingBaseCurrency}</span>. Raw transaction rows remain unchanged.
-              </p>
-              <div className="rounded-xl border bg-[var(--app-ghost)] p-3 text-xs text-fintech-muted" style={{ borderColor: "var(--app-border)" }}>
-                Example: transaction currency stays as entered, but dashboard and analysis normalize to your primary currency.
-              </div>
-              <div className="flex gap-3">
-                <button onClick={() => void handleChangeBaseCurrency()} className="flex-1 rounded-xl bg-fintech-accent px-4 py-2 text-sm font-bold text-[#002919]">Confirm Change</button>
-                <button onClick={() => setShowBaseCurrencyModal(false)} className="flex-1 rounded-xl bg-[var(--app-ghost)] px-4 py-2 text-sm font-semibold">Cancel</button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-
         {activeDomain && (
           <>
             <motion.div
@@ -2302,209 +2157,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           </section>
         )}
 
-        {activeTab === "currency" && (
-          <section className="space-y-5">
-            <div className="space-y-1">
-              <h2 className="flex items-center gap-2 text-lg font-bold"><Globe size={18} className="text-fintech-accent" /> Currency</h2>
-              <p className="text-sm text-fintech-muted">Primary currency defines all budget rollups. FX rates cover non-base transactions.</p>
-            </div>
-            {renderStatusStrip("currency")}
-
-            {(missingCoverageCurrencies.length > 0 || staleCurrencies.length > 0) && (
-              <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/10 p-3 text-xs text-yellow-300">
-                {missingCoverageCurrencies.length > 0 && <div>Missing FX coverage: {missingCoverageCurrencies.join(", ")}.</div>}
-                {staleCurrencies.length > 0 && <div className="mt-1">Stale FX rates (&gt;24h): {staleCurrencies.join(", ")}.</div>}
-              </div>
-            )}
-
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5" style={{ borderColor: "var(--app-border)" }}>
-              <div className="mb-2 text-xs font-bold uppercase tracking-widest text-fintech-muted">Primary Currency</div>
-              <div className="sticky top-0 z-10 rounded-xl bg-[var(--app-panel)] pb-3">
-                <select
-                  value={pendingBaseCurrency}
-                  onChange={(e) => setPendingBaseCurrency(e.target.value)}
-                  className="w-full rounded-xl border bg-[var(--app-ghost)] px-4 py-3 text-sm font-bold"
-                  style={{ borderColor: "var(--app-border)" }}
-                >
-                  {CURRENCIES.map((c) => (
-                    <option key={c.code} value={c.code}>{c.code} - {c.name} ({c.symbol})</option>
-                  ))}
-                </select>
-              </div>
-              <p className="text-xs text-fintech-muted">Budget totals and analytics normalize into {pendingBaseCurrency}.</p>
-              <button
-                onClick={() => setShowBaseCurrencyModal(true)}
-                disabled={pendingBaseCurrency === baseCurrency}
-                className="mt-3 rounded-xl bg-fintech-accent/10 px-4 py-2 text-sm font-bold text-fintech-accent disabled:opacity-50"
-              >
-                Save Primary Currency
-              </button>
-            </div>
-
-            {/* Secondary Currencies */}
-            <div className="rounded-xl border bg-[var(--app-panel)] p-5 space-y-4" style={{ borderColor: "var(--app-border)" }}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-bold">Secondary Currencies</h3>
-                  <p className="mt-0.5 text-xs text-fintech-muted">Each foreign currency needs a rate to convert into {baseCurrency}.</p>
-                </div>
-                <span className="text-xs text-fintech-muted">{exchangeRates.length} configured</span>
-              </div>
-
-              {exchangeRates.length === 0 && (
-                <p className="text-sm text-fintech-muted">No secondary currencies added yet. Use the dropdown below to add one.</p>
-              )}
-
-              {exchangeRates.map((rate, index) => {
-                const mode: FxRateMode = rate.mode || "fixed";
-                const currencyInfo = CURRENCIES.find((c) => c.code === rate.currency);
-                const isFetching = fetchingLiveRates[rate.currency];
-                const modes: { id: FxRateMode; label: string }[] = [
-                  { id: "live", label: "Live" },
-                  { id: "fixed", label: "Fixed" },
-                  { id: "historical", label: "Per Transaction" },
-                ];
-                return (
-                  <div key={`${rate.currency}-${index}`} className="rounded-xl border bg-[var(--app-ghost)] p-4 space-y-3" style={{ borderColor: "var(--app-border)" }}>
-                    {/* Card header */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base font-bold">{rate.currency}</span>
-                        {currencyInfo && <span className="text-xs text-fintech-muted">{currencyInfo.name}</span>}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleRemoveRate(rate.currency)}
-                        className="rounded-md p-1.5 text-fintech-muted hover:bg-fintech-danger/10 hover:text-fintech-danger transition-colors"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-
-                    {/* Mode selector */}
-                    <div className="flex gap-1 rounded-lg bg-[var(--app-panel)] p-1">
-                      {modes.map((m) => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={() => void handleSetRateMode(rate.currency, m.id)}
-                          className={`flex-1 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors ${
-                            mode === m.id
-                              ? "bg-fintech-accent/20 text-fintech-accent"
-                              : "text-fintech-muted hover:text-[var(--app-text)]"
-                          }`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Mode content */}
-                    {mode === "live" && (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-3">
-                          <div className="flex-1">
-                            {rate.rateToBase > 0 ? (
-                              <span className="text-xl font-bold tabular-nums">
-                                {rate.rateToBase.toFixed(4)}
-                                <span className="ml-1.5 text-sm font-normal text-fintech-muted">{baseCurrency} per {rate.currency}</span>
-                              </span>
-                            ) : (
-                              <span className="text-sm text-fintech-muted italic">Fetching rate…</span>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => void fetchLiveRate(rate.currency)}
-                            disabled={isFetching}
-                            className="flex items-center gap-1.5 rounded-lg bg-fintech-accent/10 px-3 py-2 text-xs font-bold text-fintech-accent disabled:opacity-60 hover:bg-fintech-accent/20 transition-colors"
-                          >
-                            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
-                            Refresh
-                          </button>
-                        </div>
-                        {rate.liveRateUpdatedAt && (
-                          <p className="text-[10px] text-fintech-muted">
-                            Live via Yahoo Finance · Updated {new Date(rate.liveRateUpdatedAt).toLocaleString()}
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {mode === "fixed" && (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            step="0.0001"
-                            min="0"
-                            value={rate.rateToBase || ""}
-                            onChange={(e) => {
-                              if (!updatePreferences) return;
-                              const next = exchangeRates.map((r, i) =>
-                                i === index ? { ...r, rateToBase: Number.parseFloat(e.target.value) || 0 } : r
-                              );
-                              void updatePreferences({ ...preferences, exchangeRates: next });
-                              updateRateMeta(rate.currency, "manual");
-                            }}
-                            placeholder="e.g. 1.35"
-                            className="flex-1 rounded-lg border bg-[var(--app-panel-strong)] px-3 py-2 text-sm tabular-nums"
-                            style={{ borderColor: "var(--app-border)" }}
-                          />
-                          <span className="text-sm font-semibold text-fintech-muted whitespace-nowrap">{baseCurrency} per {rate.currency}</span>
-                        </div>
-                        <p className="text-[10px] text-fintech-muted">
-                          Example: 100 {rate.currency} × {rate.rateToBase || "?"} = {getCurrencySymbol(baseCurrency)}{rate.rateToBase ? (100 * rate.rateToBase).toFixed(2) : "?"} in budget rollups.
-                        </p>
-                      </div>
-                    )}
-
-                    {mode === "historical" && (
-                      <div className="rounded-lg border border-fintech-accent/20 bg-fintech-accent/5 p-3 text-xs text-fintech-muted space-y-1" style={{ borderColor: "var(--app-border)" }}>
-                        <p className="font-semibold text-[var(--app-text)]">Rate captured at transaction time</p>
-                        <p>Each transaction uses the exchange rate from the day it was added or imported. Transactions without a stored rate fall back to <span className="font-mono font-semibold">{rate.rateToBase || "1.0"}</span>.</p>
-                        <div className="flex items-center gap-2 pt-1">
-                          <input
-                            type="number"
-                            step="0.0001"
-                            min="0"
-                            value={rate.rateToBase || ""}
-                            onChange={(e) => {
-                              if (!updatePreferences) return;
-                              const next = exchangeRates.map((r, i) =>
-                                i === index ? { ...r, rateToBase: Number.parseFloat(e.target.value) || 0 } : r
-                              );
-                              void updatePreferences({ ...preferences, exchangeRates: next });
-                            }}
-                            placeholder="Fallback rate"
-                            className="w-32 rounded-lg border bg-[var(--app-panel-strong)] px-3 py-1.5 text-xs font-mono"
-                            style={{ borderColor: "var(--app-border)" }}
-                          />
-                          <span className="text-[10px]">fallback rate</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-              {/* Add currency */}
-              <div className={exchangeRates.length > 0 ? "border-t pt-4" : ""} style={exchangeRates.length > 0 ? { borderColor: "var(--app-border)" } : undefined}>
-                <select
-                  value=""
-                  onChange={(e) => { void handleAddCurrency(e.target.value); e.target.value = ""; }}
-                  className="w-full rounded-xl border bg-[var(--app-ghost)] px-3 py-2.5 text-sm"
-                  style={{ borderColor: "var(--app-border)" }}
-                >
-                  <option value="">+ Add currency…</option>
-                  {CURRENCIES.filter((c) => c.code !== baseCurrency && !exchangeRates.find((r) => r.currency === c.code)).map((c) => (
-                    <option key={c.code} value={c.code}>{c.code} — {c.name} ({c.symbol})</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </section>
-        )}
+        {activeTab === "currency" && <CurrencySettings />}
 
         {activeTab === "google_workspace" && (
           <section className="space-y-5">
