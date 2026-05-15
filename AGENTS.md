@@ -93,7 +93,9 @@ vibebudget/
 │   │   ├── Dashboard.tsx    # Budget overview
 │   │   ├── Settings.tsx     # Settings tabs
 │   │   ├── AiChat.tsx       # Gemini AI chat panel
-│   │   └── Layout.tsx       # Shell with nav
+│   │   ├── Layout.tsx       # Shell: sidebar (desktop lg:flex), header, profile menu, page animation
+│   │   └── nav/
+│   │       └── BottomNav.tsx  # Mobile bottom navigation
 │   ├── contexts/
 │   │   ├── FirebaseContext.tsx   # Legacy Firebase (being migrated)
 │   │   └── SupabaseContext.tsx   # Current hosted auth/data
@@ -123,7 +125,7 @@ vibebudget/
 └── graphify-out/            # AST knowledge graph (read before exploring code)
 ```
 
-**Data flow**: `SupabaseContext` (or `FirebaseContext`) → `App.tsx` state → component props. No external router — view state is managed in `App.tsx` via `useState<View>`.
+**Data flow**: `SupabaseContext` (or `FirebaseContext`) → `App.tsx` state → component props. URL routing via `react-router-dom` — `Layout.tsx` holds `VIEW_PATHS` mapping `View` → URL and calls `useNavigate` for sidebar nav. `currentView` prop still drives active state.
 
 **Hosted vs self-hosted**: `VITE_SELF_HOSTED=true` gates Setup tab and local SQLite path. Never expose self-hosted-only features in hosted app.
 
@@ -180,6 +182,8 @@ vibebudget/
 **Migration path**: Firebase → Supabase migration ongoing. `FirebaseContext` is legacy; `SupabaseContext` is canonical. New features should use Supabase only.
 
 **Capacitor Android**: `appId=com.vibebudget.app`, `androidScheme=https`, `webDir=dist`. Deep link URL scheme: `com.vibebudget.app`. `google-services.json` is required for push notifications but is not committed — push notifications are disabled until it is added.
+
+**URL routing**: `VIEW_PATHS` in `Layout.tsx` maps `View` enum values to URL paths. Sidebar nav uses `useNavigate(VIEW_PATHS[item.id])`. When adding a new view, add it to `View` type, `PAGE_META`, and `VIEW_PATHS` in Layout, and register the route in `App.tsx`/`main.tsx`.
 
 **Auth flow** (`src/lib/auth.ts`): `signInWithGoogle(withDriveScopes?)` uses three paths — (1) native Capacitor: system browser via `@capacitor/browser`, PKCE code exchanged on `appUrlOpen` deep link `com.vibebudget.app://login-callback` (must be registered in Supabase Auth > URL Configuration > Redirect URLs); (2) embedded browser (electron/webview/wv/codex UA): direct redirect flow; (3) web: popup with automatic redirect fallback on popup-closed errors. Pass `withDriveScopes=true` to include `drive.file` + `spreadsheets.readonly` scopes for Google Sheets integration.
 
