@@ -1,0 +1,686 @@
+{
+  "/Users/shubham/Downloads/Downloads/vibebudget/tailwind.config.js": {
+    "mtime": 1776080466.4858518,
+    "hash": "f68a3316f74fb680fa379075f39f4e2c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/vite.config.mjs": {
+    "mtime": 1778621526.722581,
+    "hash": "05eecf07b34b27148166504d659da33c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/playwright.config.ts": {
+    "mtime": 1775847758.8087974,
+    "hash": "972d31dfb2b75e09f12bd6967c0e9c67"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/postcss.config.js": {
+    "mtime": 1776080470.7125423,
+    "hash": "67ef1374a30bc52d0d293518a4c14bfe"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/server.ts": {
+    "mtime": 1778621526.712324,
+    "hash": "e7e1a8cbada2d5485b5e8c153550a041"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/capacitor.config.ts": {
+    "mtime": 1776080420.9317412,
+    "hash": "074c64b9d9ac8b8605d6c9a8d79354fe"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/smoke/app.spec.ts": {
+    "mtime": 1778621526.7214892,
+    "hash": "6ee4f67a57a00ea5c69d8a0bb3f5c248"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/androidNotificationImport.test.ts": {
+    "mtime": 1777261366.3628392,
+    "hash": "837703c40d95ffcbba5f1899eec98a9d"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/importPipeline.test.ts": {
+    "mtime": 1777262445.5586348,
+    "hash": "05e26054a2f1db8e4a8b38509a815f82"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/googleSheetsSync.test.ts": {
+    "mtime": 1778057867.7014325,
+    "hash": "812713a3ab0026e13604c4c0338aa485"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/documentExtraction.test.ts": {
+    "mtime": 1778478728.2285075,
+    "hash": "ea529ae123366b873aba78b8c1e77cba"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/insights.test.ts": {
+    "mtime": 1777262109.6503985,
+    "hash": "b5e93edd45453182b4be905d297ebbda"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/currencyUtils.test.ts": {
+    "mtime": 1775847758.8081498,
+    "hash": "13e626b7dc598fc7557f67e977c0dff4"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/aiSummary.test.ts": {
+    "mtime": 1776302500.0739312,
+    "hash": "296db345bd49887f6f1588e488f6ed8b"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/googleSheetsPull.test.ts": {
+    "mtime": 1777922328.2236636,
+    "hash": "bb9abd9aebfc2260a715eb0839c4f531"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/importDedupe.test.ts": {
+    "mtime": 1776906112.5742311,
+    "hash": "0f55a544c926099d8fc5933ed6b2aeda"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/dateUtils.test.ts": {
+    "mtime": 1776063064.2262604,
+    "hash": "01949749ee320a751744a0b33c5e4a40"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/recurring.test.ts": {
+    "mtime": 1776303998.2032971,
+    "hash": "f32ec686727ba4287f594e7c5d511739"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/duplicateDetection.test.ts": {
+    "mtime": 1777945604.5173738,
+    "hash": "34632a25051ef86c468d8d7cb5c0634c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/unit/googleDrive.test.ts": {
+    "mtime": 1777262463.7992406,
+    "hash": "b8ce76cb8dd1e07be2abc72fbe48dd8e"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/setup/vitest.setup.ts": {
+    "mtime": 1775933141.956082,
+    "hash": "4e85be60981d331ce3f943f92caa5dfb"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/utils/fixtures.ts": {
+    "mtime": 1775847758.8078866,
+    "hash": "da2686d76514e3aa43ebc65f291ef54c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/utils/renderWithProviders.tsx": {
+    "mtime": 1778621526.7217894,
+    "hash": "a9ecbb927eee34073efcb722e86ae724"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/DateRangeSelector.test.tsx": {
+    "mtime": 1775847835.6848102,
+    "hash": "f51dbd102ac56045dcb3a4f18c5ca62f"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/ProviderStatusCard.test.tsx": {
+    "mtime": 1778057867.6994836,
+    "hash": "1f3d5834633c4e5f1adb75dc9072dbcc"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/GettingStartedChecklist.test.tsx": {
+    "mtime": 1778057867.6974707,
+    "hash": "264b3e8b97971338f84be6ba51ee3aa5"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/Settings.test.tsx": {
+    "mtime": 1778057867.7003472,
+    "hash": "16e1f02aafca01d28e3661317bac0d48"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/TransactionEntry.test.tsx": {
+    "mtime": 1776304595.731246,
+    "hash": "3af8ce628a5f16628a6be854f259f572"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/SetupChecklist.test.tsx": {
+    "mtime": 1778057867.7007132,
+    "hash": "768251012eebc79e5ff6ddae263a847e"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/Dashboard.test.tsx": {
+    "mtime": 1778057867.6964922,
+    "hash": "6e937b78a2eea533d32246fa656d06f3"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/App.test.tsx": {
+    "mtime": 1778057867.695904,
+    "hash": "4cd9cdb784d1bd4d3193bd89f86fb968"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/MonthlyAnalysis.test.tsx": {
+    "mtime": 1778057867.69892,
+    "hash": "eaee961f4824cd224b8173818fb9fa53"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/Docs.test.tsx": {
+    "mtime": 1777921878.9111829,
+    "hash": "003fdc79f3340b027196fc55fae19d79"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/DuplicateDetectionPanel.test.tsx": {
+    "mtime": 1778057774.3088143,
+    "hash": "2e555bbdf77e440635b8d231ee4a01fc"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/EmptyState.test.tsx": {
+    "mtime": 1778057867.6970954,
+    "hash": "56678082420289b8a2fed3b510bd6942"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/components/GoogleSheetsGating.test.tsx": {
+    "mtime": 1778057867.6982396,
+    "hash": "0359c070be3713cffe2215cb080471ea"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/api/ai-chat.test.ts": {
+    "mtime": 1776302516.2532506,
+    "hash": "104284f641b7f52a8c68c94ccf8bbf93"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/api/duplicates.test.ts": {
+    "mtime": 1777945624.0511239,
+    "hash": "29bf812f87a69bf64a4ba856a121ff6f"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/api/chat.test.ts": {
+    "mtime": 1776467869.6945736,
+    "hash": "276e1e8a67f3fcbff34492164a167cf2"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/api/selfHost.test.ts": {
+    "mtime": 1778621526.721092,
+    "hash": "3b3bb8c132a9f0e0c2c1d7f0f65dd3a6"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/api/vercel-chat-route.test.ts": {
+    "mtime": 1776928532.3960655,
+    "hash": "3d34f063c6e6965f65463c38de64c1df"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/api/extract-transactions-serverless.test.ts": {
+    "mtime": 1777922328.2229679,
+    "hash": "4f4b72039163e2362bc7c6e396334ea8"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/tests/api/server.test.ts": {
+    "mtime": 1776304023.1546977,
+    "hash": "ff24a656aa19f48735b2f03de1e77046"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/supabase/migrations/002_rls.sql": {
+    "mtime": 1778621526.7200503,
+    "hash": "a04954e027a939ada7f7260ecb5f2573"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/supabase/migrations/004_onboarding.sql": {
+    "mtime": 1778796987.9811158,
+    "hash": "6b2b1323219c880b5488ccd8204b298d"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/supabase/migrations/001_initial_schema.sql": {
+    "mtime": 1778621526.719727,
+    "hash": "aba51e70fc83f8ec124ef7050de59828"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/supabase/migrations/003_indexes.sql": {
+    "mtime": 1778621526.7206273,
+    "hash": "49c29fd377be95c8531b95c6725a6124"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/scripts/agent-start.mjs": {
+    "mtime": 1778478944.2422316,
+    "hash": "3f69d4d631e122c3685a75cf559dfc6c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/scripts/verify.mjs": {
+    "mtime": 1775847549.0878332,
+    "hash": "62856ccb55fd6bb72879fecb1fa887ef"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/scripts/agent-whoami.mjs": {
+    "mtime": 1777795411.522124,
+    "hash": "e050be8baa2fcbf59c7a736573a4b1e7"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/scripts/agent-pr.mjs": {
+    "mtime": 1778478951.2993116,
+    "hash": "63366cbb648bed3d68635e832e5e1ddd"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/scripts/migrate-firestore-to-supabase.ts": {
+    "mtime": 1778627492.3132658,
+    "hash": "3f2d33cf996545e09cb42e71b594e025"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/plaid.ts": {
+    "mtime": 1777923608.943547,
+    "hash": "5ca449e34faad08dedc517dd45aa9a57"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/fx.ts": {
+    "mtime": 1778621460.0779645,
+    "hash": "c0831145fdcfb53fe7b4bc2ad96dcd0d"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/chat.ts": {
+    "mtime": 1778621526.7066114,
+    "hash": "7c36867d5fbfbf8f5959c97c9856d19a"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/teller.ts": {
+    "mtime": 1777923608.944253,
+    "hash": "6344c557639c5ca17d6285049b75a3ed"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/setup/status.ts": {
+    "mtime": 1778621526.7076986,
+    "hash": "0d133f0bc48220020ff42d769817ed1d"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/transactions/detect-duplicates.ts": {
+    "mtime": 1778057774.2965167,
+    "hash": "0ea396c8b765d45bdfc53f0b11fb5631"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/transactions/delete-batch.ts": {
+    "mtime": 1778621526.7086442,
+    "hash": "23e44e126476da9b6db9b786b65ffff2"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/plaid/create_link_token.ts": {
+    "mtime": 1777923608.9439194,
+    "hash": "d04e9b3fe5849bb0ef0789b8603eaadf"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/account/delete.ts": {
+    "mtime": 1778797552.9118752,
+    "hash": "8beef0390eef0654c633623686c70887"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/import/extract-transactions.ts": {
+    "mtime": 1778502843.4702003,
+    "hash": "7e7111cb4003ee605bd0c7c6660fc7e6"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/api/import/commit-ocr.ts": {
+    "mtime": 1778621526.7072523,
+    "hash": "a5771f01abe9e3bbc686ee7b6da2bc78"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/App.tsx": {
+    "mtime": 1778814575.6189299,
+    "hash": "12df7e2294997a49a129b734359f1532"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/main.tsx": {
+    "mtime": 1778621526.7180805,
+    "hash": "48e8c3f14892711e411ef7abe727e3fd"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/types.ts": {
+    "mtime": 1778627492.2933023,
+    "hash": "f75fce6cd8507c8510b0303c33f7a799"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/vite-env.d.ts": {
+    "mtime": 1776063287.8694878,
+    "hash": "e566d23b580eb51115b0bb5d4b5b6a37"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/contexts/SupabaseContext.tsx": {
+    "mtime": 1778815172.9303534,
+    "hash": "de18d31a9ba109eaf7190669fd786de8"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/contexts/FirebaseContext.tsx": {
+    "mtime": 1778621526.7147512,
+    "hash": "f30ad4aec4f2af9de9cee04be4603a7c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/contexts/FirebaseUserType.ts": {
+    "mtime": 1778621526.7157028,
+    "hash": "356969490d14ae6305307595ba5f6f2a"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/server/plaid.ts": {
+    "mtime": 1777921878.9095268,
+    "hash": "e7da459457086fa2c6aa3470d53866f3"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/server/aiChat.ts": {
+    "mtime": 1778621526.7187877,
+    "hash": "5bebb463393b15c4056599b772c55813"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/server/aiClient.ts": {
+    "mtime": 1777795411.5386045,
+    "hash": "f3d92f3634f43d63e194446f68c200aa"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/server/teller.ts": {
+    "mtime": 1777389361.193944,
+    "hash": "0eb937c4895e227a41a80401f7376aaf"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/documentExtraction.ts": {
+    "mtime": 1778479943.7710357,
+    "hash": "35f59fc8f2727dc52871c7cebc693699"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/duplicateDetection.ts": {
+    "mtime": 1777945449.0955658,
+    "hash": "7371e6cf567cc433bc252e54b0add118"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/insights.ts": {
+    "mtime": 1777262096.7071133,
+    "hash": "6d1647be4573b86b0d483c595a87b1db"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/publicSheetImport.ts": {
+    "mtime": 1777378154.3897097,
+    "hash": "7f28aca14f4357c2520f5276da61a5e6"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/plaidCategoryMap.ts": {
+    "mtime": 1777387864.780587,
+    "hash": "3619f35cadac6236074cc0ac09ecc839"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/excelImport.ts": {
+    "mtime": 1777377618.077091,
+    "hash": "222d67e866b5fe9a950dad022898e9b1"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/dateUtils.ts": {
+    "mtime": 1776063057.4046683,
+    "hash": "d7e725286fe78d0a48723e0d4bc77def"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/importDedupe.ts": {
+    "mtime": 1776906112.4729035,
+    "hash": "8a961316f6b93ecf99b565381b89c9cc"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/tellerCategoryMap.ts": {
+    "mtime": 1777389314.1944058,
+    "hash": "e20c1dc07ec59a8aacb8d91f392ad351"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/currencyUtils.ts": {
+    "mtime": 1775100663.0376635,
+    "hash": "783a2528324984073e2e3b1cf44b1645"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/importPipeline.ts": {
+    "mtime": 1777538407.5617719,
+    "hash": "06484817efebd7a9fbef166e7133a437"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/googlePicker.ts": {
+    "mtime": 1778059231.008476,
+    "hash": "a568d898a6f0ecf730f432219c199caa"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/googleSheetsSync.ts": {
+    "mtime": 1778316796.8794198,
+    "hash": "18b172a2619a7db823f8df854f7516db"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/recurring.ts": {
+    "mtime": 1776303564.6443703,
+    "hash": "18019060840aea6f745abfaa6414ee60"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/merchantCategoryMap.ts": {
+    "mtime": 1777538407.5620656,
+    "hash": "244a74581dad3826aaab62c9270ad7f4"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/categoryOptions.ts": {
+    "mtime": 1776063540.8596346,
+    "hash": "ae92fea59c289c51386d639b9fb69568"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/androidNotificationImport.ts": {
+    "mtime": 1777261430.7744732,
+    "hash": "fade67fdd95e555bd056b86a260457aa"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/vendorUtils.ts": {
+    "mtime": 1775790490.807365,
+    "hash": "1687e9aa5a1f5a6fb4ae519805fed655"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/utils/googleDrive.ts": {
+    "mtime": 1775680581.411947,
+    "hash": "cfc5e4540b74123b4470f323a12daeb6"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/testing/mockSupabase.tsx": {
+    "mtime": 1778815269.1509888,
+    "hash": "9aa01f44f1f0fc9a3f3db6e171ba0c4a"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/Settings.tsx": {
+    "mtime": 1778815243.8097854,
+    "hash": "2fcd299fa25d0024bb1efc8c0bfd9952"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/SetupChecklist.tsx": {
+    "mtime": 1778057867.6888056,
+    "hash": "43ae47dd8522c919c94043ef711b32bd"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/ImpExCenter.tsx": {
+    "mtime": 1778621460.0867803,
+    "hash": "34384964a80fffd46c245087626f2221"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/TransactionsView.tsx": {
+    "mtime": 1778796987.9780762,
+    "hash": "b7909a1e5c8620d30eb1533d818eab05"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/Dashboard.tsx": {
+    "mtime": 1778057867.682971,
+    "hash": "1a9029b49036087a45e4f40098e1795e"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/ExcelImporter.tsx": {
+    "mtime": 1777378375.0365307,
+    "hash": "9a791708f8b62ec04cf485bc55b309e3"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/LoggedOutHome.tsx": {
+    "mtime": 1778478728.224156,
+    "hash": "54762d30d330e665f21f2437a14bd489"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/TransactionEntry.tsx": {
+    "mtime": 1778501111.0607474,
+    "hash": "d0f2e151de04f66bbdaaae77ad2adec0"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/ImportCenter.tsx": {
+    "mtime": 1778797552.9887948,
+    "hash": "53bd55eb8aad2e8585ad78eff55d2469"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/ProviderStatusCard.tsx": {
+    "mtime": 1778057867.686567,
+    "hash": "3f270dc3758157ab227c6ed25ae32ec3"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/AiChat.tsx": {
+    "mtime": 1777795411.5264158,
+    "hash": "180fa67fbed0278bb9512b13806e0493"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/GettingStartedChecklist.tsx": {
+    "mtime": 1778057867.6842773,
+    "hash": "e9e199c50c2d65589035f3393af61c6b"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/MonthlyAnalysis.tsx": {
+    "mtime": 1778057867.6861567,
+    "hash": "f63b0780fac6a53e383f06415a03ec28"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/Docs.tsx": {
+    "mtime": 1778057867.683473,
+    "hash": "36aa82fd80e06adfd2b5063eabe7cd81"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/CategoryManager.tsx": {
+    "mtime": 1778796987.9754934,
+    "hash": "aab716c60c3dad25298f4f42398feb0e"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/Layout.tsx": {
+    "mtime": 1778796987.9761581,
+    "hash": "8dfbc2c7c02d5b141b42aba4a1f284ac"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/DataHub.tsx": {
+    "mtime": 1777378230.114475,
+    "hash": "dfa6fb027c9652b05b550aad6a5d1c8a"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/SelfHostSetup.tsx": {
+    "mtime": 1778621526.713859,
+    "hash": "0e4e81ea4f3bb527a7393a17d98649f0"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/SetupStatus.tsx": {
+    "mtime": 1778797552.9134238,
+    "hash": "9124f564943a7497cd50bc7212e80f2a"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/DuplicateDetectionPanel.tsx": {
+    "mtime": 1778057774.3011835,
+    "hash": "73fd8c2970f3a27cc38dfaf75a87abd4"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/DateRangeSelector.tsx": {
+    "mtime": 1776080269.5936184,
+    "hash": "e75e6cbbd06012f574a6083f39f150c4"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/SetupHub.tsx": {
+    "mtime": 1777921878.9088972,
+    "hash": "bedcaf7bba3e47722a1d345bd2160ac9"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/EmptyStatePreview.tsx": {
+    "mtime": 1778057867.6839304,
+    "hash": "caacaad10b2c4dfebc85cb7143db49ef"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/TransactionIcon.tsx": {
+    "mtime": 1773742860.0,
+    "hash": "557e949b18f16b1546bf06901f474cf0"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/BulkAddModal.tsx": {
+    "mtime": 1778621526.7129986,
+    "hash": "a4fb9faf0819a7a735d5d5b4a7e71f3f"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/Analysis.tsx": {
+    "mtime": 1778057867.682277,
+    "hash": "36bfda4dfef5fb7b228c96d264837ed4"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/GoogleSheetImporter.tsx": {
+    "mtime": 1776905965.9227471,
+    "hash": "b7354b980c4f0d9fc300ff944a098161"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/ErrorBoundary.tsx": {
+    "mtime": 1775791838.206207,
+    "hash": "3a6c88456f0849fea47e262f0dbd4647"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/common/BottomSheet.tsx": {
+    "mtime": 1776080204.3793406,
+    "hash": "963df5e3bf9b9321a8abc16982f4add7"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/common/FAB.tsx": {
+    "mtime": 1776906154.135336,
+    "hash": "daa02dcc75e62e246b2ec53945fa4c26"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/common/EmptyState.tsx": {
+    "mtime": 1778057867.6902413,
+    "hash": "bcf7b9576310c33fe57cf0e08c1f2c4a"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/nav/BottomNav.tsx": {
+    "mtime": 1777798035.3214645,
+    "hash": "8b0d600844e0e43ed977a283ef95cd4d"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/onboarding/OnboardingWizard.tsx": {
+    "mtime": 1778814562.472227,
+    "hash": "12cacc84201feb03e536a8d39eb9855e"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/onboarding/steps/WelcomeStep.tsx": {
+    "mtime": 1778796987.9799635,
+    "hash": "8dc96ca8933f6df614ab3a58118c25e6"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/onboarding/steps/IntegrationsStep.tsx": {
+    "mtime": 1778796987.979816,
+    "hash": "bd7a2313d75c76f748de59987124d919"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/onboarding/steps/FirstTransactionStep.tsx": {
+    "mtime": 1778796987.979345,
+    "hash": "5cda7ea58a06fa3328cd3f935f6bb471"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/onboarding/steps/DoneStep.tsx": {
+    "mtime": 1778796987.9791176,
+    "hash": "ba969507cb9680d5d267ce36aae4904c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/onboarding/steps/CategoriesStep.tsx": {
+    "mtime": 1778796987.978724,
+    "hash": "24c822982a1bc54191f54e1094690141"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/components/onboarding/steps/CurrencyStep.tsx": {
+    "mtime": 1778796987.9788716,
+    "hash": "f035862aac277851e288f8b271925d6c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/hooks/useBreakpoint.ts": {
+    "mtime": 1776080181.0495653,
+    "hash": "fe2fc492ca555121545d47541dc18e92"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/lib/supabaseTypes.ts": {
+    "mtime": 1778621526.7177763,
+    "hash": "408d06f8bfe7299f733b637aca498728"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/lib/supabase.ts": {
+    "mtime": 1778621671.0134103,
+    "hash": "8a144459e12fbe916bf0cea2450daf47"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/src/lib/auth.ts": {
+    "mtime": 1778621526.7168524,
+    "hash": "298db01faa5b294c10617a719d8ca0fc"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/index.html": {
+    "mtime": 1777391483.8088782,
+    "hash": "14b71934f161854df8b4dbfc2d7cbd14"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/CHANGELOG-google-sheets-ux.md": {
+    "mtime": 1777795411.5103517,
+    "hash": "ed16b8287229ff915adf9a24636cf50e"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/README.md": {
+    "mtime": 1778319798.7120113,
+    "hash": "f747836f4bebb868af266ada6e073ea4"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/AGENTS.md": {
+    "mtime": 1778621526.7060213,
+    "hash": "ec739c95c21d181ef872fd1dbf982058"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/CLAUDE.md": {
+    "mtime": 1778815506.216212,
+    "hash": "8503f466df5b073ea7d89ac4d15e512a"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/setup-modes.md": {
+    "mtime": 1778319403.4746835,
+    "hash": "3a1de1cad30307d97cd12d868623a93a"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/baseline-validation-status.md": {
+    "mtime": 1777921878.896221,
+    "hash": "0158a9c5ac8cfee15ea25bbf90e6edbe"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/self-hosting.md": {
+    "mtime": 1778057867.6791377,
+    "hash": "b7b44b7d2d08b4926ffc23354f2763f9"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/byok-provider-setup.md": {
+    "mtime": 1778319798.7123694,
+    "hash": "9c44589aeb595c44e4c3790c7ed8010c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/manual-test-google-sheets-ux.md": {
+    "mtime": 1777795411.516233,
+    "hash": "82386ebbc045d93f955abfbcc2bd2070"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/staging-env-safety.md": {
+    "mtime": 1777921878.8974245,
+    "hash": "f8b2814b56f5934a6a66596d15d69002"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/troubleshooting.md": {
+    "mtime": 1778319798.7127492,
+    "hash": "07333010b05b9501c5d8aa1c09e77086"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/testing-release-workflow.md": {
+    "mtime": 1777921878.8981855,
+    "hash": "a211cf91005b8cbd21c950b59a03eab3"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/local-browser-testing.md": {
+    "mtime": 1777921878.8966665,
+    "hash": "e2310407039fb5e33279930e2755f2a0"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/hosted-vs-self-hosted.md": {
+    "mtime": 1778319415.7026968,
+    "hash": "7455e669cd017ba8cdd264c8dd9bcfbe"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/getting-started.md": {
+    "mtime": 1778319448.2749977,
+    "hash": "7cf5307d1cd3c6bf0be725e9a0320da2"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/README.md": {
+    "mtime": 1778319386.3251753,
+    "hash": "9e6e903f84bf503517ec62a8f7d49bab"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/roadmap.md": {
+    "mtime": 1777795411.5182996,
+    "hash": "b63e2abddbddf3979bb61a49461a7b38"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/prompt-log.md": {
+    "mtime": 1778621526.7090783,
+    "hash": "f88f052ec34314199e1d41d9fb6a8ad4"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/development-workflow.md": {
+    "mtime": 1778315047.7938414,
+    "hash": "9e8ad4a290202ed9bff81c365d589f09"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/north-star-strategy.md": {
+    "mtime": 1777796252.0506566,
+    "hash": "efb868cad5c32dd7c21ef4b58e9961c4"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/backlog.md": {
+    "mtime": 1778318270.2739835,
+    "hash": "fb3ed20db3fce654933d09f05c0e56dd"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/security-privacy.md": {
+    "mtime": 1778319432.6736498,
+    "hash": "f13e1bedd049b9ddaa212e7ff71b2ca7"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/docs/agent-workflow.md": {
+    "mtime": 1778478955.9291825,
+    "hash": "c29d99ec4908b6eb17454665ba8c25fc"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/memory-bank/techContext.md": {
+    "mtime": 1777921878.900568,
+    "hash": "e292845ce59671436faad6c5606d2ce3"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/memory-bank/activeContext.md": {
+    "mtime": 1777921878.8993614,
+    "hash": "4841ad954bdcbcfe616b85b6db84e9f8"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/memory-bank/progress.md": {
+    "mtime": 1777921878.9000943,
+    "hash": "f3475f62c25f35da31db7aff70e1481d"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/memory-bank/productContext.md": {
+    "mtime": 1777380157.4662745,
+    "hash": "482bc43688c04e52dbef6a6c6e8752d7"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/memory-bank/projectBrief.md": {
+    "mtime": 1777380152.0271723,
+    "hash": "8b2adc686e6fd011dac64c5de12f32ec"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/memory-bank/systemPatterns.md": {
+    "mtime": 1777380167.502326,
+    "hash": "3553a9b880f9f751fab064b5bf0b5ff8"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/public/apple-touch-icon.png": {
+    "mtime": 1776080460.1986814,
+    "hash": "916b0a1c7ce64f8c5cd516a2ab1f2c2c"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/public/icons/icon-192.png": {
+    "mtime": 1776080460.097897,
+    "hash": "bc16e5f2f0e122c8a4b872b6a69ec533"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/public/icons/icon-512-maskable.png": {
+    "mtime": 1776080459.9877217,
+    "hash": "a85cec402587a2e363eba1eb9ff2b7f0"
+  },
+  "/Users/shubham/Downloads/Downloads/vibebudget/public/icons/icon-512.png": {
+    "mtime": 1776080459.8708968,
+    "hash": "a85cec402587a2e363eba1eb9ff2b7f0"
+  }
+}

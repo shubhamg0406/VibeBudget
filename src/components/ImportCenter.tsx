@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { CheckCircle2, FileText, Search, Upload, XCircle } from "lucide-react";
+import { CheckCircle2, Download, FileText, Search, Upload, XCircle } from "lucide-react";
 import type { ImportBatch, ImportRecord, ImportRecordStatus, ImportSource } from "../types";
 import { useFirebase } from "../contexts/FirebaseContext";
 
@@ -18,6 +18,42 @@ const STATUS_STYLES: Record<ImportRecordStatus, string> = {
   warning: "bg-fintech-import/10 text-fintech-import",
   invalid: "bg-fintech-danger/10 text-fintech-danger",
 };
+
+const TEMPLATE_ROWS: Record<ImportTarget, string[][]> = {
+  expenses: [
+    ["Date", "Vendor", "Amount", "Category", "Notes"],
+    ["2026-05-01", "Save-On-Foods", "89.54", "Groceries", "Weekly groceries"],
+    ["2026-05-03", "Shell", "62.10", "Car fuel", "Regular gas"],
+    ["2026-05-04", "BC Hydro", "118.90", "Utilities", "Monthly bill"],
+  ],
+  income: [
+    ["Date", "Source", "Amount", "Category", "Notes"],
+    ["2026-05-01", "Employer Payroll", "3200.00", "Salary", "Bi-weekly salary"],
+    ["2026-05-05", "Freelance Client", "750.00", "Freelance", "Landing page design"],
+    ["2026-05-08", "Interest", "12.35", "Interest", "Savings account"],
+  ],
+  expenseCategories: [
+    ["Name", "Monthly Target"],
+    ["Groceries", "500"],
+    ["Utilities", "180"],
+    ["Entertainment", "120"],
+  ],
+  incomeCategories: [
+    ["Name", "Monthly Target"],
+    ["Salary", "0"],
+    ["Freelance", "0"],
+    ["Interest", "0"],
+  ],
+};
+
+const encodeCsvCell = (value: string) => {
+  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, "\"\"")}"`;
+  return value;
+};
+
+const buildTemplateCsv = (type: ImportTarget) => TEMPLATE_ROWS[type]
+  .map((row) => row.map((cell) => encodeCsvCell(cell)).join(","))
+  .join("\n");
 
 export const ImportCenter: React.FC<{ onImported?: () => void; allowedSources?: ImportCenterSource[] }> = ({ onImported, allowedSources }) => {
   const { previewImport, commitImport, expenseCategories, incomeCategories } = useFirebase();
@@ -105,6 +141,19 @@ export const ImportCenter: React.FC<{ onImported?: () => void; allowedSources?: 
       .filter((record) => record.status !== "invalid" && record.status !== "duplicate")
       .map((record) => record.id)));
     setMessage(`${nextBatch.summary.total} rows parsed. ${nextBatch.summary.invalid} invalid, ${nextBatch.summary.duplicate} duplicates.`);
+  };
+
+  const handleDownloadTemplate = () => {
+    const csv = buildTemplateCsv(target);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `vibebudget-${target}-sample.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
   };
 
   const handleCommit = async () => {
@@ -203,6 +252,14 @@ export const ImportCenter: React.FC<{ onImported?: () => void; allowedSources?: 
         >
           <FileText size={16} />
           Preview Import
+        </button>
+        <button
+          type="button"
+          onClick={handleDownloadTemplate}
+          className="inline-flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-ghost)] px-4 py-2 text-sm font-semibold text-fintech-muted"
+        >
+          <Download size={16} />
+          Download Sample Template
         </button>
         {batch && (
           <>
