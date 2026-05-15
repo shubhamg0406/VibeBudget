@@ -15,7 +15,7 @@ import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { useFirebase } from "../contexts/FirebaseContext";
 import { getTodayStr } from "../utils/dateUtils";
-import { ImportCenter } from "./ImportCenter";
+import { ImportCenter, buildTemplateCsv, buildTemplateXlsx } from "./ImportCenter";
 import { ExcelImporter } from "./ExcelImporter";
 import type { GoogleSheetsSyncConfig, Preferences } from "../types";
 
@@ -448,6 +448,42 @@ export const ImpExCenter: React.FC<ImpExCenterProps> = ({ onRefresh, onNavigateT
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold uppercase tracking-widest text-fintech-muted">Import</h3>
+        </div>
+
+        {/* Sample Files */}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-[var(--app-panel)] px-4 py-3" style={{ borderColor: "var(--app-border)" }}>
+          <span className="text-xs font-bold text-fintech-muted mr-1">Sample templates:</span>
+          {(["expenses", "income", "expenseCategories", "incomeCategories"] as const).map((type) => {
+            const label = { expenses: "Expenses", income: "Income", expenseCategories: "Expense Categories", incomeCategories: "Income Categories" }[type];
+            const downloadCsv = () => {
+              const blob = new Blob([buildTemplateCsv(type)], { type: "text/csv;charset=utf-8;" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `vibebudget-${type}-sample.csv`;
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            };
+            const downloadXlsx = () => {
+              const buf = buildTemplateXlsx(type);
+              const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `vibebudget-${type}-sample.xlsx`;
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            };
+            return (
+              <div key={type} className="flex items-center gap-1">
+                <span className="text-[10px] text-fintech-muted font-semibold">{label}:</span>
+                <button type="button" onClick={downloadCsv} className="inline-flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-ghost)] px-2 py-1 text-[10px] font-bold text-fintech-muted hover:text-[var(--app-text)] transition-colors">
+                  <Download size={11} /> CSV
+                </button>
+                <button type="button" onClick={downloadXlsx} className="inline-flex items-center gap-1 rounded-md border border-[var(--app-border)] bg-[var(--app-ghost)] px-2 py-1 text-[10px] font-bold text-fintech-muted hover:text-[var(--app-text)] transition-colors">
+                  <Download size={11} /> Excel
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {/* Google Sheets — state-aware hero */}

@@ -546,18 +546,22 @@ export const Analysis: React.FC<AnalysisProps> = ({
         <>
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="flex items-center gap-2">
-              <div className="relative flex items-center gap-3 rounded-xl border bg-[var(--app-ghost)] p-1.5" style={{ borderColor: "var(--app-border)" }}>
-                <span className={`pl-2 text-[10px] font-bold uppercase tracking-widest transition-colors ${expenseMode === 'all' ? 'text-[var(--app-text)]' : 'text-fintech-muted'}`}>All</span>
-                <button 
-                  onClick={() => setExpenseMode(expenseMode === 'all' ? 'core' : 'all')}
-                  className="relative h-5 w-10 rounded-full bg-[var(--app-ghost-strong)] transition-colors hover:bg-[var(--app-ghost-strong)]"
+              <div className="relative flex items-center gap-1 rounded-xl border bg-[var(--app-ghost)] p-1" style={{ borderColor: "var(--app-border)" }}>
+                <button
+                  onClick={() => setExpenseMode('all')}
+                  className={`rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors ${expenseMode === 'all' ? 'bg-[var(--app-panel)] text-[var(--app-text)] shadow-sm' : 'text-fintech-muted hover:text-[var(--app-text)]'}`}
                 >
-                  <div className={`absolute top-1 left-1 w-3 h-3 bg-fintech-accent rounded-full transition-all duration-300 shadow-[0_0_8px_rgba(16,185,129,0.5)] ${expenseMode === 'core' ? 'translate-x-5' : ''}`} />
+                  All
                 </button>
-                <span className={`pr-2 text-[10px] font-bold uppercase tracking-widest transition-colors ${expenseMode === 'core' ? 'text-[var(--app-text)]' : 'text-fintech-muted'}`}>Core</span>
-                
+                <button
+                  onClick={() => setExpenseMode('core')}
+                  className={`rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors ${expenseMode === 'core' ? 'bg-fintech-accent text-[#002919] shadow-sm' : 'text-fintech-muted hover:text-[var(--app-text)]'}`}
+                >
+                  Core
+                </button>
+
                 {/* Core Settings Tool */}
-                <button 
+                <button
                   onClick={() => setShowCoreFilter(!showCoreFilter)}
                   className={`ml-1 rounded-lg p-1.5 transition-colors ${showCoreFilter ? 'bg-fintech-accent/20 text-fintech-accent' : 'bg-transparent text-fintech-muted hover:bg-[var(--app-ghost-strong)]'}`}
                   title="Configure Core Exceptions"
