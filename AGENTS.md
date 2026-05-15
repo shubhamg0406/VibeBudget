@@ -176,6 +176,8 @@ vibebudget/
 
 **Capacitor Android**: `appId=com.vibebudget.app`, `androidScheme=https`, `webDir=dist`. Deep link URL scheme: `com.vibebudget.app`. `google-services.json` is required for push notifications but is not committed — push notifications are disabled until it is added.
 
+**Auth flow** (`src/lib/auth.ts`): `signInWithGoogle(withDriveScopes?)` uses three paths — (1) native Capacitor: system browser via `@capacitor/browser`, PKCE code exchanged on `appUrlOpen` deep link `com.vibebudget.app://login-callback` (must be registered in Supabase Auth > URL Configuration > Redirect URLs); (2) embedded browser (electron/webview/wv/codex UA): direct redirect flow; (3) web: popup with automatic redirect fallback on popup-closed errors. Pass `withDriveScopes=true` to include `drive.file` + `spreadsheets.readonly` scopes for Google Sheets integration.
+
 <!-- END AUTO-MANAGED -->
 
 <!-- AUTO-MANAGED: git-insights -->
