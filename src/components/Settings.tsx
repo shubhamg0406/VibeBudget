@@ -2269,7 +2269,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           { id: "finance_feeds",    icon: <Link2 size={14} />,      label: "Bank Feeds" },
           { id: "currency",         icon: <Globe size={14} />,      label: "Currency" },
           { id: "ai",               icon: <Sparkles size={14} />,   label: "AI" },
-          { id: "setup",            icon: <Database size={14} />,   label: "Setup" },
+          ...(import.meta.env.VITE_SELF_HOSTED === "true" ? [{ id: "setup", icon: <Database size={14} />, label: "Setup" }] : []),
           { id: "maintenance",      icon: <Shield size={14} />,     label: "Maintenance" },
         ] as { id: SettingsTab; icon: React.ReactNode; label: string }[]).map(({ id, icon, label }) => (
           <button
@@ -3328,7 +3328,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
           </section>
         )}
 
-        {activeTab === "setup" && (
+        {activeTab === "setup" && import.meta.env.VITE_SELF_HOSTED === "true" && (
           <section className="space-y-5">
             <div className="space-y-1">
               <h2 className="flex items-center gap-2 text-lg font-bold"><Database size={18} className="text-fintech-accent" /> Setup Status</h2>
