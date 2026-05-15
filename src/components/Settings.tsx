@@ -57,6 +57,7 @@ import { AI_PROVIDER_MODELS, AI_PROVIDER_LABELS, AI_PROVIDER_DEFAULT_MODEL } fro
 interface SettingsProps {
   onRefresh: () => void;
   initialTab?: SettingsTab;
+  onTabChange?: (tab: SettingsTab) => void;
 }
 
 import { SetupStatus } from "./SetupStatus";
@@ -217,7 +218,7 @@ const writeJson = (key: string, value: unknown) => {
   getSettingsStorage().setItem(key, JSON.stringify(value));
 };
 
-export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => {
+export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab, onTabChange }) => {
   const {
     wipeData,
     backupToDrive,
@@ -2124,7 +2125,7 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab }) => 
         ] as { id: SettingsTab; icon: React.ReactNode; label: string }[]).map(({ id, icon, label }) => (
           <button
             key={id}
-            onClick={() => setActiveTab(id)}
+            onClick={() => { setActiveTab(id); onTabChange?.(id); }}
             className={`flex flex-1 min-w-fit items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold whitespace-nowrap transition-colors ${
               activeTab === id
                 ? "bg-fintech-accent/20 text-fintech-accent"
