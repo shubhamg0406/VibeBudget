@@ -4,39 +4,33 @@ import { WelcomeStep } from "./steps/WelcomeStep";
 import { CurrencyStep } from "./steps/CurrencyStep";
 import { CategoriesStep } from "./steps/CategoriesStep";
 import { FirstTransactionStep } from "./steps/FirstTransactionStep";
-import { IntegrationsStep } from "./steps/IntegrationsStep";
 import { DoneStep } from "./steps/DoneStep";
 import { useFirebase } from "../../contexts/FirebaseContext";
-import type { SettingsTab } from "../Settings";
 
 interface OnboardingWizardProps {
   onComplete: () => void;
-  onNavigateToSettings: (tab: SettingsTab) => void;
+  onNavigateToSettings: (tab: string) => void;
 }
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 5;
 
 const STEP_LABELS = [
   "Welcome",
   "Currency",
   "Budgets",
   "First Transaction",
-  "Integrations",
   "Done",
 ];
 
 export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
   onComplete,
-  onNavigateToSettings,
 }) => {
   const { saveOnboardingStep, onboardingStep } = useFirebase();
 
-  // Initialize from saved step (resume support), but clamp between 0 and TOTAL_STEPS-1
   const [step, setStep] = useState<number>(() =>
     Math.min(Math.max(onboardingStep, 0), TOTAL_STEPS - 1)
   );
 
-  // Track what was completed during this session for the Done summary
   const [currencySet, setCurrencySet] = useState(false);
   const [budgetsSet, setBudgetsSet] = useState(false);
   const [transactionAdded, setTransactionAdded] = useState(false);
@@ -50,58 +44,33 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
     if (step > 0) advanceTo(step - 1);
   };
 
-  const progressPercent = ((step) / (TOTAL_STEPS - 1)) * 100;
+  const progressPercent = (step / (TOTAL_STEPS - 1)) * 100;
 
   const renderStep = () => {
     switch (step) {
       case 0:
-        return (
-          <WelcomeStep
-            onNext={() => advanceTo(1)}
-          />
-        );
+        return <WelcomeStep onNext={() => advanceTo(1)} />;
       case 1:
         return (
           <CurrencyStep
-            onNext={() => {
-              setCurrencySet(true);
-              advanceTo(2);
-            }}
+            onNext={() => { setCurrencySet(true); advanceTo(2); }}
           />
         );
       case 2:
         return (
           <CategoriesStep
-            onNext={() => {
-              setBudgetsSet(true);
-              advanceTo(3);
-            }}
+            onNext={() => { setBudgetsSet(true); advanceTo(3); }}
             onSkip={() => advanceTo(3)}
           />
         );
       case 3:
         return (
           <FirstTransactionStep
-            onNext={() => {
-              setTransactionAdded(true);
-              advanceTo(4);
-            }}
+            onNext={() => { setTransactionAdded(true); advanceTo(4); }}
             onSkip={() => advanceTo(4)}
           />
         );
       case 4:
-        return (
-          <IntegrationsStep
-            onNext={() => advanceTo(5)}
-            onSkip={() => advanceTo(5)}
-            onNavigateToSettings={(tab) => {
-              // Navigate to settings and mark onboarding as complete so the
-              // overlay doesn't block the settings view.
-              onNavigateToSettings(tab);
-            }}
-          />
-        );
-      case 5:
         return (
           <DoneStep
             currencySet={currencySet}
@@ -150,7 +119,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({
           {renderStep()}
         </div>
 
-        {/* Footer — Back button (not on first/last step) */}
+        {/* Footer */}
         {!isFirstOrLast && canGoBack && (
           <div
             className="flex items-center justify-between px-6 py-4 border-t"

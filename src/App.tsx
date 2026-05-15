@@ -310,12 +310,8 @@ export default function App() {
       <AiChat />
       {!onboardingCompleted && (
         <OnboardingWizard
-          onComplete={() => {
-            // onboardingCompleted state is updated by completeOnboarding() inside DoneStep
-          }}
-          onNavigateToSettings={(tab) => {
-            onNavigate("settings", tab);
-          }}
+          onComplete={() => undefined}
+          onNavigateToSettings={() => undefined}
         />
       )}
     </>
