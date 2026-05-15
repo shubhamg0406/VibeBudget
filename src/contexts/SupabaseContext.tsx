@@ -237,7 +237,7 @@ export interface FirebaseContextType {
   budgetId: string | null; ownerEmail: string | null; sharedUsers: string[];
   expenseCategories: ExpenseCategory[]; incomeCategories: IncomeCategory[]; categories: Category[];
   transactions: Transaction[]; income: Income[]; recurringRules: RecurringRule[];
-  preferences: Preferences; updatePreferences: (prefs: Partial<Preferences>) => Promise<void>;
+  preferences: Preferences; updatePreferences: (prefs: Partial<Preferences>) => Promise<void>; updateSingleExchangeRate: (currency: string, patch: Partial<import("../types").ExchangeRate>) => Promise<void>;
   signIn: () => Promise<void>; logout: () => Promise<void>;
   addTransaction: (data: Omit<Transaction, "id">) => Promise<void>;
   updateTransaction: (id: string, data: Partial<Transaction>) => Promise<void>;
@@ -662,6 +662,15 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updatePreferences = async (prefs: Partial<Preferences>) => {
     const next = { ...preferencesRef.current, ...prefs, coreExcludedCategories: prefs.coreExcludedCategories ? migrateExcludedCategories(prefs.coreExcludedCategories) : preferencesRef.current.coreExcludedCategories };
     await saveUserProfilePatch({ preferences: normalizePreferences(next) });
+  };
+
+  // Patches a single exchange rate entry by currency code, reading fresh from preferencesRef.
+  // Avoids stale-closure races when called immediately after adding a new currency.
+  const updateSingleExchangeRate = async (currency: string, patch: Partial<import("../types").ExchangeRate>) => {
+    const currentRates = preferencesRef.current.exchangeRates;
+    const next = currentRates.map((r) => r.currency === currency ? { ...r, ...patch } : r);
+    const nextPrefs = { ...preferencesRef.current, exchangeRates: next };
+    await saveUserProfilePatch({ preferences: normalizePreferences(nextPrefs) });
   };
 
   const saveBudgetToDrive = async () => {
@@ -1362,7 +1371,7 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         budgetId,
         ownerEmail: user?.email || null, sharedUsers: [], expenseCategories, incomeCategories,
         categories: expenseCategories, transactions, income, recurringRules, preferences,
-        updatePreferences, signIn, logout, addTransaction, refreshTransactionsNow, updateTransaction,
+        updatePreferences, updateSingleExchangeRate, signIn, logout, addTransaction, refreshTransactionsNow, updateTransaction,
         deleteTransaction, addIncome, updateIncome, deleteIncome, createRecurringRule,
         updateRecurringRule, deleteRecurringRule, generateRecurringTransactions, getUpcomingRecurring,
         updateExpenseCategoryTarget, updateIncomeCategoryTarget, updateCategoryTarget,

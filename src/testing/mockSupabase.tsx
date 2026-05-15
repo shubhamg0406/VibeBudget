@@ -65,7 +65,7 @@ export const createMockSupabaseValue = (seed?: MockSupabaseSeed): FirebaseContex
     user, loading: false, authError: null, clearAuthError: () => {}, budgetId: "mock-budget",
     ownerEmail: user?.email || null, sharedUsers: [], expenseCategories, incomeCategories,
     categories: expenseCategories, transactions, income, recurringRules, preferences,
-    updatePreferences: noop, signIn: noop, logout: noop, addTransaction: noop,
+    updatePreferences: noop, updateSingleExchangeRate: noop, deleteAccount: noop, signIn: noop, logout: noop, addTransaction: noop,
     refreshTransactionsNow: async () => 0, updateTransaction: noop, deleteTransaction: noop,
     addIncome: noop, updateIncome: noop, deleteIncome: noop, createRecurringRule: async () => "mock-rule",
     updateRecurringRule: noop, deleteRecurringRule: noop, generateRecurringTransactions: async () => ({ generated: 0, skipped: 0 }),
@@ -111,6 +111,7 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const value = useMemo<FirebaseContextType>(() => ({
     ...createMockSupabaseValue({ user, expenseCategories, incomeCategories, transactions, income, recurringRules, preferences, googleSheetsConfig }),
     updatePreferences: async (partial) => { setPreferences((c) => ({ ...c, ...partial })); },
+    updateSingleExchangeRate: async (currency, patch) => { setPreferences((c) => ({ ...c, exchangeRates: c.exchangeRates.map((r) => r.currency === currency ? { ...r, ...patch } : r) })); },
     addTransaction: async (data) => { setTransactions((c) => c.concat({ id: `txn-${c.length + 1}`, ...data })); },
     updateTransaction: async (id, data) => { setTransactions((c) => c.map((i) => (i.id === id ? { ...i, ...data } : i))); },
     deleteTransaction: async (id) => { setTransactions((c) => c.filter((i) => i.id !== id)); },
