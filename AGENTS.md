@@ -1,27 +1,197 @@
-# VibeBudget Agent Rulebook
+# AGENTS.md
 
-This file is the durable operating context for coding agents working in this
-repository. Read it before making changes, writing prompts for another agent, or
-validating a PR locally.
+This file provides guidance to AI coding agents when working with code in this repository.
 
-## Product Context
+<!-- AUTO-MANAGED: project-description -->
+## Overview
 
-VibeBudget is a privacy-aware budgeting and personal finance workspace with
-hosted and self-hosted options, provider integrations, and local-first
-development workflows.
+**VibeBudget** — privacy-aware budgeting and personal finance workspace.
 
-Keep changes aligned with:
+- Hosted (Supabase-backed) and self-hosted (local SQLite) deployment modes
+- Local-first workflows with optional cloud sync
+- Provider integrations: Plaid, Teller, Google Sheets, document OCR
+- PWA + Capacitor mobile (iOS/Android)
+- AI chat powered by Google Gemini
 
-- `README.md` for product and developer quickstart.
-- `docs/north-star-strategy.md` for product direction.
-- `docs/roadmap.md` for prioritized scope.
-- `docs/testing-release-workflow.md` for release and validation expectations.
-- `docs/agent-workflow.md` for command-level branch/PR handoff requirements.
-- `docs/development-workflow.md` for the durable Codex + implementation-agent
-  loop.
-- `docs/backlog.md` for product, UX, bug, and improvement notes captured during
-  testing.
+Key docs:
+- `README.md` — product and developer quickstart
+- `docs/north-star-strategy.md` — product direction
+- `docs/roadmap.md` — prioritized scope
+- `docs/backlog.md` — open bugs, UX polish, ideas
+- `docs/testing-release-workflow.md` — release and validation expectations
+- `docs/agent-workflow.md` — branch/PR handoff requirements
+- `docs/development-workflow.md` — Codex + implementation-agent loop
 
+<!-- END AUTO-MANAGED -->
+
+<!-- AUTO-MANAGED: build-commands -->
+## Build & Development Commands
+
+```bash
+# Full dev (API + Vite frontend, concurrent)
+npm run dev
+
+# Frontend only
+npm run dev:vite           # http://localhost:8888
+
+# API server only (builds then runs)
+npm run dev:api            # http://localhost:3000
+
+# Mock/test mode frontend
+npm run dev:test           # http://127.0.0.1:4173
+
+# Build
+npm run build              # Vite production build → dist/
+npm run build:api          # ESBuild API bundle → .server-dist/server.cjs
+
+# Lint (TypeScript type-check only)
+npm run lint               # tsc --noEmit
+
+# Tests
+npm run test               # all: unit + component + API + smoke
+npm run test:unit          # vitest run tests/unit
+npm run test:component     # vitest run tests/components
+npm run test:api           # vitest run --environment=node tests/api
+npm run test:smoke         # playwright test
+
+# Agent workflow
+npm run agent:start -- <agent> <task-slug> [base-branch]
+npm run agent:whoami
+npm run agent:pr -- <agent> "<pr title>" main --approved
+
+# Verify (pre-PR checks)
+npm run verify
+```
+
+<!-- END AUTO-MANAGED -->
+
+<!-- AUTO-MANAGED: architecture -->
+## Architecture
+
+```
+vibebudget/
+├── src/
+│   ├── App.tsx              # Root: view state machine, auth gate, routing
+│   ├── types.ts             # Domain types (Transaction, Income, Category, etc.)
+│   ├── components/          # 32+ React components
+│   │   ├── account/         # Account management
+│   │   ├── transactions/    # Transactions views
+│   │   ├── import/          # Import flows (CSV, Google Sheets, OCR)
+│   │   ├── plaid/           # Plaid bank feed UI
+│   │   ├── setup/           # Self-hosted setup (VITE_SELF_HOSTED only)
+│   │   ├── onboarding/      # Onboarding wizard
+│   │   ├── Dashboard.tsx    # Budget overview
+│   │   ├── Settings.tsx     # Settings tabs
+│   │   ├── AiChat.tsx       # Gemini AI chat panel
+│   │   └── Layout.tsx       # Shell with nav
+│   ├── contexts/
+│   │   ├── FirebaseContext.tsx   # Legacy Firebase (being migrated)
+│   │   └── SupabaseContext.tsx   # Current hosted auth/data
+│   ├── hooks/
+│   │   └── useBreakpoint.ts
+│   ├── lib/
+│   │   ├── auth.ts          # Auth helpers
+│   │   ├── supabase.ts      # Supabase client
+│   │   └── supabaseTypes.ts
+│   ├── utils/               # 15+ utility modules (date, currency, import, etc.)
+│   └── server/              # Server-side handlers
+│       ├── aiChat.ts        # Gemini AI endpoints
+│       ├── aiClient.ts      # Gemini client wrapper
+│       ├── plaid.ts         # Plaid API handler
+│       └── teller.ts        # Teller API handler
+├── server.ts                # Express entry point
+├── api/                     # Vercel serverless API routes
+├── supabase/
+│   └── migrations/          # Supabase SQL migrations
+├── scripts/                 # Agent workflow scripts
+├── tests/                   # unit/ + components/ + api/ + e2e/
+└── graphify-out/            # AST knowledge graph (read before exploring code)
+```
+
+**Data flow**: `SupabaseContext` (or `FirebaseContext`) → `App.tsx` state → component props. No external router — view state is managed in `App.tsx` via `useState<View>`.
+
+**Hosted vs self-hosted**: `VITE_SELF_HOSTED=true` gates Setup tab and local SQLite path. Never expose self-hosted-only features in hosted app.
+
+**Graphify**: Always read `graphify-out/GRAPH_REPORT.md` before source files or grep searches. Run `graphify update .` after modifying code.
+
+<!-- END AUTO-MANAGED -->
+
+<!-- AUTO-MANAGED: conventions -->
+## Code Conventions
+
+**Naming**
+- Components: `PascalCase.tsx` (e.g. `Dashboard.tsx`, `AiChat.tsx`)
+- Utilities/hooks: `camelCase.ts` (e.g. `dateUtils.ts`, `useBreakpoint.ts`)
+- Types/interfaces: PascalCase with `I`-prefix avoided (e.g. `Transaction`, `ExpenseCategory`)
+- Constants: camelCase or SCREAMING_SNAKE for env vars
+
+**Imports**
+- ES modules (`"type": "module"` in package.json)
+- Named imports preferred; default exports for React components
+- No barrel `index.ts` files — import from specific file paths
+
+**Styling**
+- Tailwind CSS 4 utility classes; `clsx` + `tailwind-merge` for conditional classes
+- No CSS modules; minimal inline styles
+- Dark/light theme via Tailwind dark: variant
+
+**TypeScript**
+- Strict mode; `tsc --noEmit` is the lint gate
+- Domain types in `src/types.ts`; Supabase generated types in `src/lib/supabaseTypes.ts`
+- Prefer `interface` for data shapes, `type` for unions/aliases
+
+**React patterns**
+- Functional components only; hooks for state/effects
+- Context for cross-cutting state (auth, transactions, categories)
+- No Redux or external state management
+
+<!-- END AUTO-MANAGED -->
+
+<!-- AUTO-MANAGED: patterns -->
+## Detected Patterns
+
+**Feature gating**: `VITE_SELF_HOSTED` env var controls self-hosted-only features. Check before adding Setup/infrastructure UI.
+
+**Import pipeline**: All imports flow through `src/utils/importPipeline.ts` with deduplication via `importDedupe.ts`. New import sources should hook into this pipeline.
+
+**Recurring transactions**: `src/utils/recurring.ts` handles rule-based recurring logic. `is_recurring_instance` flag on `Transaction`.
+
+**Currency handling**: Multi-currency via `src/utils/currencyUtils.ts`. Secondary currency has a known race condition pattern — use `updateSingleExchangeRate` not batch updates.
+
+**AI chat**: Server-side via `src/server/aiChat.ts` → Gemini. Client never calls Gemini directly.
+
+**Agent scripts**: `scripts/agent-start.mjs`, `agent-pr.mjs`, `agent-whoami.mjs` — use these for branch setup and PR creation, don't do it manually.
+
+**Migration path**: Firebase → Supabase migration ongoing. `FirebaseContext` is legacy; `SupabaseContext` is canonical. New features should use Supabase only.
+
+<!-- END AUTO-MANAGED -->
+
+<!-- AUTO-MANAGED: git-insights -->
+## Git Insights
+
+Recent design decisions from git history:
+- **Currency race condition fix** (d2034c5): Rewrote currency settings, fixed secondary currency race via `updateSingleExchangeRate` — don't reintroduce batch exchange rate updates
+- **Firebase→Supabase migration** (0f5802f, 2de2501): Treat missing `onboarding_completed` column as `true` for pre-migration safety
+- **Hosted/self-hosted split** (45de2fa): Setup tab hidden behind `VITE_SELF_HOSTED`; enforce this boundary strictly
+- **Onboarding simplification** (ed5daad): Integrations step removed from wizard — don't re-add without explicit request
+- **Agent branch convention**: `agent/<agent>/<task-slug>` — enforced by `agent-start.mjs`
+
+<!-- END AUTO-MANAGED -->
+
+<!-- AUTO-MANAGED: best-practices -->
+## Best Practices
+
+- Read `graphify-out/GRAPH_REPORT.md` first — saves grep searches
+- Keep PRs scoped; one task per branch
+- Run `npm run verify` before opening a PR
+- Test UI in local browser after backend changes — type-check alone is insufficient
+- Use `npm run test:api` for Express route changes
+- Supabase migrations go in `supabase/migrations/` — never mutate schema directly
+- Do not commit `.env*` files (gitignored); use `.env.example` as reference
+
+<!-- END AUTO-MANAGED -->
+
+<!-- MANUAL -->
 ## Working Agreement
 
 - Treat this repository as the source of truth, not chat memory.
@@ -37,68 +207,45 @@ Keep changes aligned with:
 The owner and Codex use this loop for agent-driven development:
 
 1. Codex and the owner identify the work.
-2. Codex writes a precise prompt in `docs/prompt-log.md` or directly for the
-   target implementation agent.
+2. Codex writes a precise prompt in `docs/prompt-log.md` or directly for the target implementation agent.
 3. The implementation agent works on an `agent/<agent>/<task-slug>` branch.
-4. The implementation agent runs relevant checks, commits, pushes, and opens
-   the PR.
-5. Codex pulls/checks the PR locally, starts the app, and validates the UI
-   directly in a browser.
-6. Codex reports whether local UI passes, needs a fix prompt, or needs a Codex
-   fix.
+4. The implementation agent runs relevant checks, commits, pushes, and opens the PR.
+5. Codex pulls/checks the PR locally, starts the app, and validates the UI directly in a browser.
+6. Codex reports whether local UI passes, needs a fix prompt, or needs a Codex fix.
 7. The owner decides whether to merge or ask for the next prompt.
 
-The owner should not need to manually review PR diffs or perform the first UI
-test pass. Local browser validation is the primary quality gate.
+The owner should not need to manually review PR diffs or perform the first UI test pass. Local browser validation is the primary quality gate.
 
 ## Prompt Authoring Rule
 
-When Codex writes a prompt for an implementation agent, include relevant
-operating instructions inline. Do not assume the agent will remember this
-workflow from chat or discover every rule on its own.
+When Codex writes a prompt for an implementation agent, include relevant operating instructions inline. Do not assume the agent will remember this workflow from chat or discover every rule on its own.
 
 Every implementation prompt must include:
+- Repository path
+- Files and docs to read first, including `AGENTS.md`
+- Branch/start command
+- Scoped task summary
+- Acceptance criteria
+- Out-of-scope items
+- Test, lint, build, and browser validation expectations
+- Automatic PR creation command
+- Required handoff report
+- Instruction not to merge or deploy
 
-- Repository path.
-- Files and docs to read first, including `AGENTS.md`.
-- Branch/start command.
-- Scoped task summary.
-- Acceptance criteria.
-- Out-of-scope items.
-- Test, lint, build, and browser validation expectations.
-- Automatic PR creation command.
-- Required handoff report.
-- Instruction not to merge or deploy.
-
-If a prompt is important enough to send to another agent, also preserve it in
-`docs/prompt-log.md` unless the owner explicitly says it is throwaway.
+If a prompt is important enough to send to another agent, also preserve it in `docs/prompt-log.md` unless the owner explicitly says it is throwaway.
 
 ## Backlog Capture Rule
 
-When the owner says "add this to backlog", "save this for later", or similar,
-do not start implementation. Append the note to `docs/backlog.md` with a
-lightweight entry.
+When the owner says "add this to backlog", "save this for later", or similar, do not start implementation. Append the note to `docs/backlog.md` with a lightweight entry.
 
-Backlog entries should include:
-
-- Date.
-- Source/context (local testing, PR validation, product idea, bug, or UX polish).
-- Short title.
-- What was observed or requested.
-- Why it matters.
-- Optional acceptance notes if obvious.
-- Status, defaulting to `Open`.
-
-Do not over-specify backlog items. The purpose is to preserve the idea so Codex
-can later turn it into an implementation prompt or direct fix when asked.
+Backlog entries should include: date, source/context, short title, what was observed or requested, why it matters, optional acceptance notes, status (default: `Open`).
 
 ## Branch, Commit, And PR Conventions
 
 - Agent branch format: `agent/<agent>/<task-slug>`
 - Agent commit format: `[<agent>] <short message>`
 - Agent PR title format: `[<agent>] <task summary>`
-- Codex-authored branches should use the `codex/` prefix unless the owner asks
-  for another branch name.
+- Codex-authored branches should use the `codex/` prefix unless the owner asks for another branch name.
 
 ## Guardrails
 
@@ -111,39 +258,12 @@ can later turn it into an implementation prompt or direct fix when asked.
 - Do not revert user or other-agent changes.
 - Do not touch Nexus/shared canonical work unless explicitly assigned.
 
-## Useful Commands
-
-```bash
-npm run agent:start -- <agent> <task-slug> [base-branch]
-npm run agent:whoami
-npm run agent:pr -- <agent> "<pr title>" main --approved
-npm run lint
-npm run test:run
-```
-
 ## Local Validation Standard
 
-When validating a PR, lead with local product behavior. Check the diff as
-needed, but do not stop at diff review when UI behavior is testable.
+When validating a PR, lead with local product behavior. Check the diff as needed, but do not stop at diff review when UI behavior is testable.
 
-Verify:
+Verify: user-facing behavior and acceptance criteria, relevant flow in a local browser, auth/integration boundaries when applicable, data safety expectations, API route behavior when backend changes, local testability and rollback clarity.
 
-- User-facing behavior and acceptance criteria.
-- Relevant flow in a local browser.
-- Auth/integration boundaries when applicable.
-- Data safety expectations (staging/local data, not production data).
-- API route behavior when backend changes.
-- Local testability and rollback clarity.
+If no issues are found, say so clearly and call out any remaining test gaps. If the UI fails locally, prepare the next fix prompt or fix directly when asked.
 
-If no issues are found, say so clearly and call out any remaining test gaps. If
-the UI fails locally, prepare the next fix prompt or fix directly when asked.
-
-## graphify
-
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
-
-Rules:
-- ALWAYS read graphify-out/GRAPH_REPORT.md before reading any source files, running grep/glob searches, or answering codebase questions. The graph is your primary map of the codebase.
-- IF graphify-out/wiki/index.md EXISTS, navigate it instead of reading raw files
-- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+<!-- END MANUAL -->

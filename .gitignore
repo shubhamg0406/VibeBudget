@@ -13,3 +13,6 @@ playwright-report/
 .vercel
 .server-dist/
 .claude/worktrees/
+
+# Claude Code auto-memory
+.claude/auto-memory/dirty-files*
