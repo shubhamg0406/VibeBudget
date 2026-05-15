@@ -184,7 +184,7 @@ export default function App() {
       <LoggedOutHome
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-        onOpenDocs={() => navigate("/docs")}
+        onOpenDocs={() => window.open("/docs", "_blank", "noopener,noreferrer")}
       />
     );
   }
@@ -283,7 +283,7 @@ export default function App() {
         onNavigate={onNavigate}
         theme={theme}
         onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-        onOpenDocs={() => navigate("/docs")}
+        onOpenDocs={() => window.open("/docs", "_blank", "noopener,noreferrer")}
       >
         <Routes>
           <Route path="/" element={dashboardElement} />
