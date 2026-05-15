@@ -61,6 +61,11 @@ npm run agent:pr -- <agent> "<pr title>" main --approved
 
 # Verify (pre-PR checks)
 npm run verify
+
+# Capacitor / Android
+npx cap sync android        # sync web build → native Android project
+npx cap open android        # open android/ in Android Studio
+npx cap build android       # build Android APK/AAB (requires Android Studio SDK)
 ```
 
 <!-- END AUTO-MANAGED -->
@@ -103,6 +108,11 @@ vibebudget/
 ├── api/                     # Vercel serverless API routes
 ├── supabase/
 │   └── migrations/          # Supabase SQL migrations
+├── android/                 # Capacitor Android platform (appId: com.vibebudget.app)
+│   ├── app/build.gradle     # App module: AGP 8.13.0, versionCode=1
+│   └── app/src/main/
+│       └── AndroidManifest.xml  # Deep link scheme: com.vibebudget.app
+├── capacitor.config.ts      # Capacitor config: webDir=dist, androidScheme=https
 ├── scripts/                 # Agent workflow scripts
 ├── tests/                   # unit/ + components/ + api/ + e2e/
 └── graphify-out/            # AST knowledge graph (read before exploring code)
@@ -164,6 +174,8 @@ vibebudget/
 
 **Migration path**: Firebase → Supabase migration ongoing. `FirebaseContext` is legacy; `SupabaseContext` is canonical. New features should use Supabase only.
 
+**Capacitor Android**: `appId=com.vibebudget.app`, `androidScheme=https`, `webDir=dist`. Deep link URL scheme: `com.vibebudget.app`. `google-services.json` is required for push notifications but is not committed — push notifications are disabled until it is added.
+
 <!-- END AUTO-MANAGED -->
 
 <!-- AUTO-MANAGED: git-insights -->
@@ -175,6 +187,7 @@ Recent design decisions from git history:
 - **Hosted/self-hosted split** (45de2fa): Setup tab hidden behind `VITE_SELF_HOSTED`; enforce this boundary strictly
 - **Onboarding simplification** (ed5daad): Integrations step removed from wizard — don't re-add without explicit request
 - **Agent branch convention**: `agent/<agent>/<task-slug>` — enforced by `agent-start.mjs`
+- **Android platform added** (41a73ce): Capacitor Android scaffolded with `appId=com.vibebudget.app`. `google-services.json` not committed — push notifications disabled until added.
 
 <!-- END AUTO-MANAGED -->
 
