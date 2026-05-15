@@ -174,7 +174,7 @@ vibebudget/
 
 **Migration path**: Firebase → Supabase migration ongoing. `FirebaseContext` is legacy; `SupabaseContext` is canonical. New features should use Supabase only.
 
-**Capacitor Android**: `appId=com.vibebudget.app`, `androidScheme=https`, `webDir=dist`. Deep link URL scheme: `com.vibebudget.app`. `google-services.json` is required for push notifications but is not committed — push notifications are disabled until it is added.
+**Capacitor Android**: `appId=com.vibebudget.app`, `androidScheme=https`, `webDir=dist`. Deep link URL scheme: `com.vibebudget.app`. `google-services.json` is required for push notifications but is not committed — push notifications are disabled until it is added. Launcher icon: custom wallet SVG (`ic_launcher_foreground.xml`) in green `#34D399` on dark navy `#121A2E` background — matches app theme. Web app favicon and Apple touch icon are wired via `index.html`.
 
 **Auth flow** (`src/lib/auth.ts`): `signInWithGoogle(withDriveScopes?)` uses three paths — (1) native Capacitor: system browser via `@capacitor/browser`, PKCE code exchanged on `appUrlOpen` deep link `com.vibebudget.app://login-callback` (must be registered in Supabase Auth > URL Configuration > Redirect URLs); (2) embedded browser (electron/webview/wv/codex UA): direct redirect flow; (3) web: popup with automatic redirect fallback on popup-closed errors. Pass `withDriveScopes=true` to include `drive.file` + `spreadsheets.readonly` scopes for Google Sheets integration.
 
@@ -190,6 +190,7 @@ Recent design decisions from git history:
 - **Onboarding simplification** (ed5daad): Integrations step removed from wizard — don't re-add without explicit request
 - **Agent branch convention**: `agent/<agent>/<task-slug>` — enforced by `agent-start.mjs`
 - **Android platform added** (41a73ce): Capacitor Android scaffolded with `appId=com.vibebudget.app`. `google-services.json` not committed — push notifications disabled until added.
+- **Branding wired up** (4d0e4b9): Android launcher icon replaced with custom wallet SVG (green `#34D399`, dark navy `#121A2E` bg); web `index.html` now includes favicon and Apple touch icon links.
 
 <!-- END AUTO-MANAGED -->
 
