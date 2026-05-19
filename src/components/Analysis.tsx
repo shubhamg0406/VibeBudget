@@ -549,7 +549,7 @@ export const Analysis: React.FC<AnalysisProps> = ({
               <div className="relative flex items-center gap-1 rounded-xl border bg-[var(--app-ghost)] p-1" style={{ borderColor: "var(--app-border)" }}>
                 <button
                   onClick={() => setExpenseMode('all')}
-                  className={`rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors ${expenseMode === 'all' ? 'bg-[var(--app-panel)] text-[var(--app-text)] shadow-sm' : 'text-fintech-muted hover:text-[var(--app-text)]'}`}
+                  className={`rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors ${expenseMode === 'all' ? 'bg-fintech-accent text-[#002919] shadow-sm' : 'text-fintech-muted hover:text-[var(--app-text)]'}`}
                 >
                   All
                 </button>
