@@ -197,6 +197,7 @@ Recent design decisions from git history:
 - **Currency race condition fix** (d2034c5): Rewrote currency settings, fixed secondary currency race via `updateSingleExchangeRate` — don't reintroduce batch exchange rate updates
 - **Hosted/self-hosted split** (45de2fa): Setup tab hidden behind `VITE_SELF_HOSTED`; enforce this boundary strictly
 - **Onboarding simplification** (ed5daad): Integrations step removed from wizard — don't re-add without explicit request
+- **DataHub header button removed** (350ae95): Upload/DataHub trigger removed from `Layout.tsx` header — `DataHub` component still exists in `Settings.tsx`; do not re-add a header shortcut without explicit request
 - **Agent branch convention**: `agent/<agent>/<task-slug>` — enforced by `agent-start.mjs`
 - **Android platform added** (41a73ce): Capacitor Android scaffolded with `appId=com.vibebudget.app`. `google-services.json` not committed — push notifications disabled until added.
 
