@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { supabase } from "../lib/supabase";
 import {
   AiProviderConfig, Category, DriveConnection, ExpenseCategory, GooglePullSummary,
+  GooglePullPreviewResult,
   GoogleSheetsInspectionResult, GoogleSheetsSyncConfig, GoogleSheetsSyncDirection,
   GoogleSheetsSyncMode, GoogleSheetsSyncOptions, ImportBatch, ImportCommitOptions,
   ImportCommitSummary, ImportPreviewOptions, ImportSource, Income, IncomeCategory,
@@ -220,6 +221,12 @@ const readSessionCache = <T,>(uid: string, name: string): T[] | null => {
 const writeSessionCache = <T,>(uid: string, name: string, data: T[]): void => { try { sessionStorage.setItem(getSessionKey(uid, name), JSON.stringify(data)); } catch { /* storage full */ } };
 const clearSessionCache = (uid: string, name: string): void => { sessionStorage.removeItem(getSessionKey(uid, name)); };
 
+const normalizeProviderToken = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 interface UserProfileDocument {
   budgetId: string; email: string; displayName?: string | null; photoURL?: string | null;
   preferences?: Preferences; googleSheetsConfig?: GoogleSheetsSyncConfig | null;
@@ -270,6 +277,8 @@ export interface FirebaseContextType {
   previewGoogleSheetColumn: (spreadsheetUrl: string, sheetName: string, startCell: string, endCell: string | null, noEndRange: boolean) => Promise<{ headerValue: string; samples: Array<{ cell: string; value: string }>; last: { cell: string; value: string } | null; }>;
   saveGoogleSheetsConfig: (config: Omit<GoogleSheetsSyncConfig, "connectedAt" | "connectedBy">) => Promise<void>;
   syncGoogleSheets: (direction?: GoogleSheetsSyncDirection, options?: GoogleSheetsSyncOptions) => Promise<GooglePullSummary | void>;
+  previewGoogleSheetsPull: (mode?: GoogleSheetsSyncMode) => Promise<GooglePullPreviewResult>;
+  commitGoogleSheetsPullPreview: (preview: GooglePullPreviewResult, recordIds: string[]) => Promise<GooglePullSummary>;
   validateGoogleSheetsMapping: () => { valid: boolean; missing: string[] }; googlePullSummary: GooglePullSummary | null;
   backingUp: boolean; isSyncing: boolean; lastSynced: Date | null; driveConnection: DriveConnection | null;
   driveConnected: boolean; driveSyncError: string | null; connectDriveFolder: (folderRef?: string) => Promise<void>;
@@ -546,12 +555,14 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = mapSupabaseUser(session?.user || null);
+      const providerToken = normalizeProviderToken((session as { provider_token?: unknown } | null)?.provider_token);
       const nextUid = nextUser?.uid ?? null;
       const uidChanged = nextUid !== prevAuthUidRef.current;
       prevAuthUidRef.current = nextUid;
       // Preserve stable user object reference when uid hasn't changed (prevents effect re-runs)
       setUser(prev => (prev?.uid === nextUser?.uid ? prev : nextUser));
       if (!nextUser) { resetBudgetState(); setLoading(false); return; }
+      if (providerToken) storeAccessToken(providerToken, nextUser.email);
       const storedOwnerEmail = readStoredGoogleAccessTokenOwnerEmail();
       if (googleSheetsAccessToken && storedOwnerEmail && nextUser.email && storedOwnerEmail !== nextUser.email.trim().toLowerCase()) storeAccessToken(null);
       setBudgetId(nextUser.uid); setAuthError(null);
@@ -920,6 +931,100 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (sheetsConfigRef.current) await saveUserProfilePatch({ googleSheetsConfig: { ...sheetsConfigRef.current, lastError: message } });
       throw error;
     } finally { syncInFlightRef.current = false; setGoogleSheetsSyncing(false); }
+  };
+
+  const previewGoogleSheetsPull = async (mode: GoogleSheetsSyncMode = "incremental"): Promise<GooglePullPreviewResult> => {
+    if (!googleSheetsAccessToken || !sheetsConfigRef.current) throw new Error("Configure Google Sheets first.");
+    const { rows, count } = await buildSheetRowsForPull(googleSheetsAccessToken, sheetsConfigRef.current, mode);
+    const expenseRows = rows.filter((r: any) => !r.__sourceId?.includes("income-"));
+    const incomeRows = rows.filter((r: any) => r.__sourceId?.includes("income-"));
+    const expenseBatch = previewImportBatch({
+      source: "google_sheet",
+      payload: expenseRows,
+      options: { type: "expenses", hasHeader: false },
+      existing: {
+        transactions: transactionsRef.current,
+        income: incomeRef.current,
+        expenseCategories: expenseCategoriesRef.current,
+        incomeCategories: incomeCategoriesRef.current,
+      },
+    });
+    const incomeBatch = previewImportBatch({
+      source: "google_sheet",
+      payload: incomeRows,
+      options: { type: "income", hasHeader: false },
+      existing: {
+        transactions: transactionsRef.current,
+        income: incomeRef.current,
+        expenseCategories: expenseCategoriesRef.current,
+        incomeCategories: incomeCategoriesRef.current,
+      },
+    });
+    const cursorBase = sheetsConfigRef.current.incrementalCursor || {};
+    const maxExpenseRow = expenseRows.reduce((max: number, r: any) => {
+      const match = (r.__sourceId || "").match(/row-(\d+)/);
+      return match ? Math.max(max, Number.parseInt(match[1], 10)) : max;
+    }, cursorBase.expenses || 0);
+    const maxIncomeRow = incomeRows.reduce((max: number, r: any) => {
+      const match = (r.__sourceId || "").match(/row-(\d+)/);
+      return match ? Math.max(max, Number.parseInt(match[1], 10)) : max;
+    }, cursorBase.income || 0);
+    const batch: ImportBatch = {
+      id: `google-sheet-preview-${Date.now()}`,
+      source: "google_sheet",
+      createdAt: new Date().toISOString(),
+      records: [...expenseBatch.records, ...incomeBatch.records],
+      ignoredRows: expenseBatch.ignoredRows + incomeBatch.ignoredRows,
+      warnings: [...expenseBatch.warnings, ...incomeBatch.warnings],
+      summary: {
+        total: expenseBatch.summary.total + incomeBatch.summary.total,
+        new: expenseBatch.summary.new + incomeBatch.summary.new,
+        duplicate: expenseBatch.summary.duplicate + incomeBatch.summary.duplicate,
+        warning: expenseBatch.summary.warning + incomeBatch.summary.warning,
+        invalid: expenseBatch.summary.invalid + incomeBatch.summary.invalid,
+      },
+    };
+    return {
+      mode,
+      fetched: count,
+      cursor: { expenses: maxExpenseRow, income: maxIncomeRow },
+      batch,
+    };
+  };
+
+  const commitGoogleSheetsPullPreview = async (preview: GooglePullPreviewResult, recordIds: string[]): Promise<GooglePullSummary> => {
+    const selected = new Set(recordIds);
+    const selectedRecords = preview.batch.records.filter((record) => selected.has(record.id));
+    const commitSummary = await commitImport(preview.batch, { includeDuplicates: false, recordIds });
+    const duplicateSkipped = selectedRecords.filter((record) => record.status === "duplicate").length;
+    const invalidSkipped = selectedRecords.filter((record) => record.status === "invalid").length;
+    const pullSummary: GooglePullSummary = {
+      fetched: preview.fetched,
+      imported: commitSummary.imported,
+      duplicateSkipped,
+      invalidSkipped,
+      netNew: commitSummary.imported,
+      mode: preview.mode,
+    };
+    const currentConfig = sheetsConfigRef.current;
+    if (currentConfig) {
+      const nextConfig: GoogleSheetsSyncConfig = {
+        ...currentConfig,
+        incrementalCursor: {
+          ...(currentConfig.incrementalCursor || {}),
+          expenses: Math.max(currentConfig.incrementalCursor?.expenses || 0, preview.cursor.expenses || 0),
+          income: Math.max(currentConfig.incrementalCursor?.income || 0, preview.cursor.income || 0),
+        },
+        lastPullSummary: pullSummary,
+        lastPullAt: getIsoNow(),
+        lastError: null,
+      };
+      await saveUserProfilePatch({ googleSheetsConfig: nextConfig });
+      setGoogleSheetsConfig(nextConfig);
+    }
+    setGooglePullSummary(pullSummary);
+    setGoogleSheetsError(null);
+    return pullSummary;
   };
 
   const addTransaction = async (data: Omit<Transaction, "id">) => {
@@ -1391,7 +1496,7 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         inspectGoogleSheetsSpreadsheet: async (...args) => { if (!googleSheetsAccessToken) throw new Error("Sign in with Google first."); return inspectSpreadsheet(googleSheetsAccessToken!, ...args); },
         previewGoogleSheetColumn: async () => ({ headerValue: "", samples: [], last: null }),
         saveGoogleSheetsConfig: async (config) => { if (!user) throw new Error("Sign in with Google first."); const prev = sheetsConfigRef.current; const pv = prev?.mappingVersion || 0; const payload: GoogleSheetsSyncConfig = { ...config, mappingSavedAt: getIsoNow(), mappingVersion: pv + 1, incrementalCursor: prev?.incrementalCursor || config.incrementalCursor, lastPullSummary: prev?.lastPullSummary || config.lastPullSummary || null, connectedAt: prev?.connectedAt || getIsoNow(), connectedBy: user.email || user.uid, lastError: null, lastSyncedAt: prev?.lastSyncedAt || null, lastPullAt: prev?.lastPullAt || null, lastPushAt: prev?.lastPushAt || null }; await saveUserProfilePatch({ googleSheetsConfig: payload }); setGoogleSheetsConfig(payload); setGoogleSheetsError(null); },
-        syncGoogleSheets, validateGoogleSheetsMapping: () => ({ valid: true, missing: [] }), googlePullSummary,
+        syncGoogleSheets, previewGoogleSheetsPull, commitGoogleSheetsPullPreview, validateGoogleSheetsMapping: () => ({ valid: true, missing: [] }), googlePullSummary,
         backingUp, isSyncing, lastSynced, driveConnection, driveConnected: Boolean(driveConnection),
         driveSyncError, connectDriveFolder, previewBudgetFromDrive, loadBudgetFromDrive, disconnectDriveFolder,
         googleSheetsAccessToken, plaidConnected, plaidConnection, plaidSyncing, plaidError,

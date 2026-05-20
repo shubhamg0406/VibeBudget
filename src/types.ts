@@ -250,6 +250,16 @@ export interface GooglePullSummary {
   mode: GoogleSheetsSyncMode;
 }
 
+export interface GooglePullPreviewResult {
+  mode: GoogleSheetsSyncMode;
+  fetched: number;
+  cursor: {
+    expenses: number;
+    income: number;
+  };
+  batch: ImportBatch;
+}
+
 export interface ExpenseSheetMapping {
   date: string;
   vendor: string;

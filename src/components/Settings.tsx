@@ -23,7 +23,9 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   ExpenseCategory,
   ExpenseSheetMapping,
+  ImportRecord,
   GooglePullSummary,
+  GooglePullPreviewResult,
   GoogleSheetsInspectionResult,
   GoogleSheetsSyncConfig,
   GoogleSheetsSyncDirection,
@@ -244,6 +246,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab, onTab
     previewGoogleSheetColumn,
     saveGoogleSheetsConfig,
     syncGoogleSheets,
+    previewGoogleSheetsPull,
+    commitGoogleSheetsPullPreview,
     validateGoogleSheetsMapping,
     googlePullSummary,
     driveConnection,
@@ -347,6 +351,10 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab, onTab
   const [pickingSheet, setPickingSheet] = useState(false);
   const [savingSheetConfig, setSavingSheetConfig] = useState(false);
   const [pullMode, setPullMode] = useState<GoogleSheetsSyncMode>("incremental");
+  const [pullPreview, setPullPreview] = useState<GooglePullPreviewResult | null>(null);
+  const [pullPreviewLoading, setPullPreviewLoading] = useState(false);
+  const [committingPullPreview, setCommittingPullPreview] = useState(false);
+  const [selectedPullRecordIds, setSelectedPullRecordIds] = useState<string[]>([]);
   const [mappingSavedAt, setMappingSavedAt] = useState<string | null>(null);
   const [expenseHeaders, setExpenseHeaders] = useState<string[]>([]);
   const [incomeHeaders, setIncomeHeaders] = useState<string[]>([]);
@@ -1269,6 +1277,57 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab, onTab
       setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail), "sync-now");
     }
   };
+
+  const togglePullRecordSelection = (recordId: string, checked: boolean) => {
+    setSelectedPullRecordIds((current) => {
+      if (checked) {
+        if (current.includes(recordId)) return current;
+        return [...current, recordId];
+      }
+      return current.filter((id) => id !== recordId);
+    });
+  };
+
+  const handlePreviewPullRows = async () => {
+    setPullPreviewLoading(true);
+    try {
+      const preview = await previewGoogleSheetsPull(pullMode);
+      setPullPreview(preview);
+      const defaults = preview.batch.records
+        .filter((record) => record.status === "new" || record.status === "warning")
+        .map((record) => record.id);
+      setSelectedPullRecordIds(defaults);
+      setSectionStatus("google_workspace", "success", `Preview ready: ${preview.fetched} fetched rows. Review and commit only the records you trust.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to preview pulled rows.";
+      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail));
+    } finally {
+      setPullPreviewLoading(false);
+    }
+  };
+
+  const handleCommitPullPreview = async () => {
+    if (!pullPreview) return;
+    setCommittingPullPreview(true);
+    try {
+      const summary = await commitGoogleSheetsPullPreview(pullPreview, selectedPullRecordIds);
+      setSectionStatus(
+        "google_workspace",
+        "success",
+        `Imported ${summary.imported} selected row(s). ${summary.duplicateSkipped} duplicate row(s) skipped.`
+      );
+      setPullPreview(null);
+      setSelectedPullRecordIds([]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to commit selected rows.";
+      setSectionStatus("google_workspace", "error", getCloudActionableError(message, connectedGoogleEmail), "sync-now");
+    } finally {
+      setCommittingPullPreview(false);
+    }
+  };
+
+  const pullPreviewRecords = pullPreview?.batch.records || [];
+  const selectedPreviewCount = selectedPullRecordIds.length;
 
   const mappingSummaries = useMemo<SavedSheetMappingSummary[]>(() => {
     const types = ["expenses", "income", "expenseCategories", "incomeCategories"];
@@ -2509,6 +2568,131 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab, onTab
                 <p className="mt-1.5 text-center text-[11px] text-fintech-muted">
                   Save your column mapping first to enable pull
                 </p>
+              )}
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <button
+                  onClick={() => void handlePreviewPullRows()}
+                  disabled={!canPull || googleSheetsSyncing || pullPreviewLoading}
+                  className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+                    canPull && !googleSheetsSyncing && !pullPreviewLoading
+                      ? "bg-[var(--app-ghost)] text-[var(--app-text)] hover:bg-[var(--app-ghost-strong)]"
+                      : "bg-[var(--app-ghost)] text-fintech-muted cursor-not-allowed"
+                  }`}
+                >
+                  {pullPreviewLoading ? "Preparing Preview..." : "Preview Rows First"}
+                </button>
+                <button
+                  onClick={() => { setPullPreview(null); setSelectedPullRecordIds([]); }}
+                  disabled={!pullPreview || committingPullPreview}
+                  className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+                    pullPreview && !committingPullPreview
+                      ? "bg-fintech-danger/10 text-fintech-danger hover:bg-fintech-danger/20"
+                      : "bg-[var(--app-ghost)] text-fintech-muted cursor-not-allowed"
+                  }`}
+                >
+                  Clear Preview
+                </button>
+              </div>
+
+              {pullPreview && (
+                <div className="mt-4 rounded-xl border bg-[var(--app-panel-strong)] p-4" style={{ borderColor: "var(--app-border)" }}>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-bold">Review Pulled Rows</h4>
+                      <p className="text-[11px] text-fintech-muted">
+                        Select legit rows, then commit only those to your database.
+                      </p>
+                    </div>
+                    <div className="text-[11px] text-fintech-muted">
+                      Selected {selectedPreviewCount} of {pullPreviewRecords.length}
+                    </div>
+                  </div>
+
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => {
+                        const ids = pullPreviewRecords
+                          .filter((record) => record.status === "new" || record.status === "warning")
+                          .map((record) => record.id);
+                        setSelectedPullRecordIds(ids);
+                      }}
+                      className="rounded-md bg-[var(--app-ghost)] px-2.5 py-1 text-[11px] font-semibold hover:bg-[var(--app-ghost-strong)] transition-colors"
+                    >
+                      Select New + Warning
+                    </button>
+                    <button
+                      onClick={() => setSelectedPullRecordIds([])}
+                      className="rounded-md bg-[var(--app-ghost)] px-2.5 py-1 text-[11px] font-semibold hover:bg-[var(--app-ghost-strong)] transition-colors"
+                    >
+                      Deselect All
+                    </button>
+                  </div>
+
+                  <div className="max-h-80 overflow-auto rounded-lg border" style={{ borderColor: "var(--app-border)" }}>
+                    <table className="min-w-full text-left text-xs">
+                      <thead className="bg-[var(--app-ghost)] text-[10px] uppercase tracking-widest text-fintech-muted">
+                        <tr>
+                          <th className="px-3 py-2">Pick</th>
+                          <th className="px-3 py-2">Type</th>
+                          <th className="px-3 py-2">Date</th>
+                          <th className="px-3 py-2">Vendor/Source</th>
+                          <th className="px-3 py-2">Amount</th>
+                          <th className="px-3 py-2">Category</th>
+                          <th className="px-3 py-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pullPreviewRecords.map((record: ImportRecord) => {
+                          const isChecked = selectedPullRecordIds.includes(record.id);
+                          const selectable = record.status !== "invalid";
+                          const statusClass =
+                            record.status === "new"
+                              ? "bg-fintech-accent/20 text-fintech-accent"
+                              : record.status === "warning"
+                                ? "bg-yellow-400/20 text-yellow-300"
+                                : record.status === "duplicate"
+                                  ? "bg-[var(--app-ghost)] text-fintech-muted"
+                                  : "bg-fintech-danger/20 text-fintech-danger";
+                          return (
+                            <tr key={record.id} className="border-t" style={{ borderColor: "var(--app-border)" }}>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  disabled={!selectable}
+                                  onChange={(e) => togglePullRecordSelection(record.id, e.target.checked)}
+                                />
+                              </td>
+                              <td className="px-3 py-2">{record.kind === "income" ? "Income" : "Expense"}</td>
+                              <td className="px-3 py-2">{record.date || "-"}</td>
+                              <td className="px-3 py-2">{record.merchant || "-"}</td>
+                              <td className="px-3 py-2">{typeof record.amount === "number" ? record.amount.toFixed(2) : "-"}</td>
+                              <td className="px-3 py-2">{record.category || "-"}</td>
+                              <td className="px-3 py-2">
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusClass}`}>
+                                  {record.status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <button
+                    onClick={() => void handleCommitPullPreview()}
+                    disabled={committingPullPreview || selectedPreviewCount === 0}
+                    className={`mt-3 w-full rounded-xl px-4 py-3 text-sm font-bold transition-colors ${
+                      !committingPullPreview && selectedPreviewCount > 0
+                        ? "bg-fintech-accent text-[#002919] hover:bg-fintech-accent/90"
+                        : "bg-[var(--app-ghost)] text-fintech-muted cursor-not-allowed"
+                    }`}
+                  >
+                    {committingPullPreview ? "Committing Selected Rows..." : `Commit Selected (${selectedPreviewCount})`}
+                  </button>
+                </div>
               )}
 
               {/* Pull Summary Card */}
