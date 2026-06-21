@@ -4,6 +4,7 @@ import type {
   GoogleSheetsSyncConfig,
   GoogleSheetsSyncOptions,
 } from "../../src/types";
+import { getStableImportedExpenseId } from "../../src/utils/importDedupe";
 import { previewImportBatch } from "../../src/utils/importPipeline";
 
 const makeMockExisting = () => ({
@@ -124,6 +125,87 @@ describe("Pull pipeline via previewImportBatch", () => {
     const batch = previewImportBatch({
       source: "google_sheet",
       payload: [duplicateRow],
+      options: { type: "expenses", hasHeader: false },
+      existing,
+    });
+
+    expect(batch.summary.duplicate).toBe(1);
+    expect(batch.summary.new).toBe(0);
+  });
+
+  it("does not skip a backdated sheet row just because an old row-number source id already exists", () => {
+    const existing = makeMockExisting();
+    existing.transactions = [
+      {
+        id: "existing-1",
+        date: "2026-04-10",
+        vendor: "Costco",
+        amount: 150.0,
+        category_id: "cat-1",
+        category_name: "Groceries",
+        notes: "Monthly stockup",
+        import_source: "google_sheet",
+        source_id: "google_sheet-row-4",
+        raw_description: "2026-04-10, Costco, 150, Groceries, Monthly stockup",
+      },
+    ];
+
+    const backdatedRow = {
+      __row: ["2026-04-01", "Backdated vendor", 25.0, "Groceries", "Inserted above old rows"],
+      __sourceId: getStableImportedExpenseId({
+        date: "2026-04-01",
+        vendor: "Backdated vendor",
+        amount: 25.0,
+        category_name: "Groceries",
+        notes: "Inserted above old rows",
+      }),
+      __rowNumber: 4,
+    };
+
+    const batch = previewImportBatch({
+      source: "google_sheet",
+      payload: [backdatedRow],
+      options: { type: "expenses", hasHeader: false },
+      existing,
+    });
+
+    expect(batch.summary.new).toBe(1);
+    expect(batch.summary.duplicate).toBe(0);
+  });
+
+  it("still skips legacy row-number imports by content during a full reconcile", () => {
+    const existing = makeMockExisting();
+    existing.transactions = [
+      {
+        id: "existing-1",
+        date: "2026-04-10",
+        vendor: "Costco",
+        amount: 150.0,
+        category_id: "cat-1",
+        category_name: "Groceries",
+        notes: "Monthly stockup",
+        import_source: "google_sheet",
+        source_id: "google_sheet-row-10",
+        raw_description: "2026-04-10, Costco, 150, Groceries, Monthly stockup",
+      },
+    ];
+
+    const shiftedExistingRow = {
+      __row: ["2026-04-10", "Costco", 150.0, "Groceries", "Monthly stockup"],
+      __sourceId: getStableImportedExpenseId({
+        date: "2026-04-10",
+        vendor: "Costco",
+        amount: 150.0,
+        category_name: "Groceries",
+        notes: "Monthly stockup",
+      }),
+      __rowNumber: 11,
+      __rawDescription: "2026-04-10, Costco, 150, Groceries, Monthly stockup",
+    };
+
+    const batch = previewImportBatch({
+      source: "google_sheet",
+      payload: [shiftedExistingRow],
       options: { type: "expenses", hasHeader: false },
       existing,
     });

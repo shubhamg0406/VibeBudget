@@ -19,8 +19,9 @@ import {
 } from "../utils/googleDrive";
 import { signInWithGoogle } from "../lib/auth";
 import { computeUpcoming, materializeRule } from "../utils/recurring";
-import { getTodayStr } from "../utils/dateUtils";
+import { getTodayStr, normalizeDateString } from "../utils/dateUtils";
 import { previewImportBatch } from "../utils/importPipeline";
+import { getStableImportedExpenseId, getStableImportedIncomeId } from "../utils/importDedupe";
 import type { User as FirebaseUser } from "./FirebaseUserType";
 
 const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
@@ -64,6 +65,12 @@ const stripUndefinedFields = <T,>(value: T): T => {
 };
 
 const getIsoNow = () => new Date().toISOString();
+
+const getGoogleSheetPullRowNumber = (row: unknown) => {
+  if (!row || typeof row !== "object") return 0;
+  const rowNumber = (row as { __rowNumber?: unknown }).__rowNumber;
+  return typeof rowNumber === "number" && Number.isFinite(rowNumber) ? rowNumber : 0;
+};
 
 const readStoredGoogleAccessToken = () => {
   const token = sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY) || localStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY);
@@ -828,8 +835,21 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const notes = (expNotes.values[offset] || "").trim();
           const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
           if (!date || !vendor || amount <= 0) continue;
+          const normalizedDate = normalizeDateString(date) || date;
+          const sourceId = getStableImportedExpenseId({
+            date: normalizedDate,
+            vendor,
+            amount,
+            category_name: category,
+            notes,
+          });
           totalCount += 1;
-          allRows.push({ __row: [date, vendor, amount, category, notes], __sourceId: `google_sheet-row-${absRowIndex}`, __rawDescription: [date, vendor, amount, category, notes].join(", ") });
+          allRows.push({
+            __row: [date, vendor, amount, category, notes],
+            __sourceId: sourceId,
+            __rowNumber: absRowIndex,
+            __rawDescription: [normalizedDate, vendor, amount, category, notes].join(", "),
+          });
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown Google Sheets read error";
@@ -856,8 +876,21 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const notes = (incNotes.values[offset] || "").trim();
           const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
           if (!date || !source || amount <= 0) continue;
+          const normalizedDate = normalizeDateString(date) || date;
+          const sourceId = getStableImportedIncomeId({
+            date: normalizedDate,
+            source,
+            amount,
+            category,
+            notes,
+          });
           totalCount += 1;
-          allRows.push({ __row: [date, source, amount, category, notes], __sourceId: `google_sheet-income-row-${absRowIndex}`, __rawDescription: [date, source, amount, category, notes].join(", ") });
+          allRows.push({
+            __row: [date, source, amount, category, notes],
+            __sourceId: sourceId,
+            __rowNumber: absRowIndex,
+            __rawDescription: [normalizedDate, source, amount, category, notes].join(", "),
+          });
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown Google Sheets read error";
@@ -901,8 +934,8 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const configAfterPull = sheetsConfigRef.current;
         if (configAfterPull && mode === "incremental") {
           const newCursor: Record<string, number> = { ...(configAfterPull.incrementalCursor || {}) };
-          const maxExpenseRow = expenseRows.reduce((max: number, r: any) => { const match = (r.__sourceId || "").match(/row-(\d+)/); return match ? Math.max(max, Number.parseInt(match[1], 10)) : max; }, newCursor.expenses || 0);
-          const maxIncomeRow = incomeRows.reduce((max: number, r: any) => { const match = (r.__sourceId || "").match(/row-(\d+)/); return match ? Math.max(max, Number.parseInt(match[1], 10)) : max; }, newCursor.income || 0);
+          const maxExpenseRow = expenseRows.reduce((max: number, r: any) => Math.max(max, getGoogleSheetPullRowNumber(r)), newCursor.expenses || 0);
+          const maxIncomeRow = incomeRows.reduce((max: number, r: any) => Math.max(max, getGoogleSheetPullRowNumber(r)), newCursor.income || 0);
           newCursor.expenses = Math.max(newCursor.expenses || 0, maxExpenseRow); newCursor.income = Math.max(newCursor.income || 0, maxIncomeRow);
           const nextConfig: GoogleSheetsSyncConfig = { ...configAfterPull, incrementalCursor: newCursor, lastPullSummary: pullSummary, lastPullAt: getIsoNow(), lastError: null };
           await saveUserProfilePatch({ googleSheetsConfig: nextConfig }); setGoogleSheetsError(null); return pullSummary;

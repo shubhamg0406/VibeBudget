@@ -323,7 +323,7 @@ const classifyCandidate = (
     amount,
     candidate.raw_description || candidate.notes,
   ));
-  const duplicate = candidate.source_id ? sourceDuplicate : fallbackDuplicate;
+  const duplicate = candidate.source_id ? sourceDuplicate || fallbackDuplicate : fallbackDuplicate;
   const status: ImportRecordStatus = invalid ? "invalid" : duplicate ? "duplicate" : warnings.length > 0 ? "warning" : "new";
 
   return {
