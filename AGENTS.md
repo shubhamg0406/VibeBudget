@@ -185,7 +185,11 @@ vibebudget/
 
 **URL routing**: `VIEW_PATHS` in `Layout.tsx` maps `View` enum values to URL paths. Sidebar nav uses `useNavigate(VIEW_PATHS[item.id])`. When adding a new view, add it to `View` type, `PAGE_META`, and `VIEW_PATHS` in Layout, and register the route in `App.tsx`/`main.tsx`.
 
-**Auth flow** (`src/lib/auth.ts`): `signInWithGoogle(withDriveScopes?)` uses three paths — (1) native Capacitor: system browser via `@capacitor/browser`, PKCE code exchanged on `appUrlOpen` deep link `com.vibebudget.app://login-callback` (must be registered in Supabase Auth > URL Configuration > Redirect URLs); (2) embedded browser (electron/webview/wv/codex UA): direct redirect flow; (3) web: popup with automatic redirect fallback on popup-closed errors. Pass `withDriveScopes=true` to include `drive.file` + `spreadsheets.readonly` scopes for Google Sheets integration.
+**Auth flow** (`src/lib/auth.ts`): `signInWithGoogle(withDriveScopes?)` uses three paths — (1) native Capacitor: system browser via `@capacitor/browser`, PKCE code exchanged on `appUrlOpen` deep link `com.vibebudget.app://login-callback` (must be registered in Supabase Auth > URL Configuration > Redirect URLs); (2) embedded browser (electron/webview/wv/codex UA): direct redirect flow; (3) web: popup with automatic redirect fallback on popup-closed errors. Pass `withDriveScopes=true` to include `drive.file` + `spreadsheets.readonly` scopes for Google Sheets integration. Auth state handler in `SupabaseContext` also extracts `provider_token` from the Supabase session and stores it immediately via `storeAccessToken` on sign-in.
+
+**Google Sheets pull — content-based dedup**: Incremental pull no longer uses row-number cursors (they broke when sheets were re-sorted). Replaced with open-ended column reads (`col{N}:col`) via `getSheetValues` (removed `getSheetColumnValuesUntilEmptyRun`). Dedup uses stable source IDs from `importDedupe.ts` (`getStableImportedExpenseId` / `getStableImportedIncomeId`) + a fingerprint fallback. `normalizeDateString` is applied before ID generation. Do not reintroduce cursor-based row offsets.
+
+**Google Sheets pull preview workflow**: `SupabaseContext` exposes `previewGoogleSheetsPull(mode?)` → returns `GooglePullPreviewResult`; and `commitGoogleSheetsPullPreview(preview, recordIds)` → returns `GooglePullSummary`. `Settings.tsx` uses these to implement a "Preview Rows First" → review + select records → "Commit Selected" flow before writing data. New import sources that pull from Google Sheets should follow this pattern.
 
 <!-- END AUTO-MANAGED -->
 
@@ -200,6 +204,7 @@ Recent design decisions from git history:
 - **DataHub header button removed** (350ae95): Upload/DataHub trigger removed from `Layout.tsx` header — `DataHub` component still exists in `Settings.tsx`; do not re-add a header shortcut without explicit request
 - **Agent branch convention**: `agent/<agent>/<task-slug>` — enforced by `agent-start.mjs`
 - **Android platform added** (41a73ce): Capacitor Android scaffolded with `appId=com.vibebudget.app`. `google-services.json` not committed — push notifications disabled until added.
+- **Google pull preview + content dedup** (142172a): Row-number cursor sync replaced with content-based dedup (stable import IDs + fingerprints). `getSheetColumnValuesUntilEmptyRun` removed. `previewGoogleSheetsPull` / `commitGoogleSheetsPullPreview` added to context — use the preview-then-commit flow for all future Google Sheets pull features.
 
 <!-- END AUTO-MANAGED -->
 
