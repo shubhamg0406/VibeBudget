@@ -2547,8 +2547,8 @@ export const Settings: React.FC<SettingsProps> = ({ onRefresh, initialTab, onTab
               </div>
               <p className="mb-4 text-[11px] text-fintech-muted">
                 {pullMode === "incremental"
-                  ? "Import only new rows since your last pull (uses cursor tracking)."
-                  : "Re-import all mapped rows. Duplicates are still skipped automatically."}
+                  ? "Scan the whole sheet and import any new or missing rows. Duplicates and backdated rows are handled automatically."
+                  : "Re-scan every mapped row in the sheet. Duplicates are still skipped automatically."}
               </p>
 
               {/* Pull Now Button */}

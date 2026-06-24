@@ -11,7 +11,7 @@ import {
   Transaction, UpcomingRecurringInstance,
 } from "../types";
 import {
-  getSheetColumnValuesUntilEmptyRun, getSheetValues, inspectSpreadsheet, normalizeSheetName,
+  getSheetValues, inspectSpreadsheet, normalizeSheetName,
   parseA1CellReference, parseSpreadsheetId,
 } from "../utils/googleSheetsSync";
 import {
@@ -20,8 +20,9 @@ import {
 } from "../utils/googleDrive";
 import { signInWithGoogle } from "../lib/auth";
 import { computeUpcoming, materializeRule } from "../utils/recurring";
-import { getTodayStr } from "../utils/dateUtils";
+import { getTodayStr, normalizeDateString } from "../utils/dateUtils";
 import { previewImportBatch } from "../utils/importPipeline";
+import { getStableImportedExpenseId, getStableImportedIncomeId } from "../utils/importDedupe";
 import type { User as FirebaseUser } from "./FirebaseUserType";
 
 const GOOGLE_ACCESS_TOKEN_KEY = "vibebudgetGoogleAccessToken";
@@ -65,6 +66,12 @@ const stripUndefinedFields = <T,>(value: T): T => {
 };
 
 const getIsoNow = () => new Date().toISOString();
+
+const getGoogleSheetPullRowNumber = (row: unknown) => {
+  if (!row || typeof row !== "object") return 0;
+  const rowNumber = (row as { __rowNumber?: unknown }).__rowNumber;
+  return typeof rowNumber === "number" && Number.isFinite(rowNumber) ? rowNumber : 0;
+};
 
 const readStoredGoogleAccessToken = () => {
   const token = sessionStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY) || localStorage.getItem(GOOGLE_ACCESS_TOKEN_KEY);
@@ -808,8 +815,16 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const parsedStart = parseA1CellReference(startCell);
       if (!parsedStart) return { values: [], dataStartRowNumber: 2 };
       const dataStartRowNumber = parsedStart.rowIndex + 1;
+      const columnLetter = parsedStart.cellRef.replace(/[0-9]+$/, "");
       if (draft?.noEnd || !draft?.endCell) {
-        const values = await getSheetColumnValuesUntilEmptyRun(token, config.spreadsheetId, sanitizedSheetName, parsedStart.columnIndex, dataStartRowNumber);
+        // Open-ended column read (col{start}:col) captures EVERY data row: backdated
+        // rows that sorting pushed above the previous max, and rows past internal blank
+        // gaps. The old empty-run walker stopped after 3 blank rows and read each column
+        // independently, which truncated long sheets and misaligned columns.
+        const range = `'${sanitizedSheetName.replace(/'/g, "''")}'!${columnLetter}${dataStartRowNumber}:${columnLetter}`;
+        const response = await getSheetValues(token, config.spreadsheetId, range);
+        const rows = response.values || [];
+        const values = rows.map((row) => (row[0] || "").trim());
         return { values, dataStartRowNumber };
       }
       const range = `'${sanitizedSheetName.replace(/'/g, "''")}'!${parsedStart.cellRef}:${draft.endCell}`;
@@ -827,11 +842,12 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const expCategory = await readDraftValues(config.expensesSheetName, config.expenseRangeDrafts?.category);
         const expNotes = await readDraftValues(config.expensesSheetName, config.expenseRangeDrafts?.notes);
         const expStartRow = expDate.dataStartRowNumber || config.expensesDataStartRow || 2;
-        const expCursor = mode === "incremental" ? (config.incrementalCursor?.expenses || 0) : 0;
         const expRowCount = Math.max(expDate.values.length, expVendor.values.length, expAmount.values.length, expCategory.values.length, expNotes.values.length);
         for (let offset = 0; offset < expRowCount; offset += 1) {
+          // Always scan every row regardless of mode — content-based dedup (stable source
+          // id + fallback fingerprint) decides what is new vs. already imported. Row-number
+          // cursors broke whenever the sheet was re-sorted by date.
           const absRowIndex = expStartRow + offset - 1;
-          if (mode === "incremental" && absRowIndex < expCursor) continue;
           const date = (expDate.values[offset] || "").trim();
           const vendor = (expVendor.values[offset] || "").trim();
           const amountRaw = (expAmount.values[offset] || "").trim();
@@ -839,8 +855,21 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const notes = (expNotes.values[offset] || "").trim();
           const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
           if (!date || !vendor || amount <= 0) continue;
+          const normalizedDate = normalizeDateString(date) || date;
+          const sourceId = getStableImportedExpenseId({
+            date: normalizedDate,
+            vendor,
+            amount,
+            category_name: category,
+            notes,
+          });
           totalCount += 1;
-          allRows.push({ __row: [date, vendor, amount, category, notes], __sourceId: `google_sheet-row-${absRowIndex}`, __rawDescription: [date, vendor, amount, category, notes].join(", ") });
+          allRows.push({
+            __row: [date, vendor, amount, category, notes],
+            __sourceId: sourceId,
+            __rowNumber: absRowIndex,
+            __rawDescription: [normalizedDate, vendor, amount, category, notes].join(", "),
+          });
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown Google Sheets read error";
@@ -855,11 +884,10 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const incCategory = await readDraftValues(config.incomeSheetName, config.incomeRangeDrafts?.category);
         const incNotes = await readDraftValues(config.incomeSheetName, config.incomeRangeDrafts?.notes);
         const incStartRow = incDate.dataStartRowNumber || config.incomeDataStartRow || 2;
-        const incCursor = mode === "incremental" ? (config.incrementalCursor?.income || 0) : 0;
         const incRowCount = Math.max(incDate.values.length, incSource.values.length, incAmount.values.length, incCategory.values.length, incNotes.values.length);
         for (let offset = 0; offset < incRowCount; offset += 1) {
+          // Scan every row; content dedup decides new vs. already imported (see expenses above).
           const absRowIndex = incStartRow + offset - 1;
-          if (mode === "incremental" && absRowIndex < incCursor) continue;
           const date = (incDate.values[offset] || "").trim();
           const source = (incSource.values[offset] || "").trim();
           const amountRaw = (incAmount.values[offset] || "").trim();
@@ -867,8 +895,21 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const notes = (incNotes.values[offset] || "").trim();
           const amount = Number.parseFloat(amountRaw.replace(/[^-0-9.]/g, "")) || 0;
           if (!date || !source || amount <= 0) continue;
+          const normalizedDate = normalizeDateString(date) || date;
+          const sourceId = getStableImportedIncomeId({
+            date: normalizedDate,
+            source,
+            amount,
+            category,
+            notes,
+          });
           totalCount += 1;
-          allRows.push({ __row: [date, source, amount, category, notes], __sourceId: `google_sheet-income-row-${absRowIndex}`, __rawDescription: [date, source, amount, category, notes].join(", ") });
+          allRows.push({
+            __row: [date, source, amount, category, notes],
+            __sourceId: sourceId,
+            __rowNumber: absRowIndex,
+            __rawDescription: [normalizedDate, source, amount, category, notes].join(", "),
+          });
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown Google Sheets read error";
@@ -912,8 +953,8 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const configAfterPull = sheetsConfigRef.current;
         if (configAfterPull && mode === "incremental") {
           const newCursor: Record<string, number> = { ...(configAfterPull.incrementalCursor || {}) };
-          const maxExpenseRow = expenseRows.reduce((max: number, r: any) => { const match = (r.__sourceId || "").match(/row-(\d+)/); return match ? Math.max(max, Number.parseInt(match[1], 10)) : max; }, newCursor.expenses || 0);
-          const maxIncomeRow = incomeRows.reduce((max: number, r: any) => { const match = (r.__sourceId || "").match(/row-(\d+)/); return match ? Math.max(max, Number.parseInt(match[1], 10)) : max; }, newCursor.income || 0);
+          const maxExpenseRow = expenseRows.reduce((max: number, r: any) => Math.max(max, getGoogleSheetPullRowNumber(r)), newCursor.expenses || 0);
+          const maxIncomeRow = incomeRows.reduce((max: number, r: any) => Math.max(max, getGoogleSheetPullRowNumber(r)), newCursor.income || 0);
           newCursor.expenses = Math.max(newCursor.expenses || 0, maxExpenseRow); newCursor.income = Math.max(newCursor.income || 0, maxIncomeRow);
           const nextConfig: GoogleSheetsSyncConfig = { ...configAfterPull, incrementalCursor: newCursor, lastPullSummary: pullSummary, lastPullAt: getIsoNow(), lastError: null };
           await saveUserProfilePatch({ googleSheetsConfig: nextConfig }); setGoogleSheetsError(null); return pullSummary;
@@ -961,14 +1002,8 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       },
     });
     const cursorBase = sheetsConfigRef.current.incrementalCursor || {};
-    const maxExpenseRow = expenseRows.reduce((max: number, r: any) => {
-      const match = (r.__sourceId || "").match(/row-(\d+)/);
-      return match ? Math.max(max, Number.parseInt(match[1], 10)) : max;
-    }, cursorBase.expenses || 0);
-    const maxIncomeRow = incomeRows.reduce((max: number, r: any) => {
-      const match = (r.__sourceId || "").match(/row-(\d+)/);
-      return match ? Math.max(max, Number.parseInt(match[1], 10)) : max;
-    }, cursorBase.income || 0);
+    const maxExpenseRow = expenseRows.reduce((max: number, r: any) => Math.max(max, getGoogleSheetPullRowNumber(r)), cursorBase.expenses || 0);
+    const maxIncomeRow = incomeRows.reduce((max: number, r: any) => Math.max(max, getGoogleSheetPullRowNumber(r)), cursorBase.income || 0);
     const batch: ImportBatch = {
       id: `google-sheet-preview-${Date.now()}`,
       source: "google_sheet",
