@@ -169,7 +169,7 @@ vibebudget/
 
 **Feature gating**: `VITE_SELF_HOSTED` env var controls self-hosted-only features. Check before adding Setup/infrastructure UI.
 
-**Import pipeline**: All imports flow through `src/utils/importPipeline.ts` with deduplication via `importDedupe.ts`. New import sources should hook into this pipeline.
+**Import pipeline**: All imports flow through `src/utils/importPipeline.ts` with deduplication via `importDedupe.ts`. New import sources should hook into this pipeline. Fallback dedup key (`makeFallbackKey`) uses `notes` — not `raw_description` — because `raw_description` format varies across import sources/versions and causes false-new entries on re-pulls. When `source_id` is present, duplicate detection checks both source key AND fallback key (`sourceDuplicate || fallbackDuplicate`).
 
 **Recurring transactions**: `src/utils/recurring.ts` handles rule-based recurring logic. `is_recurring_instance` flag on `Transaction`.
 
@@ -205,6 +205,7 @@ Recent design decisions from git history:
 - **Agent branch convention**: `agent/<agent>/<task-slug>` — enforced by `agent-start.mjs`
 - **Android platform added** (41a73ce): Capacitor Android scaffolded with `appId=com.vibebudget.app`. `google-services.json` not committed — push notifications disabled until added.
 - **Google pull preview + content dedup** (142172a): Row-number cursor sync replaced with content-based dedup (stable import IDs + fingerprints). `getSheetColumnValuesUntilEmptyRun` removed. `previewGoogleSheetsPull` / `commitGoogleSheetsPullPreview` added to context — use the preview-then-commit flow for all future Google Sheets pull features.
+- **Import fallback dedup uses notes not raw_description** (7ae1f9d): `makeFallbackKey` in `importPipeline.ts` now keys on `notes` exclusively — `raw_description` caused false-new on re-pulls when its format changed between versions. Also tightened: records with a `source_id` now check both source key and fallback key for duplicates.
 
 <!-- END AUTO-MANAGED -->
 
