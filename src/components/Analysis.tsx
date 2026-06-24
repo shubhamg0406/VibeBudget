@@ -88,6 +88,24 @@ export const Analysis: React.FC<AnalysisProps> = ({
     return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [expenseCategories]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(categories[0]?.id || null);
+  const [deepDiveMode, setDeepDiveMode] = useState<"expenses" | "income">("expenses");
+
+  const normalizedIncomeCategories = useMemo(() => {
+    const byName = new Map<string, { id: string; ids: string[]; name: string; target_amount: number }>();
+    incomeCategories.forEach((cat) => {
+      const name = cat.name.trim().replace(/\s+/g, " ");
+      if (!name) return;
+      const key = name.toLowerCase();
+      const existing = byName.get(key);
+      if (!existing) { byName.set(key, { id: cat.id, ids: [cat.id], name, target_amount: cat.target_amount || 0 }); return; }
+      if (!existing.ids.includes(cat.id)) existing.ids.push(cat.id);
+      if ((existing.target_amount || 0) === 0 && (cat.target_amount || 0) !== 0) existing.target_amount = cat.target_amount;
+    });
+    return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [incomeCategories]);
+
+  const [selectedIncomeCategoryId, setSelectedIncomeCategoryId] = useState<string | null>(null);
+
   const { preferences, updatePreferences } = useFirebase();
   const baseSymbol = getCurrencySymbol(preferences?.baseCurrency);
   const [showCoreFilter, setShowCoreFilter] = useState(false);
@@ -108,15 +126,18 @@ export const Analysis: React.FC<AnalysisProps> = ({
   const resolvedCategoryRange = useMemo(() => resolveDateRange(categoryRange), [categoryRange]);
 
   useEffect(() => {
-    if (categories.length === 0) {
-      setSelectedCategoryId(null);
-      return;
-    }
-
+    if (categories.length === 0) { setSelectedCategoryId(null); return; }
     if (!selectedCategoryId || !categories.some((category) => category.id === selectedCategoryId)) {
       setSelectedCategoryId(categories[0].id);
     }
   }, [categories, selectedCategoryId]);
+
+  useEffect(() => {
+    if (normalizedIncomeCategories.length === 0) { setSelectedIncomeCategoryId(null); return; }
+    if (!selectedIncomeCategoryId || !normalizedIncomeCategories.some((c) => c.id === selectedIncomeCategoryId)) {
+      setSelectedIncomeCategoryId(normalizedIncomeCategories[0].id);
+    }
+  }, [normalizedIncomeCategories, selectedIncomeCategoryId]);
 
   const transactionMatchesCategory = (transaction: Transaction, category: { ids: string[]; normalizedName: string }) => (
     category.ids.includes(transaction.category_id) ||
@@ -501,6 +522,45 @@ export const Analysis: React.FC<AnalysisProps> = ({
     const avgActual = data.reduce((acc, d) => acc + d.actual, 0) / (data.length || 1);
     return data.map(d => ({ ...d, average: avgActual }));
   }, [selectedCategoryId, allTransactions, categories, resolvedCategoryRange, preferences]);
+
+  const incomeCategoryTrendData = useMemo(() => {
+    if (!selectedIncomeCategoryId) return [];
+    const selectedCat = normalizedIncomeCategories.find((c) => c.id === selectedIncomeCategoryId);
+    if (!selectedCat) return [];
+
+    const start = parseDateString(resolvedCategoryRange.start);
+    const end = parseDateString(resolvedCategoryRange.end);
+    const diffDays = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const isDaily = diffDays <= 31;
+
+    const timePoints: string[] = [];
+    let curr = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    if (isDaily) {
+      while (curr <= end) { timePoints.push(formatDate(curr)); curr.setDate(curr.getDate() + 1); }
+    } else {
+      let monthCurr = new Date(start.getFullYear(), start.getMonth(), 1);
+      const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+      while (monthCurr <= endMonth) {
+        timePoints.push(`${monthCurr.getFullYear()}-${String(monthCurr.getMonth() + 1).padStart(2, "0")}`);
+        monthCurr.setMonth(monthCurr.getMonth() + 1);
+      }
+    }
+
+    const target = selectedCat.target_amount || 0;
+    const data = timePoints.map((point) => {
+      const actual = allIncome
+        .filter((i) =>
+          (selectedCat.ids.includes(i.category_id || "") || i.category?.toLowerCase() === selectedCat.name.toLowerCase()) &&
+          (isDaily ? normalizeDateString(i.date) === point : getMonthKey(i.date) === point) &&
+          isDateInRange(i.date, resolvedCategoryRange.start, resolvedCategoryRange.end)
+        )
+        .reduce((acc, i) => acc + convertToBaseCurrency(i.amount, i.currency, preferences), 0);
+      return { label: point, actual, target, isDaily };
+    });
+
+    const avgActual = data.reduce((acc, d) => acc + d.actual, 0) / (data.length || 1);
+    return data.map((d) => ({ ...d, average: avgActual }));
+  }, [selectedIncomeCategoryId, normalizedIncomeCategories, allIncome, resolvedCategoryRange, preferences]);
 
   const selectedCategory = categories.find(c => c.id === selectedCategoryId);
   const currentTarget = selectedCategory?.target_amount || 0;
@@ -1048,139 +1108,220 @@ export const Analysis: React.FC<AnalysisProps> = ({
         </div>
       ) : (
         <div className="space-y-8">
-          {categories.length === 0 ? (
-            <div className="rounded-2xl border border-dashed bg-[var(--app-ghost)] px-6 py-10 text-center" style={{ borderColor: "var(--app-border)" }}>
-              <div className="text-base font-bold text-white">No expense categories available yet</div>
-              <div className="mt-2 text-sm text-fintech-muted">
-                Add expense categories or import expense data to unlock the category deep dive.
+          {/* Deep Dive Mode Toggle */}
+          <div className="flex items-center gap-2 rounded-xl border bg-[var(--app-ghost)] p-1 w-fit" style={{ borderColor: "var(--app-border)" }}>
+            <button
+              onClick={() => setDeepDiveMode("expenses")}
+              className={`rounded-lg px-4 py-1.5 text-xs font-bold transition-all ${deepDiveMode === "expenses" ? "bg-fintech-accent text-[#002919] shadow-sm" : "text-fintech-muted hover:text-[var(--app-text)]"}`}
+            >
+              Expenses
+            </button>
+            <button
+              onClick={() => setDeepDiveMode("income")}
+              className={`rounded-lg px-4 py-1.5 text-xs font-bold transition-all ${deepDiveMode === "income" ? "bg-fintech-accent text-[#002919] shadow-sm" : "text-fintech-muted hover:text-[var(--app-text)]"}`}
+            >
+              Income
+            </button>
+          </div>
+
+          {deepDiveMode === "expenses" ? (
+            categories.length === 0 ? (
+              <div className="rounded-2xl border border-dashed bg-[var(--app-ghost)] px-6 py-10 text-center" style={{ borderColor: "var(--app-border)" }}>
+                <div className="text-base font-bold text-white">No expense categories available yet</div>
+                <div className="mt-2 text-sm text-fintech-muted">Add expense categories or import expense data to unlock the category deep dive.</div>
               </div>
-            </div>
-          ) : (
-          <>
-          {/* Category Selector & Date Range */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="relative group">
-                <select 
-                  value={selectedCategoryId || ""}
-                  onChange={(e) => setSelectedCategoryId(e.target.value)}
-                  className="cursor-pointer appearance-none rounded-lg border bg-[var(--app-ghost)] px-5 py-3 pr-12 text-sm font-bold text-[var(--app-text)] transition-all hover:bg-[var(--app-ghost-strong)] focus:border-fintech-accent focus:outline-none"
-                  style={{ borderColor: "var(--app-border)" }}
-                >
-                  {categories.map(cat => (
-                    <option key={cat.id} value={cat.id} className="bg-[var(--app-panel)] text-[var(--app-text)]">
-                      {cat.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-fintech-muted">
-                  <BarChart3 size={16} />
+            ) : (
+              <>
+              {/* Expense Category Selector & Date Range */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="relative group">
+                    <select
+                      value={selectedCategoryId || ""}
+                      onChange={(e) => setSelectedCategoryId(e.target.value)}
+                      className="cursor-pointer appearance-none rounded-lg border bg-[var(--app-ghost)] px-5 py-3 pr-12 text-sm font-bold text-[var(--app-text)] transition-all hover:bg-[var(--app-ghost-strong)] focus:border-fintech-accent focus:outline-none"
+                      style={{ borderColor: "var(--app-border)" }}
+                    >
+                      {categories.map((cat) => (
+                        <option key={cat.id} value={cat.id} className="bg-[var(--app-panel)] text-[var(--app-text)]">{cat.name}</option>
+                      ))}
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-fintech-muted"><BarChart3 size={16} /></div>
+                  </div>
+                </div>
+                <DateRangeSelector range={categoryRange} onChange={setCategoryRange} />
+              </div>
+
+              {/* Expense Trend Chart */}
+              <section className="glass-card space-y-6 rounded-2xl border p-6" style={{ borderColor: "var(--app-border)" }}>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-fintech-muted">
+                    {categories.find((c) => c.id === selectedCategoryId)?.name} — Trend Analysis
+                  </h3>
+                  <div className="flex gap-4 text-[10px] font-bold uppercase tracking-widest">
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fintech-accent" /> Actual</div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fintech-danger" /> Target</div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500" /> Average</div>
+                  </div>
+                </div>
+                <div className="h-80 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={categoryTrendData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} vertical={false} />
+                      <XAxis dataKey="label" stroke={chartAxisStroke} fontSize={10} axisLine={false} tickLine={false}
+                        tickFormatter={(val) => { const p = val.split("-"); if (p.length === 3) return `${p[2]}/${p[1]}`; const m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return m[parseInt(p[1]) - 1]; }}
+                      />
+                      <YAxis stroke={chartAxisStroke} fontSize={10} axisLine={false} tickLine={false}
+                        domain={[0, (dataMax: number) => Math.max(dataMax, currentTarget * 1.1)]}
+                      />
+                      <Tooltip cursor={{ fill: "var(--app-ghost)" }} contentStyle={tooltipStyle}
+                        formatter={(value: number) => [`${baseSymbol}${value.toLocaleString()}`, ""]}
+                      />
+                      <ReferenceLine y={currentTarget} stroke="#ef4444" strokeDasharray="3 3"
+                        label={{ position: "insideTopRight", value: `Target: ${baseSymbol}${currentTarget.toLocaleString()}`, fill: "#ef4444", fontSize: 10, fontWeight: "bold" }}
+                      />
+                      <ReferenceLine y={categoryTrendData[0]?.average || 0} stroke="#10b981" strokeDasharray="5 5"
+                        label={{ position: "insideTopLeft", value: `Avg: ${baseSymbol}${(categoryTrendData[0]?.average || 0).toLocaleString()}`, fill: "#10b981", fontSize: 10, fontWeight: "bold" }}
+                      />
+                      <Bar dataKey="actual" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={30} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+
+              {/* Expense Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
+                  <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Avg. Monthly Spend</span>
+                  <div className="mt-1 text-base font-bold text-white">
+                    {baseSymbol}{(categoryTrendData.reduce((acc, d) => acc + d.actual, 0) / 12).toFixed(0)}
+                  </div>
+                </div>
+                <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
+                  <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Monthly Target</span>
+                  <div className="mt-1 text-base font-bold text-fintech-accent">
+                    {baseSymbol}{categories.find((c) => c.id === selectedCategoryId)?.target_amount || 0}
+                  </div>
+                </div>
+                <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
+                  <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Target Variance</span>
+                  <div className={`mt-1 text-base font-bold ${(categoryTrendData[categoryTrendData.length - 1]?.actual || 0) > (categories.find((c) => c.id === selectedCategoryId)?.target_amount || 0) ? "text-fintech-danger" : "text-emerald-500"}`}>
+                    {(((categoryTrendData[categoryTrendData.length - 1]?.actual || 0) / (categories.find((c) => c.id === selectedCategoryId)?.target_amount || 1)) * 100).toFixed(0)}%
+                  </div>
+                  <div className="text-[10px] text-fintech-muted mt-1">Current month vs target</div>
                 </div>
               </div>
-            </div>
+              </>
+            )
+          ) : (
+            normalizedIncomeCategories.length === 0 ? (
+              <div className="rounded-2xl border border-dashed bg-[var(--app-ghost)] px-6 py-10 text-center" style={{ borderColor: "var(--app-border)" }}>
+                <div className="text-base font-bold text-white">No income categories available yet</div>
+                <div className="mt-2 text-sm text-fintech-muted">Add income records to unlock the income deep dive.</div>
+              </div>
+            ) : (
+              <>
+              {/* Income Category Selector & Date Range */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="relative group">
+                    <select
+                      value={selectedIncomeCategoryId || ""}
+                      onChange={(e) => setSelectedIncomeCategoryId(e.target.value)}
+                      className="cursor-pointer appearance-none rounded-lg border bg-[var(--app-ghost)] px-5 py-3 pr-12 text-sm font-bold text-[var(--app-text)] transition-all hover:bg-[var(--app-ghost-strong)] focus:border-fintech-accent focus:outline-none"
+                      style={{ borderColor: "var(--app-border)" }}
+                    >
+                      {normalizedIncomeCategories.map((cat) => (
+                        <option key={cat.id} value={cat.id} className="bg-[var(--app-panel)] text-[var(--app-text)]">{cat.name}</option>
+                      ))}
+                    </select>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-fintech-muted"><TrendingUp size={16} /></div>
+                  </div>
+                </div>
+                <DateRangeSelector range={categoryRange} onChange={setCategoryRange} />
+              </div>
 
-            <DateRangeSelector range={categoryRange} onChange={setCategoryRange} />
-          </div>
+              {/* Income Trend Chart */}
+              <section className="glass-card space-y-6 rounded-2xl border p-6" style={{ borderColor: "var(--app-border)" }}>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-fintech-muted">
+                    {normalizedIncomeCategories.find((c) => c.id === selectedIncomeCategoryId)?.name} — Income Trend
+                  </h3>
+                  <div className="flex gap-4 text-[10px] font-bold uppercase tracking-widest">
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500" /> Actual</div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fintech-accent" /> Target</div>
+                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-400" /> Average</div>
+                  </div>
+                </div>
+                <div className="h-80 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={incomeCategoryTrendData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} vertical={false} />
+                      <XAxis dataKey="label" stroke={chartAxisStroke} fontSize={10} axisLine={false} tickLine={false}
+                        tickFormatter={(val) => { const p = val.split("-"); if (p.length === 3) return `${p[2]}/${p[1]}`; const m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return m[parseInt(p[1]) - 1]; }}
+                      />
+                      <YAxis stroke={chartAxisStroke} fontSize={10} axisLine={false} tickLine={false}
+                        domain={[0, (dataMax: number) => Math.max(dataMax, (normalizedIncomeCategories.find((c) => c.id === selectedIncomeCategoryId)?.target_amount || 0) * 1.1)]}
+                      />
+                      <Tooltip cursor={{ fill: "var(--app-ghost)" }} contentStyle={tooltipStyle}
+                        formatter={(value: number) => [`${baseSymbol}${value.toLocaleString()}`, ""]}
+                      />
+                      {(normalizedIncomeCategories.find((c) => c.id === selectedIncomeCategoryId)?.target_amount || 0) > 0 && (
+                        <ReferenceLine
+                          y={normalizedIncomeCategories.find((c) => c.id === selectedIncomeCategoryId)?.target_amount || 0}
+                          stroke="#10b981"
+                          strokeDasharray="3 3"
+                          label={{ position: "insideTopRight", value: `Target: ${baseSymbol}${(normalizedIncomeCategories.find((c) => c.id === selectedIncomeCategoryId)?.target_amount || 0).toLocaleString()}`, fill: "#10b981", fontSize: 10, fontWeight: "bold" }}
+                        />
+                      )}
+                      <ReferenceLine y={incomeCategoryTrendData[0]?.average || 0} stroke="#60a5fa" strokeDasharray="5 5"
+                        label={{ position: "insideTopLeft", value: `Avg: ${baseSymbol}${(incomeCategoryTrendData[0]?.average || 0).toLocaleString()}`, fill: "#60a5fa", fontSize: 10, fontWeight: "bold" }}
+                      />
+                      <Bar dataKey="actual" fill="#10b981" radius={[4, 4, 0, 0]} barSize={30} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
 
-          {/* Category Trend Chart */}
-          <section className="glass-card space-y-6 rounded-2xl border p-6" style={{ borderColor: "var(--app-border)" }}>
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold uppercase tracking-widest text-fintech-muted">
-                {categories.find(c => c.id === selectedCategoryId)?.name} - Trend Analysis
-              </h3>
-              <div className="flex gap-4 text-[10px] font-bold uppercase tracking-widest">
-                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fintech-accent" /> Actual</div>
-                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-fintech-danger" /> Target</div>
-                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-emerald-500" /> Average</div>
-              </div>
-            </div>
-            <div className="h-80 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={categoryTrendData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} vertical={false} />
-                  <XAxis 
-                    dataKey="label" 
-                    stroke={chartAxisStroke} 
-                    fontSize={10} 
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(val) => {
-                      const parts = val.split("-");
-                      if (parts.length === 3) {
-                        return `${parts[2]}/${parts[1]}`;
-                      }
-                      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-                      return months[parseInt(parts[1]) - 1];
-                    }}
-                  />
-                  <YAxis 
-                    stroke={chartAxisStroke} 
-                    fontSize={10} 
-                    axisLine={false} 
-                    tickLine={false}
-                    domain={[0, (dataMax: number) => Math.max(dataMax, currentTarget * 1.1)]}
-                  />
-                  <Tooltip 
-                    cursor={{ fill: 'var(--app-ghost)' }}
-                    contentStyle={tooltipStyle}
-                    formatter={(value: number) => [`${baseSymbol}${value.toLocaleString()}`, ""]}
-                  />
-                  <ReferenceLine 
-                    y={currentTarget} 
-                    stroke="#ef4444" 
-                    strokeDasharray="3 3" 
-                    label={{ 
-                      position: 'insideTopRight', 
-                      value: `Target: ${baseSymbol}${currentTarget.toLocaleString()}`, 
-                      fill: '#ef4444', 
-                      fontSize: 10,
-                      fontWeight: 'bold'
-                    }} 
-                  />
-                  <ReferenceLine 
-                    y={categoryTrendData[0]?.average || 0} 
-                    stroke="#10b981" 
-                    strokeDasharray="5 5" 
-                    label={{ 
-                      position: 'insideTopLeft', 
-                      value: `Avg: ${baseSymbol}${(categoryTrendData[0]?.average || 0).toLocaleString()}`, 
-                      fill: '#10b981', 
-                      fontSize: 10,
-                      fontWeight: 'bold'
-                    }} 
-                  />
-                  <Bar dataKey="actual" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={30} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </section>
-
-          {/* Category Stats Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
-              <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Avg. Monthly Spend</span>
-              <div className="mt-1 text-base font-bold text-white">
-                {baseSymbol}{(categoryTrendData.reduce((acc, d) => acc + d.actual, 0) / 12).toFixed(0)}
-              </div>
-            </div>
-            <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
-              <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Monthly Target</span>
-              <div className="mt-1 text-base font-bold text-fintech-accent">
-                {baseSymbol}{categories.find(c => c.id === selectedCategoryId)?.target_amount || 0}
-              </div>
-            </div>
-            <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
-              <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Target Variance</span>
-              <div className={`mt-1 text-base font-bold ${
-                (categoryTrendData[categoryTrendData.length - 1]?.actual || 0) > (categories.find(c => c.id === selectedCategoryId)?.target_amount || 0)
-                ? "text-fintech-danger" : "text-emerald-500"
-              }`}>
-                {(((categoryTrendData[categoryTrendData.length - 1]?.actual || 0) / (categories.find(c => c.id === selectedCategoryId)?.target_amount || 1)) * 100).toFixed(0)}%
-              </div>
-              <div className="text-[10px] text-fintech-muted mt-1">Current month vs target</div>
-            </div>
-          </div>
-          </>
+              {/* Income Stats */}
+              {(() => {
+                const selectedIncomeCat = normalizedIncomeCategories.find((c) => c.id === selectedIncomeCategoryId);
+                const incomeTarget = selectedIncomeCat?.target_amount || 0;
+                const totalActual = incomeCategoryTrendData.reduce((acc, d) => acc + d.actual, 0);
+                const monthCount = incomeCategoryTrendData.filter((d) => d.actual > 0).length || 1;
+                const lastActual = incomeCategoryTrendData[incomeCategoryTrendData.length - 1]?.actual || 0;
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
+                      <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Avg. Monthly Income</span>
+                      <div className="mt-1 text-base font-bold text-emerald-400">
+                        {baseSymbol}{(totalActual / monthCount).toFixed(0)}
+                      </div>
+                    </div>
+                    <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
+                      <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">Monthly Target</span>
+                      <div className="mt-1 text-base font-bold text-fintech-accent">
+                        {incomeTarget > 0 ? `${baseSymbol}${incomeTarget.toLocaleString()}` : "—"}
+                      </div>
+                    </div>
+                    <div className="glass-card rounded-xl border p-4" style={{ borderColor: "var(--app-border)" }}>
+                      <span className="text-[10px] font-bold text-fintech-muted uppercase tracking-widest">vs Target</span>
+                      {incomeTarget > 0 ? (
+                        <>
+                          <div className={`mt-1 text-base font-bold ${lastActual >= incomeTarget ? "text-emerald-400" : "text-fintech-danger"}`}>
+                            {((lastActual / incomeTarget) * 100).toFixed(0)}%
+                          </div>
+                          <div className="text-[10px] text-fintech-muted mt-1">Current month vs target</div>
+                        </>
+                      ) : (
+                        <div className="mt-1 text-base font-bold text-fintech-muted">No target set</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+              </>
+            )
           )}
         </div>
       )}
