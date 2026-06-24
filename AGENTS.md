@@ -191,6 +191,8 @@ vibebudget/
 
 **Google Sheets pull preview workflow**: `SupabaseContext` exposes `previewGoogleSheetsPull(mode?)` → returns `GooglePullPreviewResult`; and `commitGoogleSheetsPullPreview(preview, recordIds)` → returns `GooglePullSummary`. `Settings.tsx` uses these to implement a "Preview Rows First" → review + select records → "Commit Selected" flow before writing data. New import sources that pull from Google Sheets should follow this pattern.
 
+**Bulk Supabase operations**: Never use per-row loops for bulk deletes or updates — they time out on datasets of 1000+ rows. Use a single `.delete().eq('user_id', uid)` or `.update({...}).eq('user_id', uid)` call. After the bulk operation, update local React state and clear relevant session/localStorage caches immediately.
+
 <!-- END AUTO-MANAGED -->
 
 <!-- AUTO-MANAGED: git-insights -->
@@ -205,6 +207,7 @@ Recent design decisions from git history:
 - **Agent branch convention**: `agent/<agent>/<task-slug>` — enforced by `agent-start.mjs`
 - **Android platform added** (41a73ce): Capacitor Android scaffolded with `appId=com.vibebudget.app`. `google-services.json` not committed — push notifications disabled until added.
 - **Google pull preview + content dedup** (142172a): Row-number cursor sync replaced with content-based dedup (stable import IDs + fingerprints). `getSheetColumnValuesUntilEmptyRun` removed. `previewGoogleSheetsPull` / `commitGoogleSheetsPullPreview` added to context — use the preview-then-commit flow for all future Google Sheets pull features.
+- **wipeData bulk operations** (aac107c): Per-row delete/update loops replaced with single bulk Supabase calls — per-row loops time out on datasets of 1000+ rows. Local state and session cache are cleared immediately after the bulk operation.
 
 <!-- END AUTO-MANAGED -->
 
