@@ -249,11 +249,13 @@ const makeExistingKeys = (existing: PreviewImportArgs["existing"]) => {
 
   existing.transactions.forEach((item) => {
     if (item.import_source && item.source_id) sourceKeys.add(`${item.import_source}|${item.source_id}`);
-    fallbackKeys.add(makeFallbackKey("expense", item.date, item.vendor, item.amount, item.raw_description || item.notes));
+    // Use notes (not raw_description) — raw_description format varies by import source/date
+    // format, causing false-new on re-pulls when format changed between versions.
+    fallbackKeys.add(makeFallbackKey("expense", item.date, item.vendor, item.amount, item.notes));
   });
   existing.income.forEach((item) => {
     if (item.import_source && item.source_id) sourceKeys.add(`${item.import_source}|${item.source_id}`);
-    fallbackKeys.add(makeFallbackKey("income", item.date, item.source, item.amount, item.raw_description || item.notes));
+    fallbackKeys.add(makeFallbackKey("income", item.date, item.source, item.amount, item.notes));
   });
 
   return { sourceKeys, fallbackKeys };
@@ -264,13 +266,13 @@ const makeFallbackKey = (
   date: string | undefined,
   merchant: string | undefined,
   amount: number | undefined,
-  rawDescription: string | undefined
+  notes: string | undefined
 ) => [
   kind,
   date || "",
   normalizeKeyText(merchant),
   Number.isFinite(amount) ? Number(amount).toFixed(2) : "0.00",
-  normalizeKeyText(rawDescription),
+  normalizeKeyText(notes),
 ].join("|");
 
 const classifyCandidate = (
@@ -321,9 +323,9 @@ const classifyCandidate = (
     date,
     merchant,
     amount,
-    candidate.raw_description || candidate.notes,
+    candidate.notes,
   ));
-  const duplicate = candidate.source_id ? sourceDuplicate : fallbackDuplicate;
+  const duplicate = candidate.source_id ? sourceDuplicate || fallbackDuplicate : fallbackDuplicate;
   const status: ImportRecordStatus = invalid ? "invalid" : duplicate ? "duplicate" : warnings.length > 0 ? "warning" : "new";
 
   return {
