@@ -1377,16 +1377,29 @@ export const SupabaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const wipeData = async (type: string) => {
     const { data: { user: cu } } = await supabase.auth.getUser();
     if (!cu) throw new Error("Sign in with Google first.");
-    if (type === "expenses") { for (const item of transactionsRef.current) { await supabase.from('transactions').update({ deleted: true, updated_at: getIsoNow() }).eq('id', item.id).eq('user_id', cu.id); } return; }
-    if (type === "income") { for (const item of incomeRef.current) { await supabase.from('income').delete().eq('id', item.id).eq('user_id', cu.id); } return; }
+    if (type === "expenses") {
+      // Single bulk update — per-row loops time out on large datasets (1000+ rows)
+      await supabase.from('transactions').update({ deleted: true, updated_at: getIsoNow() }).eq('user_id', cu.id);
+      setTransactions([]); transactionsRef.current = []; clearTransactionsCache(cu.id);
+      return;
+    }
+    if (type === "income") {
+      await supabase.from('income').delete().eq('user_id', cu.id);
+      setIncome([]); incomeRef.current = []; clearSessionCache(cu.id, 'income');
+      return;
+    }
     if (type === "categories" || type === "targets" || type === "expenseCategories") {
-      for (const item of expenseCategoriesRef.current) { await supabase.from('categories').delete().eq('id', item.id).eq('user_id', cu.id); }
-      await supabase.from('categories').upsert(createDefaultExpenseCategories().map((c) => ({ ...c, user_id: cu.id, deleted: false, updated_at: getIsoNow() }))); return;
+      await supabase.from('categories').delete().eq('user_id', cu.id);
+      const defaults = createDefaultExpenseCategories();
+      await supabase.from('categories').upsert(defaults.map((c) => ({ ...c, user_id: cu.id, deleted: false, updated_at: getIsoNow() })));
+      setExpenseCategories(defaults); expenseCategoriesRef.current = defaults; clearSessionCache(cu.id, 'expenseCategories');
+      return;
     }
     if (type === "incomeCategories") {
-      for (const item of incomeCategoriesRef.current) { await supabase.from('income_categories').delete().eq('id', item.id).eq('user_id', cu.id); }
+      await supabase.from('income_categories').delete().eq('user_id', cu.id);
       const ci = createIncomeCategoriesFromRecords(incomeRef.current);
       if (ci.length > 0) { await supabase.from('income_categories').upsert(ci.map((c) => ({ ...c, user_id: cu.id, deleted: false, updated_at: getIsoNow() }))); }
+      setIncomeCategories(ci); incomeCategoriesRef.current = ci; clearSessionCache(cu.id, 'incomeCategories');
     }
   };
 
