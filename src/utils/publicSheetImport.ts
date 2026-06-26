@@ -3,6 +3,7 @@ import {
   PublicSheetImportRangeSelection,
   PublicSheetImportSharedConfig,
 } from "../types";
+import { supabase } from "../lib/supabase";
 import {
   getFullSheetGridRows,
   getGoogleSheetsAccessErrorMessage,
@@ -11,6 +12,7 @@ import {
   trimValuesAtEmptyRun,
 } from "./googleSheetsSync";
 import { normalizeDateString } from "./dateUtils";
+import { getStableImportedExpenseId, getStableImportedIncomeId } from "./importDedupe";
 
 type TransactionImportType = "expenses" | "income";
 
@@ -21,9 +23,8 @@ interface ImportFieldConfig {
 
 const SHARED_IMPORT_CONFIG_KEY = "googleSheetImport_shared";
 const TRANSACTION_IMPORT_TYPES: TransactionImportType[] = ["expenses", "income"];
-
-/** Key under which we store the last-imported row cursor per type */
 const CURSOR_PREFIX = "googleSheetImport_cursor_";
+const GOOGLE_SHEET_IMPORT_SOURCE = "google_sheet";
 
 const IMPORT_CONFIGS: Record<TransactionImportType, ImportFieldConfig> = {
   expenses: {
@@ -61,7 +62,6 @@ export interface SheetImportSingleRefreshResult {
   imported: number;
 }
 
-/** Detailed result from a delta refresh */
 export interface SheetImportDeltaResult {
   newRows: number;
   updatedRows: number;
@@ -69,12 +69,17 @@ export interface SheetImportDeltaResult {
   totalParsed: number;
 }
 
+interface PersistSummary {
+  imported: number;
+  updated: number;
+  skipped: number;
+}
+
 const getImportConfigKey = (type: TransactionImportType) => `googleSheetImport_${type}`;
 
 const readJson = <T>(key: string): T | null => {
   const raw = localStorage.getItem(key);
   if (!raw) return null;
-
   try {
     return JSON.parse(raw) as T;
   } catch {
@@ -92,6 +97,10 @@ const parseDate = (value: string) => {
   if (!value) return "";
   return normalizeDateString(value.trim().replace(/^"|"$/g, "")) || "";
 };
+
+const normalizeCategoryName = (value: string) => value.trim().replace(/\s+/g, " ");
+
+const sanitizeId = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 120);
 
 const splitCSVRow = (row: string) => {
   const result: string[] = [];
@@ -138,7 +147,6 @@ const getSpreadsheetIdForConfig = (typeConfig: PublicSheetImportConfig & { sheet
   if (!spreadsheetId) {
     throw new Error("No saved Google Sheet URL found for the transaction import.");
   }
-
   return spreadsheetId;
 };
 
@@ -234,28 +242,16 @@ const parseRows = async (
 
   for (let index = 0; index < rowCount; index += 1) {
     const getValue = (field: string) => (valuesByField.get(field)?.[index] || "").trim();
-
-    if (importConfig.required.every((field) => getValue(field) === "")) {
-      continue;
-    }
-
-    if (importConfig.required.some((field) => getValue(field) === "")) {
-      continue;
-    }
+    if (importConfig.required.every((field) => getValue(field) === "")) continue;
+    if (importConfig.required.some((field) => getValue(field) === "")) continue;
 
     const parsed = importConfig.parseRow(getValue);
-    if (parsed) {
-      parsedRows.push(parsed);
-    }
+    if (parsed) parsedRows.push(parsed);
   }
 
   return parsedRows;
 };
 
-/**
- * Build a fingerprint for a parsed row (array of values).
- * Used to detect duplicates across refreshes.
- */
 const buildRowFingerprint = (row: any[]): string => {
   return row
     .map((v) => {
@@ -265,9 +261,6 @@ const buildRowFingerprint = (row: any[]): string => {
     .join("|||");
 };
 
-/**
- * Get the stored cursor (last imported absolute row index) for a given type.
- */
 const getStoredCursor = (type: TransactionImportType): number | null => {
   const raw = localStorage.getItem(`${CURSOR_PREFIX}${type}`);
   if (!raw) return null;
@@ -275,24 +268,14 @@ const getStoredCursor = (type: TransactionImportType): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-/**
- * Store the cursor (last imported absolute row index) for a given type.
- */
 const storeCursor = (type: TransactionImportType, absoluteRowIndex: number) => {
   localStorage.setItem(`${CURSOR_PREFIX}${type}`, String(absoluteRowIndex));
 };
 
-/**
- * Clear the stored cursor for a given type.
- */
 const clearCursor = (type: TransactionImportType) => {
   localStorage.removeItem(`${CURSOR_PREFIX}${type}`);
 };
 
-/**
- * Get the stored fingerprints from the last import for a given type.
- * This allows us to detect if existing rows have been modified.
- */
 const getStoredFingerprints = (type: TransactionImportType): Set<string> | null => {
   const raw = localStorage.getItem(`${CURSOR_PREFIX}fingerprints_${type}`);
   if (!raw) return null;
@@ -303,24 +286,163 @@ const getStoredFingerprints = (type: TransactionImportType): Set<string> | null 
   }
 };
 
-/**
- * Store fingerprints for a given type.
- */
 const storeFingerprints = (type: TransactionImportType, fingerprints: string[]) => {
   localStorage.setItem(`${CURSOR_PREFIX}fingerprints_${type}`, JSON.stringify(fingerprints));
 };
 
-/**
- * Clear stored fingerprints for a given type.
- */
 const clearFingerprints = (type: TransactionImportType) => {
   localStorage.removeItem(`${CURSOR_PREFIX}fingerprints_${type}`);
 };
 
-/**
- * Check if there is new data available in the sheet since the last import.
- * Returns the count of new rows and whether any existing rows have changed.
- */
+const getCurrentUserId = async () => {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.id || null;
+};
+
+const ensureExpenseCategoryId = async (userId: string, name: string) => {
+  const normalizedName = normalizeCategoryName(name) || "Misc.";
+  const { data: existing, error: existingError } = await supabase
+    .from("categories")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("name", normalizedName)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing?.id) return existing.id as string;
+
+  const id = crypto.randomUUID();
+  const { error } = await supabase.from("categories").upsert({
+    id,
+    user_id: userId,
+    name: normalizedName,
+    target_amount: 0,
+    deleted: false,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+  return id;
+};
+
+const ensureIncomeCategoryId = async (userId: string, name: string) => {
+  const normalizedName = normalizeCategoryName(name) || "Uncategorized";
+  const { data: existing, error: existingError } = await supabase
+    .from("income_categories")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("name", normalizedName)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing?.id) return existing.id as string;
+
+  const id = crypto.randomUUID();
+  const { error } = await supabase.from("income_categories").upsert({
+    id,
+    user_id: userId,
+    name: normalizedName,
+    target_amount: 0,
+    deleted: false,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+  return id;
+};
+
+const persistGoogleSheetRows = async (
+  type: TransactionImportType,
+  rows: any[],
+  fallbackUpsert: (type: TransactionImportType, rows: any[]) => Promise<PersistSummary>,
+): Promise<PersistSummary> => {
+  const userId = await getCurrentUserId();
+  if (!userId) return fallbackUpsert(type, rows);
+
+  let imported = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const row of rows) {
+    const [date, title, amountRaw, categoryRaw, notesRaw] = row;
+    const amount = typeof amountRaw === "number" ? amountRaw : parseAmount(String(amountRaw || ""));
+    const category = normalizeCategoryName(String(categoryRaw || ""));
+    const notes = String(notesRaw || "").trim();
+    const now = new Date().toISOString();
+
+    if (!date || !title || !category || !Number.isFinite(amount)) {
+      skipped += 1;
+      continue;
+    }
+
+    if (type === "expenses") {
+      const vendor = String(title).trim();
+      const sourceId = getStableImportedExpenseId({ date, vendor, amount, category_name: category, notes });
+      const { data: existing, error: existingError } = await supabase
+        .from("transactions")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("import_source", GOOGLE_SHEET_IMPORT_SOURCE)
+        .eq("source_id", sourceId)
+        .maybeSingle();
+      if (existingError) throw existingError;
+
+      const categoryId = await ensureExpenseCategoryId(userId, category);
+      const id = (existing?.id as string | undefined) || sanitizeId(`${GOOGLE_SHEET_IMPORT_SOURCE}-expense-${sourceId}`);
+      const { error } = await supabase.from("transactions").upsert({
+        id,
+        user_id: userId,
+        date,
+        vendor,
+        amount,
+        category_id: categoryId,
+        category_name: category,
+        notes,
+        import_source: GOOGLE_SHEET_IMPORT_SOURCE,
+        source_id: sourceId,
+        import_batch_id: "saved-google-sheet-refresh",
+        raw_description: [date, vendor, amount, category, notes].join(", "),
+        status: "posted",
+        deleted: false,
+        updated_at: now,
+      });
+      if (error) throw error;
+      if (existing?.id) updated += 1; else imported += 1;
+      continue;
+    }
+
+    const source = String(title).trim();
+    const sourceId = getStableImportedIncomeId({ date, source, amount, category, notes });
+    const { data: existing, error: existingError } = await supabase
+      .from("income")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("import_source", GOOGLE_SHEET_IMPORT_SOURCE)
+      .eq("source_id", sourceId)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    const categoryId = await ensureIncomeCategoryId(userId, category);
+    const id = (existing?.id as string | undefined) || sanitizeId(`${GOOGLE_SHEET_IMPORT_SOURCE}-income-${sourceId}`);
+    const { error } = await supabase.from("income").upsert({
+      id,
+      user_id: userId,
+      date,
+      source,
+      amount,
+      category_id: categoryId,
+      category,
+      notes,
+      import_source: GOOGLE_SHEET_IMPORT_SOURCE,
+      source_id: sourceId,
+      import_batch_id: "saved-google-sheet-refresh",
+      raw_description: [date, source, amount, category, notes].join(", "),
+      status: "posted",
+      updated_at: now,
+    });
+    if (error) throw error;
+    if (existing?.id) updated += 1; else imported += 1;
+  }
+
+  return { imported, updated, skipped };
+};
+
 export const checkForNewSheetData = async (
   type: TransactionImportType,
   token: string | null,
@@ -332,49 +454,24 @@ export const checkForNewSheetData = async (
 
   const cursor = getStoredCursor(type);
   const storedFingerprints = getStoredFingerprints(type);
-
-  // If no cursor or fingerprints stored, we can't do delta detection
-  if (cursor === null || !storedFingerprints) {
-    // Fall back: just check if there are any rows at all
-    const parsedRows = await parseRows(type, config!, token, config!.mapping);
-    return {
-      hasNewData: parsedRows.length > 0,
-      newRowCount: parsedRows.length,
-      changedRowCount: 0,
-    };
-  }
-
-  // Parse all rows to compare
   const parsedRows = await parseRows(type, config!, token, config!.mapping);
 
-  // Check for new rows beyond the cursor
-  const newRows = parsedRows.slice(cursor);
-  const newRowCount = newRows.length;
-
-  // Check for changes in previously imported rows
-  let changedRowCount = 0;
-  for (let i = 0; i < Math.min(cursor, parsedRows.length); i += 1) {
-    const fingerprint = buildRowFingerprint(parsedRows[i]);
-    if (!storedFingerprints.has(fingerprint)) {
-      changedRowCount += 1;
-    }
+  if (cursor === null || !storedFingerprints) {
+    return { hasNewData: parsedRows.length > 0, newRowCount: parsedRows.length, changedRowCount: 0 };
   }
 
-  return {
-    hasNewData: newRowCount > 0 || changedRowCount > 0,
-    newRowCount,
-    changedRowCount,
-  };
+  const newRowCount = parsedRows.slice(cursor).length;
+  let changedRowCount = 0;
+  for (let i = 0; i < Math.min(cursor, parsedRows.length); i += 1) {
+    if (!storedFingerprints.has(buildRowFingerprint(parsedRows[i]))) changedRowCount += 1;
+  }
+
+  return { hasNewData: newRowCount > 0 || changedRowCount > 0, newRowCount, changedRowCount };
 };
 
-/**
- * Refresh saved transaction sheet imports with delta detection.
- * Only imports rows that are new or changed since the last refresh.
- * Returns detailed summary including duplicates flagged.
- */
 export const refreshSavedTransactionSheetImports = async (
   token: string | null,
-  upsertGoogleSheetRows: (type: TransactionImportType, rows: any[]) => Promise<{ imported: number; updated: number; skipped: number }>,
+  upsertGoogleSheetRows: (type: TransactionImportType, rows: any[]) => Promise<PersistSummary>,
 ): Promise<SheetImportRefreshResult> => {
   const result: SheetImportRefreshResult = { expenses: 0, income: 0 };
 
@@ -385,10 +482,8 @@ export const refreshSavedTransactionSheetImports = async (
     const parsedRows = await parseRows(type, config!, token, config!.mapping);
     if (parsedRows.length === 0) continue;
 
-    const summary = await upsertGoogleSheetRows(type, parsedRows);
+    const summary = await persistGoogleSheetRows(type, parsedRows, upsertGoogleSheetRows);
     result[type] = summary.imported;
-
-    // Store cursor and fingerprints for future delta detection
     storeCursor(type, parsedRows.length);
     storeFingerprints(type, parsedRows.map(buildRowFingerprint));
   }
@@ -396,13 +491,9 @@ export const refreshSavedTransactionSheetImports = async (
   return result;
 };
 
-/**
- * Delta refresh: only imports rows that are new or changed since the last cursor.
- * Returns detailed delta information.
- */
 export const refreshSavedTransactionSheetImportsDelta = async (
   token: string | null,
-  upsertGoogleSheetRows: (type: TransactionImportType, rows: any[]) => Promise<{ imported: number; updated: number; skipped: number }>,
+  upsertGoogleSheetRows: (type: TransactionImportType, rows: any[]) => Promise<PersistSummary>,
 ): Promise<Record<TransactionImportType, SheetImportDeltaResult>> => {
   const result: Record<TransactionImportType, SheetImportDeltaResult> = {
     expenses: { newRows: 0, updatedRows: 0, skippedDuplicates: 0, totalParsed: 0 },
@@ -417,54 +508,40 @@ export const refreshSavedTransactionSheetImportsDelta = async (
     if (parsedRows.length === 0) continue;
 
     result[type].totalParsed = parsedRows.length;
-
     const cursor = getStoredCursor(type);
     const storedFingerprints = getStoredFingerprints(type);
-
-    // Determine which rows to import (delta)
     const rowsToImport: any[] = [];
     let newRows = 0;
     let updatedRows = 0;
     let skippedDuplicates = 0;
 
     if (cursor !== null && storedFingerprints) {
-      // Delta mode: only import new rows and changed rows
       for (let i = 0; i < parsedRows.length; i += 1) {
         const fingerprint = buildRowFingerprint(parsedRows[i]);
-
         if (i < cursor) {
-          // Previously imported row - check if changed
           if (storedFingerprints.has(fingerprint)) {
-            // Unchanged - skip
             skippedDuplicates += 1;
           } else {
-            // Changed - re-import
             rowsToImport.push(parsedRows[i]);
             updatedRows += 1;
           }
         } else {
-          // New row beyond cursor
           rowsToImport.push(parsedRows[i]);
           newRows += 1;
         }
       }
     } else {
-      // No cursor - import all rows
       rowsToImport.push(...parsedRows);
       newRows = parsedRows.length;
     }
 
     if (rowsToImport.length > 0) {
-      const summary = await upsertGoogleSheetRows(type, rowsToImport);
-      // upsertGoogleSheetRows already handles dedup internally
-      // The "skipped" from upsert is for invalid rows, not duplicates
+      await persistGoogleSheetRows(type, rowsToImport, upsertGoogleSheetRows);
     }
 
     result[type].newRows = newRows;
     result[type].updatedRows = updatedRows;
     result[type].skippedDuplicates = skippedDuplicates;
-
-    // Update cursor and fingerprints
     storeCursor(type, parsedRows.length);
     storeFingerprints(type, parsedRows.map(buildRowFingerprint));
   }
@@ -475,19 +552,15 @@ export const refreshSavedTransactionSheetImportsDelta = async (
 export const refreshSavedTransactionSheetImportForType = async (
   type: TransactionImportType,
   token: string | null,
-  upsertGoogleSheetRows: (type: TransactionImportType, rows: any[]) => Promise<{ imported: number; updated: number; skipped: number }>,
+  upsertGoogleSheetRows: (type: TransactionImportType, rows: any[]) => Promise<PersistSummary>,
 ): Promise<SheetImportSingleRefreshResult> => {
   const config = readJson<PublicSheetImportConfig & { sheetUrl?: string }>(getImportConfigKey(type));
-  if (!hasUsableMapping(config)) {
-    return { imported: 0 };
-  }
+  if (!hasUsableMapping(config)) return { imported: 0 };
 
   const parsedRows = await parseRows(type, config!, token, config!.mapping);
-  if (parsedRows.length === 0) {
-    return { imported: 0 };
-  }
+  if (parsedRows.length === 0) return { imported: 0 };
 
-  const summary = await upsertGoogleSheetRows(type, parsedRows);
+  const summary = await persistGoogleSheetRows(type, parsedRows, upsertGoogleSheetRows);
   return { imported: summary.imported };
 };
 
@@ -496,15 +569,10 @@ export const getSavedTransactionSheetRowsForType = async (
   token: string | null,
 ): Promise<any[]> => {
   const config = readJson<PublicSheetImportConfig & { sheetUrl?: string }>(getImportConfigKey(type));
-  if (!hasUsableMapping(config)) {
-    return [];
-  }
+  if (!hasUsableMapping(config)) return [];
   return parseRows(type, config!, token, config!.mapping);
 };
 
-/**
- * Get the count of rows that would be imported (for preview purposes).
- */
 export const getSavedTransactionSheetRowCount = async (
   type: TransactionImportType,
   token: string | null,
@@ -513,9 +581,6 @@ export const getSavedTransactionSheetRowCount = async (
   return rows.length;
 };
 
-/**
- * Clear all stored cursors and fingerprints (e.g., when reconfiguring).
- */
 export const clearAllCursors = () => {
   for (const type of TRANSACTION_IMPORT_TYPES) {
     clearCursor(type);
